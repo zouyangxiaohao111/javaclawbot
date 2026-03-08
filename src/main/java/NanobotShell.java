@@ -6,8 +6,16 @@ import java.util.Scanner;
 public final class NanobotShell {
 
     public static void main(String[] args) {
+
+
         CommandLine cmd = new CommandLine(new cli.Commands());
         Scanner scanner = new Scanner(System.in);
+
+        // 有参数：直接执行
+        if (args != null && args.length > 0) {
+            cmd.execute(args);
+            return;
+        }
 
         System.out.println("nanobot interactive shell");
         System.out.println("Examples: onboard | agent -m \"hello\" | status | exit");
