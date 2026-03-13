@@ -1,0 +1,23 @@
+{
+  "skill_name": "markdown-docx-pandoc",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "把这段 Markdown 内容按 template_标题不编号-列表第二行缩进.docx 模板导出成 docx，保持 HTML 表格和图片标题处理，默认走 pandoc input.md -t html | pandoc -f html -o output.docx --reference-doc template.docx --lua-filter markdown-to-docx.lua 这条命令。",
+      "expected_output": "生成基于 reference-doc 模板的 docx 转换方案或产物，明确使用两段式 Pandoc 管道和 markdown-to-docx.lua。",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "我有一份混合 Markdown 和 HTML img 标签的文档，要套用标题编号模板导出 Word，图片标题需要自动带图号。请给我正确的模板选择和 lua 模块启用方案。",
+      "expected_output": "选择标题编号模板，并指出应使用带编号的图片 caption 过滤逻辑。",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "请给我一份 Java 后端集成代码，要求用 pandoc 的两段式管道把 Markdown 转成符合 reference-doc 模板的 docx，并设置工作目录确保 markdown-to-docx.lua 能加载 lua 子模块。",
+      "expected_output": "输出遵循两段式 Pandoc 转换的 Java 集成实现。",
+      "files": []
+    }
+  ]
+}

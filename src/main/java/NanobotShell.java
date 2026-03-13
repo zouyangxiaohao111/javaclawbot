@@ -18,7 +18,7 @@ public final class NanobotShell {
         }
 
         System.out.println("nanobot interactive shell");
-        System.out.println("Examples: onboard | agent -m \"hello\" | status | exit");
+        System.out.println("Examples: onboard | agent -m \"hello\" | status | exit | gateway");
 
         while (true) {
             System.out.print("nanobot> ");

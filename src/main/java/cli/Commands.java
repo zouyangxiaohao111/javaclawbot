@@ -190,70 +190,7 @@ public class Commands implements Runnable {
     static class OnboardCmd implements Runnable {
         @Override
         public void run() {
-            Path configPath = ConfigIO.getConfigPath();
-
-            if (Files.exists(configPath)) {
-                System.out.println("Config already exists at " + configPath);
-                System.out.println("  y = overwrite with defaults (existing values will be lost)");
-                System.out.println("  N = refresh config, keeping existing values and adding new fields");
-
-                boolean overwrite = promptConfirm("Overwrite?");
-                if (overwrite) {
-                    ConfigSchema.Config cfg = new ConfigSchema.Config();
-                    try {
-                        ConfigIO.saveConfig(cfg, null);
-                    } catch (IOException e) {
-                        System.err.println("Failed to save config: " + e.getMessage());
-                        return;
-                    }
-                    System.out.println("✓ Config reset to defaults at " + configPath);
-                } else {
-                    ConfigSchema.Config cfg = ConfigIO.loadConfig(null);
-                    try {
-                        ConfigIO.saveConfig(cfg, null);
-                    } catch (IOException e) {
-                        System.err.println("Failed to save config: " + e.getMessage());
-                        return;
-                    }
-                    System.out.println("✓ Config refreshed at " + configPath + " (existing values preserved)");
-                }
-            } else {
-                try {
-                    ConfigIO.saveConfig(new ConfigSchema.Config(), null);
-                } catch (IOException e) {
-                    System.err.println("Failed to save config: " + e.getMessage());
-                    return;
-                }
-                System.out.println("✓ Created config at " + configPath);
-            }
-
-            Path workspace = Helpers.getWorkspacePath(null);
-            if (Files.notExists(workspace)) {
-                try { Files.createDirectories(workspace); } catch (IOException ignored) {}
-                System.out.println("✓ Created workspace at " + workspace);
-            }
-
-            createWorkspaceTemplates(workspace);
-
-            System.out.println();
-            System.out.println("🐈 nanobot is ready!");
-            System.out.println();
-            System.out.println("Next steps:");
-            System.out.println("  1. Add your API key to ~/.nanobot/config.json");
-            System.out.println("  2. Chat: nanobot agent -m \"Hello!\"");
-        }
-
-        static boolean promptConfirm(String prompt) {
-            System.out.print(prompt + " [y/N] ");
-            try {
-                Scanner sc = new Scanner(System.in);
-                String s = sc.nextLine();
-                if (s == null) return false;
-                s = s.trim().toLowerCase(Locale.ROOT);
-                return s.equals("y") || s.equals("yes");
-            } catch (Exception e) {
-                return false;
-            }
+            new OnboardWizard().run();
         }
     }
 

@@ -113,7 +113,9 @@ public final class SessionManager {
                     safeMetadata,
                     session.getLastConsolidated()
             );
-            cache.put(key, safeSession);
+            session.setMessages(safeSession.getMessages());
+            session.setMetadata(safeSession.getMetadata());
+            cache.put(key, session);
 
         } catch (Exception e) {
             LOG.log(Level.WARNING, "保存会话失败：" + key + "，原因：" + e.getMessage(), e);

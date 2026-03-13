@@ -1,0 +1,278 @@
+package cli;
+
+import org.jline.terminal.Terminal;
+import utils.Helpers;
+
+import java.io.IOException;
+import java.net.URI;
+import java.net.URL;
+import java.nio.file.*;
+import java.util.*;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
+/**
+ * 内置技能安装器
+ *
+ * 兼容：
+ * - 开发期 file: classpath 目录
+ * - 生产期 jar: classpath 资源
+ */
+public final class BuiltinSkillsInstaller {
+
+    private BuiltinSkillsInstaller() {}
+
+    private static final String CLASSPATH_SKILLS_ROOT = "skills";
+
+    public static final class SkillResource {
+        private final String name;
+        private final String classpathDir;
+
+        public SkillResource(String name, String classpathDir) {
+            this.name = name;
+            this.classpathDir = classpathDir;
+        }
+
+        public String getName() { return name; }
+        public String getClasspathDir() { return classpathDir; }
+    }
+
+    public static final class InstallSummary {
+        private final List<String> installed = new ArrayList<>();
+        private final List<String> overwritten = new ArrayList<>();
+        private final List<String> skipped = new ArrayList<>();
+        private final List<String> failed = new ArrayList<>();
+
+        public List<String> getInstalled() { return installed; }
+        public List<String> getOverwritten() { return overwritten; }
+        public List<String> getSkipped() { return skipped; }
+        public List<String> getFailed() { return failed; }
+    }
+
+    public static List<SkillResource> discoverBuiltinSkills() {
+        ClassLoader cl = Thread.currentThread().getContextClassLoader();
+        if (cl == null) cl = BuiltinSkillsInstaller.class.getClassLoader();
+
+        try {
+            Enumeration<URL> roots = cl.getResources(CLASSPATH_SKILLS_ROOT);
+            List<SkillResource> result = new ArrayList<>();
+
+            while (roots.hasMoreElements()) {
+                URL url = roots.nextElement();
+                result.addAll(scanSkillsFromUrl(url));
+            }
+
+            Map<String, SkillResource> dedup = new LinkedHashMap<>();
+            for (SkillResource r : result) dedup.putIfAbsent(r.getName(), r);
+
+            return dedup.values().stream()
+                    .sorted(Comparator.comparing(SkillResource::getName, String.CASE_INSENSITIVE_ORDER))
+                    .collect(Collectors.toList());
+
+        } catch (Exception e) {
+            System.err.println("Failed to discover built-in skills: " + e.getMessage());
+            return List.of();
+        }
+    }
+
+    public static TerminalPrompts.SelectionResult<SkillResource> promptSelection(
+            Terminal terminal,
+            List<SkillResource> allSkills
+    ) {
+        return TerminalPrompts.multiSelect(
+                terminal,
+                allSkills,
+                SkillResource::getName,
+                "Select built-in skills to install",
+                false,
+                true
+        );
+    }
+
+    public static InstallSummary installSelectedSkills(
+            Path workspace,
+            List<SkillResource> selected,
+            boolean overwrite
+    ) {
+        InstallSummary summary = new InstallSummary();
+        Path targetRoot = Helpers.getSkillsPath(workspace);
+
+        if (selected == null || selected.isEmpty()) {
+            return summary;
+        }
+
+        for (SkillResource skill : selected) {
+            String name = skill.getName();
+            Path targetDir = targetRoot.resolve(name);
+
+            try {
+                if (overwrite) {
+                    deleteDirectoryIfExists(targetDir);
+                    copyClasspathDirectory(skill.getClasspathDir(), targetDir);
+                    summary.getOverwritten().add(name);
+                } else {
+                    if (Files.exists(targetDir)) {
+                        summary.getSkipped().add(name);
+                    } else {
+                        copyClasspathDirectory(skill.getClasspathDir(), targetDir);
+                        summary.getInstalled().add(name);
+                    }
+                }
+            } catch (Exception e) {
+                summary.getFailed().add(name + " (" + e.getMessage() + ")");
+            }
+        }
+
+        return summary;
+    }
+
+    public static void printSummary(InstallSummary summary) {
+        System.out.println();
+        System.out.println("Built-in skills installation result:");
+
+        for (String s : summary.getInstalled()) {
+            System.out.println("  ✓ Installed: " + s);
+        }
+        for (String s : summary.getOverwritten()) {
+            System.out.println("  ✓ Overwritten: " + s);
+        }
+        for (String s : summary.getSkipped()) {
+            System.out.println("  - Skipped existing: " + s);
+        }
+        for (String s : summary.getFailed()) {
+            System.out.println("  ✗ Failed: " + s);
+        }
+
+        if (summary.getInstalled().isEmpty()
+                && summary.getOverwritten().isEmpty()
+                && summary.getSkipped().isEmpty()
+                && summary.getFailed().isEmpty()) {
+            System.out.println("  (nothing selected)");
+        }
+    }
+
+    private static List<SkillResource> scanSkillsFromUrl(URL url) throws Exception {
+        if (url == null) return List.of();
+        String protocol = url.getProtocol();
+
+        if ("file".equalsIgnoreCase(protocol)) {
+            return scanFromFileUrl(url);
+        }
+        if ("jar".equalsIgnoreCase(protocol)) {
+            return scanFromJarUrl(url);
+        }
+        return List.of();
+    }
+
+    private static List<SkillResource> scanFromFileUrl(URL url) throws Exception {
+        Path root = Paths.get(url.toURI());
+        if (!Files.isDirectory(root)) return List.of();
+
+        List<SkillResource> out = new ArrayList<>();
+        try (DirectoryStream<Path> ds = Files.newDirectoryStream(root)) {
+            for (Path p : ds) {
+                if (!Files.isDirectory(p)) continue;
+                if (Files.notExists(p.resolve("SKILL.md"))) continue;
+
+                String name = p.getFileName().toString();
+                out.add(new SkillResource(name, CLASSPATH_SKILLS_ROOT + "/" + name));
+            }
+        }
+        return out;
+    }
+
+    private static List<SkillResource> scanFromJarUrl(URL url) throws Exception {
+        URI uri = url.toURI();
+        String uriStr = uri.toString();
+        int sep = uriStr.indexOf("!/");
+        if (sep < 0) return List.of();
+
+        URI jarUri = URI.create(uriStr.substring(0, sep));
+
+        try (FileSystem fs = openOrGetJarFileSystem(jarUri)) {
+            Path root = fs.getPath("/" + CLASSPATH_SKILLS_ROOT);
+            if (!Files.isDirectory(root)) return List.of();
+
+            List<SkillResource> out = new ArrayList<>();
+            try (DirectoryStream<Path> ds = Files.newDirectoryStream(root)) {
+                for (Path p : ds) {
+                    if (!Files.isDirectory(p)) continue;
+                    if (Files.notExists(p.resolve("SKILL.md"))) continue;
+
+                    String name = p.getFileName().toString();
+                    out.add(new SkillResource(name, CLASSPATH_SKILLS_ROOT + "/" + name));
+                }
+            }
+            return out;
+        }
+    }
+
+    public static void copyClasspathDirectory(String classpathDir, Path targetDir) throws Exception {
+        ClassLoader cl = Thread.currentThread().getContextClassLoader();
+        if (cl == null) cl = BuiltinSkillsInstaller.class.getClassLoader();
+
+        URL url = cl.getResource(classpathDir);
+        if (url == null) {
+            throw new IOException("Classpath resource not found: " + classpathDir);
+        }
+
+        String protocol = url.getProtocol();
+        if ("file".equalsIgnoreCase(protocol)) {
+            copyFromFileSystemDir(Paths.get(url.toURI()), targetDir);
+            return;
+        }
+
+        if ("jar".equalsIgnoreCase(protocol)) {
+            URI uri = url.toURI();
+            String uriStr = uri.toString();
+            int sep = uriStr.indexOf("!/");
+            if (sep < 0) throw new IOException("Invalid jar uri: " + uriStr);
+
+            URI jarUri = URI.create(uriStr.substring(0, sep));
+            try (FileSystem fs = openOrGetJarFileSystem(jarUri)) {
+                Path sourceDir = fs.getPath("/" + classpathDir);
+                copyFromFileSystemDir(sourceDir, targetDir);
+                return;
+            }
+        }
+
+        throw new IOException("Unsupported protocol: " + protocol);
+    }
+
+    private static void copyFromFileSystemDir(Path sourceDir, Path targetDir) throws IOException {
+        if (!Files.exists(sourceDir) || !Files.isDirectory(sourceDir)) {
+            throw new IOException("Source dir not found: " + sourceDir);
+        }
+
+        try (Stream<Path> stream = Files.walk(sourceDir)) {
+            for (Path source : stream.collect(Collectors.toList())) {
+                Path relative = sourceDir.relativize(source);
+                Path target = targetDir.resolve(relative.toString());
+
+                if (Files.isDirectory(source)) {
+                    Files.createDirectories(target);
+                } else {
+                    Files.createDirectories(target.getParent());
+                    Files.copy(source, target, StandardCopyOption.REPLACE_EXISTING);
+                }
+            }
+        }
+    }
+
+    public static void deleteDirectoryIfExists(Path dir) throws IOException {
+        if (dir == null || Files.notExists(dir)) return;
+
+        try (Stream<Path> walk = Files.walk(dir)) {
+            List<Path> paths = walk.sorted(Comparator.reverseOrder()).collect(Collectors.toList());
+            for (Path p : paths) Files.deleteIfExists(p);
+        }
+    }
+
+    private static FileSystem openOrGetJarFileSystem(URI jarUri) throws IOException {
+        try {
+            return FileSystems.newFileSystem(jarUri, Map.of());
+        } catch (FileSystemAlreadyExistsException e) {
+            return FileSystems.getFileSystem(jarUri);
+        }
+    }
+}

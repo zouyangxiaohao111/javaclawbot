@@ -346,7 +346,7 @@ public class FeishuChannel extends BaseChannel {
 
     private void onP2MessageReceive(P2MessageReceiveV1 wrapper) {
         // Convert event to JSON and parse with Jackson to avoid tight coupling to SDK model getters.
-        log.error("接收到消息: {}", wrapper.getEvent().getMessage().getContent());
+        log.info("接收到消息: {}", wrapper.getEvent().getMessage().getContent());
         String json = Jsons.DEFAULT.toJson(wrapper.getEvent());
         try {
             JsonNode root = om.readTree(json);
