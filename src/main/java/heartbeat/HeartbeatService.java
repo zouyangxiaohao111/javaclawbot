@@ -1,7 +1,7 @@
 package heartbeat;
 
+import config.ConfigSchema;
 import providers.LLMProvider;
-import providers.ToolCallRequest;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -10,8 +10,6 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
-import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.Executors;
@@ -19,89 +17,94 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.regex.Pattern;
 
 /**
  * 心跳服务：周期性唤醒代理检查是否存在待执行任务
  *
- * 语义严格对齐 Python 源码：
- * - 工具定义：heartbeat(action=skip/run, tasks=摘要)
- * - Phase 1（决策）：读取 HEARTBEAT.md -> 通过“虚拟工具调用”让模型返回 skip/run
- * - Phase 2（执行）：仅当 run 时调用 onExecute 执行；若有返回且 onNotify 存在则推送
- *
- * 循环行为对齐：
- * - Python 先 sleep(interval) 再 tick
- * - Java 使用 scheduleWithFixedDelay，设置 initialDelay=intervalSeconds，保持同样“先等再跑”
+ * 对齐 OpenClaw 的 heartbeat-runner.ts 实现：
+ * - 使用 HEARTBEAT_OK token 匹配（而非虚拟工具调用）
+ * - 支持空文件检测跳过
+ * - 支持去重机制
+ * - 支持 cron/exec 事件触发
+ * - 支持活跃时间配置
  */
 public final class HeartbeatService {
 
     private static final Logger LOG = Logger.getLogger(HeartbeatService.class.getName());
 
-    /**
-     * 心跳工具定义（用于模型工具调用）
-     *
-     * 结构保持与 Python 一致：
-     * - 工具名：heartbeat
-     * - 参数：action（skip/run），tasks（run 时给出任务摘要）
-     */
-    private static final List<Map<String, Object>> HEARTBEAT_TOOL = buildHeartbeatTool();
+    /** 心跳确认 token（对齐 OpenClaw HEARTBEAT_TOKEN） */
+    public static final String HEARTBEAT_TOKEN = "HEARTBEAT_OK";
+
+    /** 默认心跳间隔（30分钟） */
+    public static final String DEFAULT_HEARTBEAT_EVERY = "30m";
+
+    /** 默认确认消息最大字符数 */
+    public static final int DEFAULT_HEARTBEAT_ACK_MAX_CHARS = 300;
+
+    /** 默认心跳提示词 */
+    public static final String DEFAULT_HEARTBEAT_PROMPT =
+        "Read HEARTBEAT.md if it exists (workspace context). Follow it strictly. " +
+        "Do not infer or repeat old tasks from prior chats. If nothing needs attention, reply HEARTBEAT_OK.";
+
+    /** 心跳运行结果 */
+    public record HeartbeatRunResult(
+        String status,      // "ran", "skipped", "failed"
+        String reason,      // 跳过/失败原因
+        long durationMs,    // 执行时长
+        String preview      // 发送内容预览
+    ) {}
+
+    /** 心跳配置 */
+    public record HeartbeatConfig(
+        boolean enabled,
+        int intervalMs,
+        String prompt,
+        String target,
+        String model,
+        int ackMaxChars,
+        boolean isolatedSession,
+        boolean includeReasoning,
+        String activeHoursStart,  // e.g. "09:00"
+        String activeHoursEnd     // e.g. "18:00"
+    ) {}
+
+    /** 心跳状态 */
+    public record HeartbeatState(
+        String lastHeartbeatText,
+        long lastHeartbeatSentAt
+    ) {}
 
     private final Path workspace;
     private final LLMProvider provider;
     private final String model;
-
-    /**
-     * 执行回调：入参为任务摘要，返回执行结果文本
-     * Python: on_execute: Callable[[str], Coroutine[..., str]] | None
-     */
     private final Function<String, CompletableFuture<String>> onExecute;
-
-    /**
-     * 通知回调：入参为需要推送的文本
-     * Python: on_notify: Callable[[str], Coroutine[..., None]] | None
-     */
     private final Function<String, CompletableFuture<Void>> onNotify;
+    private final HeartbeatConfig config;
 
-    /** 间隔秒数（默认 30 分钟） */
-    private final int intervalSeconds;
-
-    /** 是否启用心跳 */
-    private final boolean enabled;
-
-    /** 运行标记（对应 Python 的 self._running） */
     private volatile boolean running = false;
-
-    /** 定时执行器（对应 Python 的 asyncio.create_task + 循环 sleep） */
     private ScheduledExecutorService scheduler;
+    private HeartbeatState lastState = new HeartbeatState(null, 0);
 
-    /**
-     * @param workspace       工作区目录
-     * @param provider        模型提供者
-     * @param model           模型名称
-     * @param onExecute       执行回调（可为 null）
-     * @param onNotify        通知回调（可为 null）
-     * @param intervalSeconds 间隔秒数
-     * @param enabled         是否启用
-     */
     public HeartbeatService(
             Path workspace,
             LLMProvider provider,
             String model,
             Function<String, CompletableFuture<String>> onExecute,
             Function<String, CompletableFuture<Void>> onNotify,
-            int intervalSeconds,
-            boolean enabled
+            HeartbeatConfig config
     ) {
         this.workspace = workspace;
         this.provider = provider;
-        this.model = model;
+        this.model = config.model() != null && !config.model().isBlank() 
+            ? config.model() : model;
         this.onExecute = onExecute;
         this.onNotify = onNotify;
-        this.intervalSeconds = intervalSeconds;
-        this.enabled = enabled;
+        this.config = config;
     }
 
     /**
-     * 便捷构造：默认每 30 分钟一次
+     * 便捷构造：使用默认配置
      */
     public HeartbeatService(
             Path workspace,
@@ -110,26 +113,20 @@ public final class HeartbeatService {
             Function<String, CompletableFuture<String>> onExecute,
             Function<String, CompletableFuture<Void>> onNotify
     ) {
-        this(workspace, provider, model, onExecute, onNotify, 30 * 60, true);
+        this(workspace, provider, model, onExecute, onNotify, 
+            new HeartbeatConfig(true, 30 * 60 * 1000, DEFAULT_HEARTBEAT_PROMPT, 
+                "none", null, DEFAULT_HEARTBEAT_ACK_MAX_CHARS, false, false, null, null));
     }
 
-    /**
-     * 心跳文件路径：{workspace}/HEARTBEAT.md
-     */
     public Path getHeartbeatFile() {
         return workspace.resolve("HEARTBEAT.md");
     }
 
     /**
-     * 启动心跳服务（对齐 Python 的 start）
-     *
-     * Python 行为：
-     * - enabled=false：日志提示并返回
-     * - 已经 running：warning 并返回
-     * - 启动后：后台循环每 interval_s 触发一次 tick（先 sleep 再 tick）
+     * 启动心跳服务
      */
     public synchronized CompletableFuture<Void> start() {
-        if (!enabled) {
+        if (!config.enabled()) {
             LOG.log(Level.INFO, "Heartbeat disabled");
             return CompletableFuture.completedFuture(null);
         }
@@ -146,28 +143,22 @@ public final class HeartbeatService {
             return t;
         });
 
-        // 对齐 Python：先等待 intervalSeconds，再执行 tick
+        // 对齐 OpenClaw：先等待 interval，再执行
         scheduler.scheduleWithFixedDelay(() -> {
             if (!running) return;
             try {
-                tick().join();
-            } catch (CancellationException ignored) {
-                // 对齐 Python：CancelledError 时直接退出/忽略
+                runOnce("interval").join();
             } catch (Exception e) {
                 LOG.log(Level.SEVERE, "Heartbeat error: " + e.getMessage(), e);
             }
-        }, intervalSeconds, intervalSeconds, TimeUnit.SECONDS);
+        }, config.intervalMs(), config.intervalMs(), TimeUnit.MILLISECONDS);
 
-        LOG.log(Level.INFO, "Heartbeat started (every {0}s)", intervalSeconds);
+        LOG.log(Level.INFO, "Heartbeat started (every {0}ms)", config.intervalMs());
         return CompletableFuture.completedFuture(null);
     }
 
     /**
-     * 停止心跳服务（对齐 Python 的 stop）
-     *
-     * Python：
-     * - self._running = False
-     * - if self._task: cancel
+     * 停止心跳服务
      */
     public synchronized void stop() {
         running = false;
@@ -178,90 +169,328 @@ public final class HeartbeatService {
     }
 
     /**
-     * 手动触发一次心跳（对齐 Python 的 trigger_now）
-     *
-     * Python：
-     * - 读取 HEARTBEAT.md，不存在/空 => None
-     * - 决策不是 run 或 on_execute 不存在 => None
-     * - 否则执行 on_execute(tasks) 并返回其结果
+     * 手动触发一次心跳
      */
-    public CompletableFuture<String> triggerNow() {
-        String content = readHeartbeatFile();
-        if (content == null || content.isBlank()) {
-            return CompletableFuture.completedFuture(null);
+    public CompletableFuture<HeartbeatRunResult> triggerNow() {
+        return runOnce("manual");
+    }
+
+    /**
+     * Cron 事件触发心跳
+     */
+    public CompletableFuture<HeartbeatRunResult> triggerCronEvent(String eventContent) {
+        return runOnceWithEvent("cron-event", eventContent);
+    }
+
+    /**
+     * Exec 完成事件触发心跳
+     */
+    public CompletableFuture<HeartbeatRunResult> triggerExecEvent() {
+        return runOnceWithEvent("exec-event", null);
+    }
+
+    /**
+     * 更新心跳状态（用于去重）
+     */
+    public void updateState(String text, long sentAt) {
+        lastState = new HeartbeatState(text, sentAt);
+    }
+
+    // -------------------- 核心逻辑 --------------------
+
+    /**
+     * 执行一次心跳检查
+     */
+    public CompletableFuture<HeartbeatRunResult> runOnce(String reason) {
+        return runOnceWithEvent(reason, null);
+    }
+
+    /**
+     * 执行一次心跳检查（带事件内容）
+     */
+    private CompletableFuture<HeartbeatRunResult> runOnceWithEvent(String reason, String eventContent) {
+        long startedAt = System.currentTimeMillis();
+
+        // 检查活跃时间
+        if (!isWithinActiveHours(startedAt)) {
+            return CompletableFuture.completedFuture(
+                new HeartbeatRunResult("skipped", "quiet-hours", 0, null));
         }
 
-        return decide(content).thenCompose(decision -> {
-            if (!"run".equals(decision.action()) || onExecute == null) {
-                return CompletableFuture.completedFuture(null);
+        // 读取 HEARTBEAT.md
+        String content = readHeartbeatFile();
+
+        // 空文件检测（对齐 OpenClaw isHeartbeatContentEffectivelyEmpty）
+        if (content != null && isHeartbeatContentEffectivelyEmpty(content)) {
+            emitHeartbeatEvent("skipped", "empty-heartbeat-file", 0, null);
+            return CompletableFuture.completedFuture(
+                new HeartbeatRunResult("skipped", "empty-heartbeat-file", 0, null));
+        }
+
+        // 构建提示词
+        String prompt = buildPrompt(reason, eventContent, content);
+
+        // 调用模型
+        return callModel(prompt)
+            .thenApply(response -> {
+                long durationMs = System.currentTimeMillis() - startedAt;
+
+                if (response == null || response.isBlank()) {
+                    emitHeartbeatEvent("ok-empty", reason, durationMs, null);
+                    return new HeartbeatRunResult("ran", null, durationMs, null);
+                }
+
+                // 检查 HEARTBEAT_OK token
+                String normalizedResponse = normalizeHeartbeatReply(response, config.ackMaxChars());
+                
+                if (isHeartbeatOkToken(normalizedResponse)) {
+                    emitHeartbeatEvent("ok-token", reason, durationMs, null);
+                    return new HeartbeatRunResult("ran", null, durationMs, null);
+                }
+
+                // 去重检查
+                if (isDuplicateHeartbeat(normalizedResponse, startedAt)) {
+                    emitHeartbeatEvent("skipped", "duplicate", durationMs, normalizedResponse);
+                    return new HeartbeatRunResult("ran", null, durationMs, null);
+                }
+
+                // 有实际内容需要发送
+                if (onNotify != null) {
+                    updateState(normalizedResponse, startedAt);
+                    onNotify.apply(normalizedResponse);
+                }
+
+                emitHeartbeatEvent("sent", reason, durationMs, normalizedResponse);
+                return new HeartbeatRunResult("ran", null, durationMs, normalizedResponse);
+            })
+            .exceptionally(ex -> {
+                long durationMs = System.currentTimeMillis() - startedAt;
+                emitHeartbeatEvent("failed", ex.getMessage(), durationMs, null);
+                return new HeartbeatRunResult("failed", ex.getMessage(), durationMs, null);
+            });
+    }
+
+    /**
+     * 构建心跳提示词
+     */
+    private String buildPrompt(String reason, String eventContent, String heartbeatContent) {
+        StringBuilder prompt = new StringBuilder();
+
+        // 根据触发源构建不同的提示词
+        if ("cron-event".equals(reason) && eventContent != null) {
+            prompt.append("A scheduled reminder has been triggered. The reminder content is:\n\n")
+                  .append(eventContent)
+                  .append("\n\nPlease relay this reminder to the user in a helpful and friendly way.");
+        } else if ("exec-event".equals(reason)) {
+            prompt.append("An async command you ran earlier has completed. The result is shown in the system messages above. ")
+                  .append("Please relay the command output to the user in a helpful way.");
+        } else {
+            // 常规心跳
+            prompt.append(config.prompt() != null ? config.prompt() : DEFAULT_HEARTBEAT_PROMPT);
+            
+            if (heartbeatContent != null && !heartbeatContent.isBlank()) {
+                prompt.append("\n\nHEARTBEAT.md content:\n\n").append(heartbeatContent);
             }
-            return onExecute.apply(decision.tasks());
-        });
-    }
-
-    // -------------------- 内部逻辑 --------------------
-
-    /**
-     * 单次心跳 tick（对齐 Python 的 _tick）
-     *
-     * Python：
-     * - content 为空：debug 日志并 return
-     * - 调 _decide
-     * - action != run：info OK 并 return
-     * - run：info tasks found
-     *   - 若 on_execute：执行 -> 若 response 非空且 on_notify：推送
-     * - 异常：logger.exception
-     */
-    private CompletableFuture<Void> tick() {
-        String content = readHeartbeatFile();
-        if (content == null || content.isBlank()) {
-            // Python 这里是 debug 级别；java.util.logging 没有 debug，使用 FINE
-            LOG.log(Level.FINE, "Heartbeat: HEARTBEAT.md missing or empty");
-            return CompletableFuture.completedFuture(null);
         }
 
-        LOG.log(Level.INFO, "Heartbeat: checking for tasks...");
+        // 添加当前时间
+        prompt.append("\n\nCurrent time: ").append(new java.util.Date().toString());
 
-        return decide(content)
-                .thenCompose(decision -> {
-                    String action = decision.action();
-                    String tasks = decision.tasks();
-
-                    if (!"run".equals(action)) {
-                        LOG.log(Level.INFO, "Heartbeat: OK (nothing to report)");
-                        return CompletableFuture.completedFuture(null);
-                    }
-
-                    LOG.log(Level.INFO, "Heartbeat: tasks found, executing...");
-
-                    if (onExecute == null) {
-                        // Python：如果 on_execute 不存在则什么都不做
-                        return CompletableFuture.completedFuture(null);
-                    }
-
-                    return onExecute.apply(tasks)
-                            .thenCompose(result -> {
-                                // Python：if response and self.on_notify
-                                if (result != null && !result.isBlank() && onNotify != null) {
-                                    LOG.log(Level.INFO, "Heartbeat: completed, delivering response");
-                                    return onNotify.apply(result);
-                                }
-                                return CompletableFuture.completedFuture(null);
-                            });
-                })
-                .exceptionally(ex -> {
-                    // 对齐 Python：异常时记录堆栈
-                    LOG.log(Level.SEVERE, "Heartbeat execution failed: " + ex.getMessage(), ex);
-                    return null;
-                });
+        return prompt.toString();
     }
 
     /**
-     * 读取 HEARTBEAT.md 内容（读取失败返回 null）
-     *
-     * Python：
-     * - 文件存在则 read_text；异常返回 None
-     * - 文件不存在返回 None
+     * 调用模型获取回复
+     */
+    private CompletableFuture<String> callModel(String prompt) {
+        List<Map<String, Object>> messages = new ArrayList<>();
+
+        Map<String, Object> user = new LinkedHashMap<>();
+        user.put("role", "user");
+        user.put("content", prompt);
+        messages.add(user);
+
+        return provider.chatWithRetry(messages, null, model, 8192, 0.7)
+            .thenApply(resp -> {
+                if (resp == null || resp.getContent() == null) {
+                    return null;
+                }
+                return resp.getContent();
+            });
+    }
+
+    /**
+     * 检查是否是 HEARTBEAT_OK token
+     * 对齐 OpenClaw 的 token 匹配逻辑
+     */
+    private boolean isHeartbeatOkToken(String text) {
+        if (text == null || text.isBlank()) {
+            return false;
+        }
+
+        String trimmed = text.trim();
+        String lower = trimmed.toLowerCase();
+        String tokenLower = HEARTBEAT_TOKEN.toLowerCase();
+
+        // 完全匹配
+        if (lower.equals(tokenLower)) {
+            return true;
+        }
+
+        // 以 token 开头
+        if (lower.startsWith(tokenLower)) {
+            String suffix = lower.substring(tokenLower.length());
+            // 检查后缀是否只是标点符号
+            if (suffix.isEmpty() || !suffix.matches(".*[a-z0-9_].*")) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * 规范化心跳回复
+     * 对齐 OpenClaw 的 normalizeHeartbeatReply
+     */
+    private String normalizeHeartbeatReply(String text, int ackMaxChars) {
+        if (text == null) {
+            return "";
+        }
+
+        String stripped = stripHeartbeatToken(text);
+        
+        // 限制长度
+        if (stripped.length() > ackMaxChars) {
+            stripped = stripped.substring(0, ackMaxChars) + "...";
+        }
+
+        return stripped.trim();
+    }
+
+    /**
+     * 移除 HEARTBEAT_OK token
+     */
+    private String stripHeartbeatToken(String text) {
+        if (text == null || text.isBlank()) {
+            return "";
+        }
+
+        String trimmed = text.trim();
+        String token = HEARTBEAT_TOKEN;
+        String tokenLower = token.toLowerCase();
+        String lower = trimmed.toLowerCase();
+
+        // 移除开头的 token
+        if (lower.startsWith(tokenLower)) {
+            trimmed = trimmed.substring(token.length()).trim();
+        }
+
+        // 移除结尾的 token（可能带标点）
+        Pattern trailingPattern = Pattern.compile(
+            Pattern.quote(token) + "[^\\w]{0,4}$",
+            Pattern.CASE_INSENSITIVE
+        );
+        trimmed = trailingPattern.matcher(trimmed).replaceAll("").trim();
+
+        return trimmed;
+    }
+
+    /**
+     * 检查是否是重复的心跳
+     * 对齐 OpenClaw 的去重逻辑（24小时内相同内容跳过）
+     */
+    private boolean isDuplicateHeartbeat(String text, long now) {
+        if (lastState.lastHeartbeatText() == null || lastState.lastHeartbeatText().isBlank()) {
+            return false;
+        }
+
+        if (text == null || text.isBlank()) {
+            return false;
+        }
+
+        // 内容相同且在24小时内
+        if (text.trim().equals(lastState.lastHeartbeatText().trim())) {
+            long elapsed = now - lastState.lastHeartbeatSentAt();
+            return elapsed < 24 * 60 * 60 * 1000;
+        }
+
+        return false;
+    }
+
+    /**
+     * 检查 HEARTBEAT.md 内容是否"实际上为空"
+     * 对齐 OpenClaw 的 isHeartbeatContentEffectivelyEmpty
+     */
+    public static boolean isHeartbeatContentEffectivelyEmpty(String content) {
+        if (content == null || content.isBlank()) {
+            return true;
+        }
+
+        String[] lines = content.split("\n");
+        for (String line : lines) {
+            String trimmed = line.trim();
+
+            // 跳过空行
+            if (trimmed.isEmpty()) {
+                continue;
+            }
+
+            // 跳过 markdown 标题行（# 开头）
+            if (trimmed.matches("^#+\\s.*")) {
+                continue;
+            }
+
+            // 跳过空的列表项（- [ ] 或 * [ ] 或 - ）
+            if (trimmed.matches("^[-*+]\\s*(\\[[\\sXx]?\\]\\s*)?$")) {
+                continue;
+            }
+
+            // 找到非空、非注释的内容
+            return false;
+        }
+
+        // 所有行都是空的或注释
+        return true;
+    }
+
+    /**
+     * 检查当前时间是否在活跃时间内
+     */
+    private boolean isWithinActiveHours(long nowMs) {
+        if (config.activeHoursStart() == null || config.activeHoursEnd() == null) {
+            return true; // 未配置则始终活跃
+        }
+
+        try {
+            java.util.Calendar cal = java.util.Calendar.getInstance();
+            cal.setTimeInMillis(nowMs);
+            int currentHour = cal.get(java.util.Calendar.HOUR_OF_DAY);
+            int currentMinute = cal.get(java.util.Calendar.MINUTE);
+            int currentTime = currentHour * 60 + currentMinute;
+
+            int startMinutes = parseTimeToMinutes(config.activeHoursStart());
+            int endMinutes = parseTimeToMinutes(config.activeHoursEnd());
+
+            if (startMinutes <= endMinutes) {
+                // 同一天内的时间范围
+                return currentTime >= startMinutes && currentTime <= endMinutes;
+            } else {
+                // 跨天的时间范围（如 22:00 - 06:00）
+                return currentTime >= startMinutes || currentTime <= endMinutes;
+            }
+        } catch (Exception e) {
+            return true; // 解析失败则默认活跃
+        }
+    }
+
+    private int parseTimeToMinutes(String time) {
+        String[] parts = time.split(":");
+        return Integer.parseInt(parts[0]) * 60 + Integer.parseInt(parts[1]);
+    }
+
+    /**
+     * 读取 HEARTBEAT.md 文件
      */
     private String readHeartbeatFile() {
         Path file = getHeartbeatFile();
@@ -276,101 +505,86 @@ public final class HeartbeatService {
     }
 
     /**
-     * Phase 1：让模型通过工具调用返回决策（对齐 Python 的 _decide）
-     *
-     * 返回：
-     * - action：skip 或 run
-     * - tasks：任务摘要（run 时建议给出）
-     *
-     * 注意：
-     * - Python 若没有工具调用 => ("skip","")
-     * - args.get("tasks") 若不存在 => ""
+     * 发射心跳事件（用于日志/监控）
      */
-    private CompletableFuture<HeartbeatDecision> decide(String content) {
-        List<Map<String, Object>> messages = new ArrayList<>();
+    private void emitHeartbeatEvent(String status, String reason, long durationMs, String preview) {
+        String previewStr = preview != null && preview.length() > 200 
+            ? preview.substring(0, 200) + "..." 
+            : preview;
+        
+        LOG.log(Level.INFO, "Heartbeat: status={0}, reason={1}, duration={2}ms, preview={3}",
+            new Object[]{status, reason, durationMs, previewStr});
+    }
 
-        Map<String, Object> system = new LinkedHashMap<>();
-        system.put("role", "system");
-        system.put(
-                "content",
-                "You are a heartbeat agent. Call the heartbeat tool to report your decision."
+    // -------------------- 配置解析 --------------------
+
+    /**
+     * 从配置解析心跳配置
+     */
+    public static HeartbeatConfig parseConfig(ConfigSchema.Config cfg) {
+        ConfigSchema.HeartbeatConfig hb = cfg.getAgents().getDefaults().getHeartbeat();
+        
+        if (hb == null) {
+            return new HeartbeatConfig(
+                true, 
+                30 * 60 * 1000, 
+                DEFAULT_HEARTBEAT_PROMPT,
+                "none", 
+                null, 
+                DEFAULT_HEARTBEAT_ACK_MAX_CHARS,
+                false,
+                false,
+                null,
+                null
+            );
+        }
+
+        int intervalMs = parseInterval(hb.getEvery());
+        
+        return new HeartbeatConfig(
+            hb.isEnabled(),
+            intervalMs,
+            hb.getPrompt() != null && !hb.getPrompt().isBlank() 
+                ? hb.getPrompt() : DEFAULT_HEARTBEAT_PROMPT,
+            hb.getTarget() != null ? hb.getTarget() : "none",
+            hb.getModel(),
+            hb.getAckMaxChars() > 0 ? hb.getAckMaxChars() : DEFAULT_HEARTBEAT_ACK_MAX_CHARS,
+            hb.isIsolatedSession(),
+            hb.isIncludeReasoning(),
+            hb.getActiveHoursStart(),
+            hb.getActiveHoursEnd()
         );
-        messages.add(system);
-
-        Map<String, Object> user = new LinkedHashMap<>();
-        user.put("role", "user");
-        user.put(
-                "content",
-                "Review the following HEARTBEAT.md and decide whether there are active tasks.\n\n"
-                        + content
-        );
-        messages.add(user);
-
-        // Python：provider.chat(messages=[...], tools=_HEARTBEAT_TOOL, model=self.model)
-        // Java：按你工程现有签名调用（这里不额外引入 max_tokens / temperature 的语义差异）
-        return provider.chatWithRetry(messages, HEARTBEAT_TOOL, model, 8192, 0.7)
-                .thenApply(resp -> {
-                    if (resp == null || !resp.hasToolCalls()) {
-                        return new HeartbeatDecision("skip", "");
-                    }
-
-                    List<ToolCallRequest> toolCalls = resp.getToolCalls();
-                    if (toolCalls == null || toolCalls.isEmpty()) {
-                        return new HeartbeatDecision("skip", "");
-                    }
-
-                    Map<String, Object> args = toolCalls.get(0).getArguments();
-                    if (args == null) {
-                        return new HeartbeatDecision("skip", "");
-                    }
-
-                    // 对齐 Python：缺省值分别是 "skip" 和 ""
-                    String action = Objects.toString(args.get("action"), "skip");
-                    String tasks = Objects.toString(args.get("tasks"), "");
-                    return new HeartbeatDecision(action, tasks);
-                })
-                .exceptionally(ex -> new HeartbeatDecision("skip", ""));
     }
 
     /**
-     * 心跳决策结果
+     * 解析时间间隔字符串
      */
-    private record HeartbeatDecision(String action, String tasks) {}
+    public static int parseInterval(String every) {
+        if (every == null || every.isBlank()) {
+            return 30 * 60 * 1000; // 默认 30 分钟
+        }
 
-    /**
-     * 构造 heartbeat 工具定义（保持与 Python 常量 _HEARTBEAT_TOOL 一致）
-     */
-    @SuppressWarnings("unchecked")
-    private static List<Map<String, Object>> buildHeartbeatTool() {
-        Map<String, Object> tool = new LinkedHashMap<>();
-        tool.put("type", "function");
+        String trimmed = every.trim().toLowerCase();
+        int multiplier = 1;
+        int value;
 
-        Map<String, Object> function = new LinkedHashMap<>();
-        function.put("name", "heartbeat");
-        function.put("description", "Report heartbeat decision after reviewing tasks.");
+        if (trimmed.endsWith("s")) {
+            multiplier = 1000;
+            value = Integer.parseInt(trimmed.replaceAll("[^0-9]", ""));
+        } else if (trimmed.endsWith("m") && !trimmed.endsWith("ms")) {
+            multiplier = 60 * 1000;
+            value = Integer.parseInt(trimmed.replaceAll("[^0-9]", ""));
+        } else if (trimmed.endsWith("h")) {
+            multiplier = 60 * 60 * 1000;
+            value = Integer.parseInt(trimmed.replaceAll("[^0-9]", ""));
+        } else if (trimmed.endsWith("ms")) {
+            value = Integer.parseInt(trimmed.replaceAll("[^0-9]", ""));
+        } else {
+            // 默认分钟
+            multiplier = 60 * 1000;
+            value = Integer.parseInt(trimmed.replaceAll("[^0-9]", ""));
+        }
 
-        Map<String, Object> parameters = new LinkedHashMap<>();
-        parameters.put("type", "object");
-
-        Map<String, Object> properties = new LinkedHashMap<>();
-
-        Map<String, Object> action = new LinkedHashMap<>();
-        action.put("type", "string");
-        action.put("enum", List.of("skip", "run"));
-        action.put("description", "skip = nothing to do, run = has active tasks");
-        properties.put("action", action);
-
-        Map<String, Object> tasks = new LinkedHashMap<>();
-        tasks.put("type", "string");
-        tasks.put("description", "Natural-language summary of active tasks (required for run)");
-        properties.put("tasks", tasks);
-
-        parameters.put("properties", properties);
-        parameters.put("required", List.of("action"));
-
-        function.put("parameters", parameters);
-        tool.put("function", function);
-
-        return List.of(tool);
+        return value * multiplier;
     }
 }

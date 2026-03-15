@@ -582,9 +582,24 @@ public final class ConfigSchema {
         private String reasoningEffort = null;
 
         /**
+         * 全局最大并发数（对齐 OpenClaw maxConcurrent）
+         */
+        private int maxConcurrent = 4;
+
+        /**
          * fallback 调用策略配置
          */
         private FallbackConfig fallback = new FallbackConfig();
+
+        /**
+         * 心跳配置
+         */
+        private HeartbeatConfig heartbeat = new HeartbeatConfig();
+
+        /**
+         * 队列配置
+         */
+        private QueueConfig queue = new QueueConfig();
 
         public String getWorkspace() { return workspace; }
         public void setWorkspace(String workspace) { this.workspace = workspace; }
@@ -610,8 +625,17 @@ public final class ConfigSchema {
         public String getReasoningEffort() { return reasoningEffort; }
         public void setReasoningEffort(String reasoningEffort) { this.reasoningEffort = reasoningEffort; }
 
+        public int getMaxConcurrent() { return maxConcurrent; }
+        public void setMaxConcurrent(int maxConcurrent) { this.maxConcurrent = maxConcurrent; }
+
         public FallbackConfig getFallback() { return fallback; }
         public void setFallback(FallbackConfig fallback) { this.fallback = (fallback != null) ? fallback : new FallbackConfig(); }
+
+        public HeartbeatConfig getHeartbeat() { return heartbeat; }
+        public void setHeartbeat(HeartbeatConfig heartbeat) { this.heartbeat = (heartbeat != null) ? heartbeat : new HeartbeatConfig(); }
+
+        public QueueConfig getQueue() { return queue; }
+        public void setQueue(QueueConfig queue) { this.queue = (queue != null) ? queue : new QueueConfig(); }
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
@@ -876,15 +900,83 @@ public final class ConfigSchema {
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     @JsonInclude(JsonInclude.Include.NON_NULL)
+    public static class QueueConfig {
+        /**
+         * 队列模式：collect/steer/followup/interrupt
+         */
+        private String mode = "collect";
+
+        /**
+         * 去抖动时间（毫秒）
+         */
+        private int debounceMs = 1000;
+
+        /**
+         * 队列容量
+         */
+        private int cap = 20;
+
+        /**
+         * 溢出策略：old/new/summarize
+         */
+        private String drop = "summarize";
+
+        public String getMode() { return mode; }
+        public void setMode(String mode) { this.mode = mode; }
+
+        public int getDebounceMs() { return debounceMs; }
+        public void setDebounceMs(int debounceMs) { this.debounceMs = debounceMs; }
+
+        public int getCap() { return cap; }
+        public void setCap(int cap) { this.cap = cap; }
+
+        public String getDrop() { return drop; }
+        public void setDrop(String drop) { this.drop = drop; }
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     public static class HeartbeatConfig {
         private boolean enabled = true;
-        private int intervalS = 30 * 60;
+        private String every = "30m";
+        private String prompt = null;
+        private String target = "none";
+        private String model = null;
+        private int ackMaxChars = 300;
+        private boolean isolatedSession = false;
+        private boolean includeReasoning = false;
+        private String activeHoursStart = null;
+        private String activeHoursEnd = null;
 
         public boolean isEnabled() { return enabled; }
         public void setEnabled(boolean enabled) { this.enabled = enabled; }
 
-        public int getIntervalS() { return intervalS; }
-        public void setIntervalS(int intervalS) { this.intervalS = intervalS; }
+        public String getEvery() { return every; }
+        public void setEvery(String every) { this.every = every; }
+
+        public String getPrompt() { return prompt; }
+        public void setPrompt(String prompt) { this.prompt = prompt; }
+
+        public String getTarget() { return target; }
+        public void setTarget(String target) { this.target = target; }
+
+        public String getModel() { return model; }
+        public void setModel(String model) { this.model = model; }
+
+        public int getAckMaxChars() { return ackMaxChars; }
+        public void setAckMaxChars(int ackMaxChars) { this.ackMaxChars = ackMaxChars; }
+
+        public boolean isIsolatedSession() { return isolatedSession; }
+        public void setIsolatedSession(boolean isolatedSession) { this.isolatedSession = isolatedSession; }
+
+        public boolean isIncludeReasoning() { return includeReasoning; }
+        public void setIncludeReasoning(boolean includeReasoning) { this.includeReasoning = includeReasoning; }
+
+        public String getActiveHoursStart() { return activeHoursStart; }
+        public void setActiveHoursStart(String activeHoursStart) { this.activeHoursStart = activeHoursStart; }
+
+        public String getActiveHoursEnd() { return activeHoursEnd; }
+        public void setActiveHoursEnd(String activeHoursEnd) { this.activeHoursEnd = activeHoursEnd; }
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)

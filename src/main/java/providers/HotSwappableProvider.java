@@ -23,14 +23,14 @@ import java.util.concurrent.locks.ReentrantLock;
  * 1. 每次 chat 前检查配置文件是否变化
  * 2. 若变化则尝试重建 provider 快照
  * 3. 若新配置有问题，则保留旧快照
- * 4. primary 失败后，按 provider/model 链执行 fallback
+ * 4. 委托 ModelFallbackManager 执行 fallback 逻辑
  */
 public final class HotSwappableProvider extends LLMProvider {
 
     private static final Logger log = LoggerFactory.getLogger(HotSwappableProvider.class);
 
     private final ConfigReloader reloader;
-    private final ProviderFactory factory;
+    private final ModelFallbackManager fallbackManager;
     private final ReentrantLock rebuildLock = new ReentrantLock();
 
     /**
@@ -38,14 +38,14 @@ public final class HotSwappableProvider extends LLMProvider {
      */
     private volatile ProviderRuntimeSnapshot activeSnapshot;
 
-    public HotSwappableProvider(ConfigReloader reloader, ProviderFactory factory) {
+    public HotSwappableProvider(ConfigReloader reloader) {
         super("hot-swap", "hot-swap");
         this.reloader = Objects.requireNonNull(reloader, "reloader");
-        this.factory = Objects.requireNonNull(factory, "factory");
+        this.fallbackManager = new ModelFallbackManager();
 
         ConfigSchema.Config cfg = reloader.getCurrentConfig();
         long version = reloader.getVersion();
-        this.activeSnapshot = factory.create(cfg, version);
+        this.activeSnapshot = buildSnapshot(cfg, version);
     }
 
     @Override
@@ -59,9 +59,9 @@ public final class HotSwappableProvider extends LLMProvider {
     ) {
         ProviderRuntimeSnapshot snapshot = ensureLatestSnapshot();
 
-        // 注意：这里优先使用 snapshot 中的主模型配置，而不是 AgentLoop 启动时传入的快照 model
-        // 这样 config.json 修改后，下一轮请求会自动使用新模型
-        return invokeChain(snapshot, messages, tools, maxTokens, temperature, reasoningEffort);
+        // 委托 ModelFallbackManager 执行
+        ModelFallbackManager.FallbackChain chain = snapshot.getFallbackChain();
+        return fallbackManager.executeWithFallback(chain, messages, tools, maxTokens, temperature, reasoningEffort);
     }
 
     @Override
@@ -97,14 +97,15 @@ public final class HotSwappableProvider extends LLMProvider {
 
             try {
                 ConfigSchema.Config cfg = reloader.getCurrentConfig();
-                ProviderRuntimeSnapshot next = factory.create(cfg, version);
+                ProviderRuntimeSnapshot next = buildSnapshot(cfg, version);
                 activeSnapshot = next;
 
+                ModelFallbackManager.FallbackChain chain = next.getFallbackChain();
                 log.info("Provider snapshot rebuilt successfully. version={}, primary={} / {}, fallback_mode={}",
                         next.getVersion(),
                         next.getPrimaryProviderName(),
                         next.getModel(),
-                        next.getFallbackStrategy().name());
+                        chain.getStrategy().name());
 
                 return next;
             } catch (Exception e) {
@@ -117,104 +118,10 @@ public final class HotSwappableProvider extends LLMProvider {
     }
 
     /**
-     * 按 provider/model 链执行：
-     * primary(provider/model) -> fallback(provider/model) -> ...
+     * 构建快照
      */
-    private CompletableFuture<LLMResponse> invokeChain(
-            ProviderRuntimeSnapshot snapshot,
-            List<Map<String, Object>> messages,
-            List<Map<String, Object>> tools,
-            int maxTokens,
-            double temperature,
-            String reasoningEffort
-    ) {
-        List<ProviderRuntimeSnapshot.NamedProvider> chain = snapshot.fullChain();
-        int maxAttempts = Math.min(snapshot.getMaxAttempts(), chain.size());
-        if (maxAttempts <= 0) maxAttempts = 1;
-
-        CompletableFuture<LLMResponse> out = new CompletableFuture<>();
-        invokeAt(snapshot, chain, 0, maxAttempts, messages, tools, maxTokens, temperature, reasoningEffort, out);
-        return out;
-    }
-
-    private void invokeAt(
-            ProviderRuntimeSnapshot snapshot,
-            List<ProviderRuntimeSnapshot.NamedProvider> chain,
-            int index,
-            int maxAttempts,
-            List<Map<String, Object>> messages,
-            List<Map<String, Object>> tools,
-            int maxTokens,
-            double temperature,
-            String reasoningEffort,
-            CompletableFuture<LLMResponse> out
-    ) {
-        if (index >= chain.size() || index >= maxAttempts) {
-            out.complete(errorResponse("All providers/models failed or no valid provider response."));
-            return;
-        }
-
-        ProviderRuntimeSnapshot.NamedProvider current = chain.get(index);
-        String providerName = current.getName();
-        String nodeModel = current.getModel();
-        LLMProvider provider = current.getProvider();
-
-        provider.chat(messages, tools, nodeModel, maxTokens, temperature, reasoningEffort)
-                .whenComplete((resp, ex) -> {
-                    boolean shouldFallback = snapshot.getFallbackStrategy().shouldFallback(resp, ex, index);
-
-                    if (!shouldFallback) {
-                        if (ex != null) {
-                            out.complete(errorResponse(ex.toString()));
-                        } else {
-                            out.complete(resp != null ? resp : errorResponse("Provider returned null response."));
-                        }
-                        return;
-                    }
-
-                    // 已经没有更多 fallback 节点
-                    if (index + 1 >= chain.size() || index + 1 >= maxAttempts) {
-                        if (ex != null) {
-                            log.warn("Provider {} / {} failed and no more fallbacks. error={}",
-                                    providerName, nodeModel, ex.toString());
-                            out.complete(errorResponse(ex.toString()));
-                        } else {
-                            log.warn("Provider {} / {} produced fallback-worthy response and no more fallbacks.",
-                                    providerName, nodeModel);
-                            out.complete(resp != null ? resp : errorResponse("No more fallbacks available."));
-                        }
-                        return;
-                    }
-
-                    ProviderRuntimeSnapshot.NamedProvider next = chain.get(index + 1);
-                    String reason = ex != null ? ex.toString() : summarizeResponse(resp);
-
-                    log.warn("Provider {} / {} failed or invalid, fallback to {} / {}. strategy={}, reason={}",
-                            providerName,
-                            nodeModel,
-                            next.getName(),
-                            next.getModel(),
-                            snapshot.getFallbackStrategy().name(),
-                            reason);
-
-                    invokeAt(snapshot, chain, index + 1, maxAttempts, messages, tools, maxTokens, temperature, reasoningEffort, out);
-                });
-    }
-
-    private static LLMResponse errorResponse(String message) {
-        LLMResponse r = new LLMResponse();
-        r.setContent("Error: " + message);
-        r.setFinishReason("error");
-        return r;
-    }
-
-    private static String summarizeResponse(LLMResponse resp) {
-        if (resp == null) return "null_response";
-        String finish = resp.getFinishReason();
-        String content = resp.getContent();
-        if (content != null && content.length() > 120) {
-            content = content.substring(0, 120) + "...";
-        }
-        return "finish_reason=" + finish + ", content=" + content;
+    private ProviderRuntimeSnapshot buildSnapshot(ConfigSchema.Config config, long version) {
+        ModelFallbackManager.FallbackChain chain = fallbackManager.buildFallbackChain(config);
+        return new ProviderRuntimeSnapshot(version, chain);
     }
 }

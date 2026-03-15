@@ -428,4 +428,266 @@ public final class SessionManager {
         }
         return result;
     }
+    
+    // =========================
+    // 会话维护功能
+    // =========================
+    
+    /** 维护配置 */
+    private SessionMaintenanceConfig maintenanceConfig = SessionMaintenanceConfig.DEFAULT;
+    
+    /** 警告消费者 */
+    private java.util.function.Consumer<String> warningConsumer;
+    
+    /**
+     * 设置维护配置
+     */
+    public void setMaintenanceConfig(SessionMaintenanceConfig config) {
+        this.maintenanceConfig = config != null ? config : SessionMaintenanceConfig.DEFAULT;
+    }
+    
+    /**
+     * 设置警告消费者
+     */
+    public void setWarningConsumer(java.util.function.Consumer<String> consumer) {
+        this.warningConsumer = consumer;
+    }
+    
+    /**
+     * 执行会话维护
+     * 
+     * @param activeSessionKey 当前活跃的会话键（不会被清理）
+     * @return 维护报告
+     */
+    public MaintenanceReport performMaintenance(String activeSessionKey) {
+        if (maintenanceConfig == null) {
+            return new MaintenanceReport(0, 0, 0, 0);
+        }
+        
+        List<Map<String, Object>> sessions = listSessions();
+        int beforeCount = sessions.size();
+        int pruned = 0;
+        int capped = 0;
+        long freedBytes = 0;
+        
+        // 检查活跃会话是否会被清理
+        if (activeSessionKey != null && !activeSessionKey.isBlank()) {
+            MaintenanceWarning warning = checkActiveSessionWarning(
+                    sessions, activeSessionKey, maintenanceConfig);
+            
+            if (warning != null) {
+                // 发送警告
+                SessionMaintenanceWarning.checkAndWarn(
+                        activeSessionKey,
+                        maintenanceConfig.getPruneAfterMs(),
+                        maintenanceConfig.getMaxEntries(),
+                        warning.wouldPrune,
+                        warning.wouldCap,
+                        warningConsumer
+                );
+                
+                // 如果是 warn 模式，不执行清理
+                if (maintenanceConfig.getMode() == SessionMaintenanceConfig.Mode.WARN) {
+                    return new MaintenanceReport(beforeCount, beforeCount, 0, 0);
+                }
+            }
+        }
+        
+        // enforce 模式：执行清理
+        if (maintenanceConfig.getMode() == SessionMaintenanceConfig.Mode.ENFORCE) {
+            // 修剪过期会话
+            pruned = pruneStaleSessions(sessions, maintenanceConfig.getPruneAfterMs(), activeSessionKey);
+            
+            // 限制会话数量
+            capped = capSessionCount(sessions, maintenanceConfig.getMaxEntries(), activeSessionKey);
+            
+            // 磁盘预算检查
+            freedBytes = enforceDiskBudget(maintenanceConfig.getDiskBudgetBytes());
+        }
+        
+        int afterCount = listSessions().size();
+        return new MaintenanceReport(beforeCount, afterCount, pruned, capped);
+    }
+    
+    /**
+     * 检查活跃会话是否会被清理
+     */
+    private MaintenanceWarning checkActiveSessionWarning(
+            List<Map<String, Object>> sessions,
+            String activeSessionKey,
+            SessionMaintenanceConfig config
+    ) {
+        boolean wouldPrune = false;
+        boolean wouldCap = false;
+        
+        // 检查是否过期
+        for (Map<String, Object> session : sessions) {
+            String key = (String) session.get("key");
+            if (activeSessionKey.equals(key)) {
+                Object updatedAt = session.get("updated_at");
+                if (updatedAt instanceof String ua) {
+                    try {
+                        LocalDateTime updated = LocalDateTime.parse(ua);
+                        long ageMs = java.time.Duration.between(updated, LocalDateTime.now()).toMillis();
+                        if (ageMs > config.getPruneAfterMs()) {
+                            wouldPrune = true;
+                        }
+                    } catch (Exception ignored) {}
+                }
+                break;
+            }
+        }
+        
+        // 检查是否超出数量限制
+        int activeIndex = -1;
+        for (int i = 0; i < sessions.size(); i++) {
+            String key = (String) sessions.get(i).get("key");
+            if (activeSessionKey.equals(key)) {
+                activeIndex = i;
+                break;
+            }
+        }
+        
+        if (activeIndex >= 0 && activeIndex >= config.getMaxEntries()) {
+            wouldCap = true;
+        }
+        
+        if (wouldPrune || wouldCap) {
+            return new MaintenanceWarning(activeSessionKey, wouldPrune, wouldCap);
+        }
+        
+        return null;
+    }
+    
+    /**
+     * 修剪过期会话
+     */
+    private int pruneStaleSessions(
+            List<Map<String, Object>> sessions,
+            long pruneAfterMs,
+            String activeSessionKey
+    ) {
+        int pruned = 0;
+        long now = System.currentTimeMillis();
+        
+        for (Map<String, Object> session : sessions) {
+            String key = (String) session.get("key");
+            if (key == null || key.equals(activeSessionKey)) continue;
+            
+            Object updatedAt = session.get("updated_at");
+            if (updatedAt instanceof String ua) {
+                try {
+                    LocalDateTime updated = LocalDateTime.parse(ua);
+                    long ageMs = java.time.Duration.between(updated, LocalDateTime.now()).toMillis();
+                    if (ageMs > pruneAfterMs) {
+                        // 删除会话文件
+                        Path sessionPath = getSessionPath(key);
+                        if (Files.exists(sessionPath)) {
+                            Files.delete(sessionPath);
+                            cache.remove(key);
+                            pruned++;
+                        }
+                    }
+                } catch (Exception ignored) {}
+            }
+        }
+        
+        return pruned;
+    }
+    
+    /**
+     * 限制会话数量
+     */
+    private int capSessionCount(
+            List<Map<String, Object>> sessions,
+            int maxEntries,
+            String activeSessionKey
+    ) {
+        int capped = 0;
+        
+        if (sessions.size() <= maxEntries) {
+            return 0;
+        }
+        
+        // 从最旧的开始删除
+        for (int i = maxEntries; i < sessions.size(); i++) {
+            String key = (String) sessions.get(i).get("key");
+            if (key == null || key.equals(activeSessionKey)) continue;
+            
+            try {
+                Path sessionPath = getSessionPath(key);
+                if (Files.exists(sessionPath)) {
+                    Files.delete(sessionPath);
+                    cache.remove(key);
+                    capped++;
+                }
+            } catch (Exception ignored) {}
+        }
+        
+        return capped;
+    }
+    
+    /**
+     * 执行磁盘预算
+     */
+    private long enforceDiskBudget(long maxBytes) {
+        try {
+            long totalSize = 0;
+            List<Path> sessionFiles = new ArrayList<>();
+            
+            try (DirectoryStream<Path> stream = Files.newDirectoryStream(sessionsDir, "*.jsonl")) {
+                for (Path path : stream) {
+                    totalSize += Files.size(path);
+                    sessionFiles.add(path);
+                }
+            }
+            
+            if (totalSize <= maxBytes) {
+                return 0;
+            }
+            
+            // 按修改时间排序（最旧的在前）
+            sessionFiles.sort((a, b) -> {
+                try {
+                    return Files.getLastModifiedTime(a).compareTo(Files.getLastModifiedTime(b));
+                } catch (Exception e) {
+                    return 0;
+                }
+            });
+            
+            long freed = 0;
+            for (Path path : sessionFiles) {
+                if (totalSize - freed <= maxBytes) break;
+                
+                long size = Files.size(path);
+                Files.delete(path);
+                freed += size;
+            }
+            
+            return freed;
+            
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "磁盘预算检查失败", e);
+            return 0;
+        }
+    }
+    
+    /**
+     * 维护报告
+     */
+    public record MaintenanceReport(
+            int beforeCount,
+            int afterCount,
+            int pruned,
+            int capped
+    ) {}
+    
+    /**
+     * 维护警告
+     */
+    private record MaintenanceWarning(
+            String activeSessionKey,
+            boolean wouldPrune,
+            boolean wouldCap
+    ) {}
 }

@@ -11,7 +11,9 @@ import java.util.concurrent.CompletionStage;
 /**
  * Spawn tool for creating background subagents.
  * Java port of nanobot/agent/tools/spawn.py
+ * 被弃用 @see agent.subagent.SubagentsTool
  */
+@Deprecated(since = "1.0.1")
 public class SpawnTool extends Tool {
 
     private final SubagentManager manager;

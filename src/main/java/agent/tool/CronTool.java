@@ -25,6 +25,7 @@ public class CronTool extends Tool {
     private final CronService cron;
     private String channel = "";
     private String chatId = "";
+
     private final ThreadLocal<Boolean> inCronContext = ThreadLocal.withInitial(() -> false);
 
     public CronTool(CronService cronService) {

@@ -131,7 +131,7 @@ public final class ConfigReloader {
             config.setWorkspacePath(workspacePath);
         }
 
-        LLMProvider provider = new HotSwappableProvider(reloader, new ProviderFactory());
+        LLMProvider provider = new HotSwappableProvider(reloader);
         AgentRuntimeSettings runtimeSettings = new AgentRuntimeSettings(reloader);
 
         return new RuntimeComponents(reloader, config, provider, runtimeSettings);

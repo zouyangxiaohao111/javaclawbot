@@ -25,6 +25,14 @@ public final class AgentRuntimeSettings {
         this.reloader = Objects.requireNonNull(reloader, "reloader");
     }
 
+    public ConfigSchema.Config getCurrentConfig(){
+        try {
+            reloader.refreshIfChanged();
+        } catch (Exception ignored) {
+        }
+        return reloader.getCurrentConfig();
+    }
+
     /**
      * 获取当前运行时快照
      *

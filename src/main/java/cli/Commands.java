@@ -25,6 +25,7 @@ import picocli.CommandLine;
 import picocli.CommandLine.*;
 import providers.*;
 import session.SessionManager;
+import session.SessionCostUsage;
 import utils.Helpers;
 
 import java.io.IOException;
@@ -52,7 +53,10 @@ import static config.ConfigReloader.createRuntimeComponents;
                 Commands.StatusCmd.class,
                 Commands.ChannelsCmd.class,
                 Commands.CronCmd.class,
-                Commands.ProviderCmd.class
+                Commands.ProviderCmd.class,
+                Commands.CostCmd.class,
+                Commands.ServiceCmd.class,
+                Commands.CompletionCmdWrapper.class
         }
 )
 public class Commands implements Runnable {
@@ -130,8 +134,7 @@ public class Commands implements Runnable {
     static LLMProvider makeHotProvider() {
         Path configPath = ConfigIO.getConfigPath();
         ConfigReloader reloader = new ConfigReloader(configPath);
-        ProviderFactory factory = new ProviderFactory();
-        return new HotSwappableProvider(reloader, factory);
+        return new HotSwappableProvider(reloader);
     }
 
     @Command(name = "onboard", description = "Initialize nanobot configuration and workspace.")
@@ -268,8 +271,7 @@ public class Commands implements Runnable {
                                 null
                         )).toCompletableFuture();
                     },
-                    config.getGateway().getHeartbeat().getIntervalS(),
-                    config.getGateway().getHeartbeat().isEnabled()
+                    HeartbeatService.parseConfig(config)
             );
 
             AtomicBoolean stopping = new AtomicBoolean(false);
@@ -859,6 +861,285 @@ public class Commands implements Runnable {
 
                 throw new CommandLine.ExecutionException(new CommandLine(this),
                         "OAuth login not implemented in Java CLI");
+            }
+        }
+    }
+
+    @Command(name = "cost", description = "Show session cost and usage statistics.")
+    static class CostCmd implements Runnable {
+
+        @Option(names = {"-d", "--days"}, description = "Number of days to show (default: 30)")
+        int days = 30;
+
+        @Option(names = {"-s", "--session"}, description = "Show cost for specific session")
+        String sessionId;
+
+        @Override
+        public void run() {
+            ConfigSchema.Config config = ConfigIO.loadConfig(null);
+            Path workspace = config.getWorkspacePath();
+            Path sessionsDir = workspace.resolve("sessions");
+
+            if (!Files.exists(sessionsDir)) {
+                System.out.println("No sessions found.");
+                return;
+            }
+
+            if (sessionId != null && !sessionId.isBlank()) {
+                // Show specific session cost
+                Path sessionFile = sessionsDir.resolve(sessionId.replace(":", "_") + ".jsonl");
+                if (!Files.exists(sessionFile)) {
+                    System.out.println("Session not found: " + sessionId);
+                    return;
+                }
+
+                SessionCostUsage.SessionCostSummary summary = SessionCostUsage.loadSessionCostSummary(sessionFile);
+                if (summary == null) {
+                    System.out.println("Failed to load session cost.");
+                    return;
+                }
+
+                System.out.println("\n🐈 Session Cost Summary: " + sessionId + "\n");
+                System.out.println("Messages: " + summary.messageCounts().total() +
+                        " (user: " + summary.messageCounts().user() +
+                        ", assistant: " + summary.messageCounts().assistant() + ")");
+                System.out.println("Tool calls: " + summary.messageCounts().toolCalls());
+                
+                if (summary.totals() != null) {
+                    System.out.println("\nToken Usage:");
+                    System.out.println("  Input: " + formatNumber(summary.totals().input()));
+                    System.out.println("  Output: " + formatNumber(summary.totals().output()));
+                    System.out.println("  Cache Read: " + formatNumber(summary.totals().cacheRead()));
+                    System.out.println("  Cache Write: " + formatNumber(summary.totals().cacheWrite()));
+                    System.out.println("  Total: " + formatNumber(summary.totals().totalTokens()));
+                }
+
+                if (summary.latency() != null) {
+                    System.out.println("\nLatency:");
+                    System.out.println("  Avg: " + formatMs(summary.latency().avgMs()));
+                    System.out.println("  P95: " + formatMs(summary.latency().p95Ms()));
+                    System.out.println("  Min: " + formatMs(summary.latency().minMs()));
+                    System.out.println("  Max: " + formatMs(summary.latency().maxMs()));
+                }
+
+                if (summary.toolUsage() != null) {
+                    System.out.println("\nTop Tools:");
+                    summary.toolUsage().tools().stream()
+                            .limit(5)
+                            .forEach(t -> System.out.println("  " + t.name() + ": " + t.count()));
+                }
+                System.out.println();
+                return;
+            }
+
+            // Show overall cost summary
+            long endMs = System.currentTimeMillis();
+            long startMs = endMs - (days * 24L * 60 * 60 * 1000);
+
+            SessionCostUsage.CostUsageSummary summary = SessionCostUsage.loadCostUsageSummary(sessionsDir, startMs, endMs);
+
+            System.out.println("\n🐈 Cost & Usage Summary (Last " + days + " days)\n");
+
+            if (summary.totals() != null) {
+                System.out.println("Total Tokens: " + formatNumber(summary.totals().totalTokens()));
+                System.out.println("  Input: " + formatNumber(summary.totals().input()));
+                System.out.println("  Output: " + formatNumber(summary.totals().output()));
+                System.out.println("  Cache Read: " + formatNumber(summary.totals().cacheRead()));
+                System.out.println("  Cache Write: " + formatNumber(summary.totals().cacheWrite()));
+                if (summary.totals().totalCost() > 0) {
+                    System.out.println("Total Cost: $" + String.format("%.4f", summary.totals().totalCost()));
+                }
+            }
+
+            if (!summary.daily().isEmpty()) {
+                System.out.println("\nDaily Usage:");
+                System.out.println("  Date       | Tokens");
+                System.out.println("  -----------|--------");
+                summary.daily().stream()
+                        .limit(10)
+                        .forEach(d -> System.out.println("  " + d.date() + " | " + formatNumber(d.totals().totalTokens())));
+            }
+            System.out.println();
+        }
+
+        private String formatNumber(int n) {
+            if (n >= 1_000_000) return String.format("%.1fM", n / 1_000_000.0);
+            if (n >= 1_000) return String.format("%.1fK", n / 1_000.0);
+            return String.valueOf(n);
+        }
+
+        private String formatMs(long ms) {
+            if (ms >= 60_000) return String.format("%.1fm", ms / 60_000.0);
+            if (ms >= 1000) return String.format("%.1fs", ms / 1000.0);
+            return ms + "ms";
+        }
+    }
+
+    @Command(name = "completion", description = "Generate shell completion script.")
+    static class CompletionCmdWrapper implements Runnable {
+        @Override
+        public void run() {
+            new CompletionCmd().run();
+        }
+    }
+
+    @Command(name = "service", description = "管理守护进程服务",
+            subcommands = {
+                    ServiceCmd.Install.class,
+                    ServiceCmd.Uninstall.class,
+                    ServiceCmd.Start.class,
+                    ServiceCmd.Stop.class,
+                    ServiceCmd.Restart.class,
+                    ServiceCmd.Status.class
+            })
+    static class ServiceCmd implements Runnable {
+        @Override
+        public void run() {
+            throw new ParameterException(new CommandLine(this), "缺少 service 子命令");
+        }
+
+        @Command(name = "install", description = "安装守护进程服务")
+        static class Install implements Runnable {
+
+            @Option(names = {"-p", "--port"}, description = "Gateway 端口")
+            int port = 18790;
+
+            @Option(names = {"-w", "--workspace"}, description = "工作空间目录")
+            String workspace;
+
+            @Option(names = {"--start"}, description = "安装后立即启动")
+            boolean start = false;
+
+            @Override
+            public void run() {
+                try {
+                    daemon.DaemonService service = daemon.DaemonServiceFactory.create();
+                    daemon.DaemonService.ServiceConfig config = new daemon.DaemonService.ServiceConfig(port, workspace);
+
+                    System.out.println("正在安装 " + service.getLabel() + " 服务...");
+
+                    daemon.DaemonService.ServiceResult result = service.install(config);
+                    System.out.println(result.message() != null ? result.message() : result.error());
+
+                    if (start && result.success()) {
+                        System.out.println("正在启动服务...");
+                        daemon.DaemonService.ServiceResult startResult = service.start();
+                        System.out.println(startResult.message() != null ? startResult.message() : startResult.error());
+                    }
+
+                } catch (UnsupportedOperationException e) {
+                    System.err.println("错误: " + e.getMessage());
+                    System.err.println("当前仅支持 Linux (systemd)、macOS (launchd) 和 Windows (计划任务)");
+                } catch (Exception e) {
+                    System.err.println("安装服务失败: " + e.getMessage());
+                }
+            }
+        }
+
+        @Command(name = "uninstall", description = "卸载守护进程服务")
+        static class Uninstall implements Runnable {
+            @Override
+            public void run() {
+                try {
+                    daemon.DaemonService service = daemon.DaemonServiceFactory.create();
+
+                    System.out.println("正在卸载 " + service.getLabel() + " 服务...");
+
+                    daemon.DaemonService.ServiceResult result = service.uninstall();
+                    System.out.println(result.message() != null ? result.message() : result.error());
+
+                } catch (UnsupportedOperationException e) {
+                    System.err.println("错误: " + e.getMessage());
+                } catch (Exception e) {
+                    System.err.println("卸载服务失败: " + e.getMessage());
+                }
+            }
+        }
+
+        @Command(name = "start", description = "启动守护进程服务")
+        static class Start implements Runnable {
+            @Override
+            public void run() {
+                try {
+                    daemon.DaemonService service = daemon.DaemonServiceFactory.create();
+
+                    daemon.DaemonService.ServiceResult result = service.start();
+                    System.out.println(result.message() != null ? result.message() : result.error());
+
+                } catch (UnsupportedOperationException e) {
+                    System.err.println("错误: " + e.getMessage());
+                } catch (Exception e) {
+                    System.err.println("启动服务失败: " + e.getMessage());
+                }
+            }
+        }
+
+        @Command(name = "stop", description = "停止守护进程服务")
+        static class Stop implements Runnable {
+            @Override
+            public void run() {
+                try {
+                    daemon.DaemonService service = daemon.DaemonServiceFactory.create();
+
+                    daemon.DaemonService.ServiceResult result = service.stop();
+                    System.out.println(result.message() != null ? result.message() : result.error());
+
+                } catch (UnsupportedOperationException e) {
+                    System.err.println("错误: " + e.getMessage());
+                } catch (Exception e) {
+                    System.err.println("停止服务失败: " + e.getMessage());
+                }
+            }
+        }
+
+        @Command(name = "restart", description = "重启守护进程服务")
+        static class Restart implements Runnable {
+            @Override
+            public void run() {
+                try {
+                    daemon.DaemonService service = daemon.DaemonServiceFactory.create();
+
+                    daemon.DaemonService.ServiceResult result = service.restart();
+                    System.out.println(result.message() != null ? result.message() : result.error());
+
+                } catch (UnsupportedOperationException e) {
+                    System.err.println("错误: " + e.getMessage());
+                } catch (Exception e) {
+                    System.err.println("重启服务失败: " + e.getMessage());
+                }
+            }
+        }
+
+        @Command(name = "status", description = "查看服务状态")
+        static class Status implements Runnable {
+            @Override
+            public void run() {
+                try {
+                    daemon.DaemonService service = daemon.DaemonServiceFactory.create();
+                    daemon.DaemonService.ServiceStatus status = service.status();
+
+                    System.out.println();
+                    System.out.println("🐈 nanobot 服务状态");
+                    System.out.println();
+                    System.out.println("平台: " + daemon.DaemonServiceFactory.getCurrentPlatform() + " (" + service.getLabel() + ")");
+                    System.out.println("安装: " + (status.installed() ? "✓ 已安装" : "✗ 未安装"));
+                    System.out.println("状态: " + status.statusText());
+
+                    if (status.pid() != null) {
+                        System.out.println("PID: " + status.pid());
+                    }
+
+                    if (status.logPath() != null) {
+                        System.out.println("日志: " + status.logPath());
+                    }
+
+                    System.out.println();
+
+                } catch (UnsupportedOperationException e) {
+                    System.err.println("错误: " + e.getMessage());
+                } catch (Exception e) {
+                    System.err.println("获取状态失败: " + e.getMessage());
+                }
             }
         }
     }

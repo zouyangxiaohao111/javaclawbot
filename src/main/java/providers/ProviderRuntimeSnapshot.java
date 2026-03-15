@@ -1,9 +1,5 @@
 package providers;
 
-import providers.startegy.FallbackStrategy;
-
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Objects;
 
 /**
@@ -12,33 +8,16 @@ import java.util.Objects;
  * 设计思想：
  * - 每次配置变化时，不修改旧 provider，而是创建一套新的不可变快照
  * - 一次 chat 请求始终绑定同一个 snapshot，保证配置一致性
+ * - 委托 ModelFallbackManager.FallbackChain 管理 fallback 逻辑
  */
 public final class ProviderRuntimeSnapshot {
 
     private final long version;
-    private final String model;
-    private final String primaryProviderName;
-    private final LLMProvider primary;
-    private final List<NamedProvider> fallbacks;
-    private final FallbackStrategy fallbackStrategy;
-    private final int maxAttempts;
+    private final ModelFallbackManager.FallbackChain fallbackChain;
 
-    public ProviderRuntimeSnapshot(
-            long version,
-            String model,
-            String primaryProviderName,
-            LLMProvider primary,
-            List<NamedProvider> fallbacks,
-            FallbackStrategy fallbackStrategy,
-            int maxAttempts
-    ) {
+    public ProviderRuntimeSnapshot(long version, ModelFallbackManager.FallbackChain fallbackChain) {
         this.version = version;
-        this.model = model;
-        this.primaryProviderName = primaryProviderName;
-        this.primary = Objects.requireNonNull(primary, "primary");
-        this.fallbacks = (fallbacks != null) ? List.copyOf(fallbacks) : List.of();
-        this.fallbackStrategy = Objects.requireNonNull(fallbackStrategy, "fallbackStrategy");
-        this.maxAttempts = Math.max(1, maxAttempts);
+        this.fallbackChain = Objects.requireNonNull(fallbackChain, "fallbackChain");
     }
 
     public long getVersion() {
@@ -46,67 +25,50 @@ public final class ProviderRuntimeSnapshot {
     }
 
     public String getModel() {
-        return model;
+        return fallbackChain.getPrimaryModel();
     }
 
     public String getPrimaryProviderName() {
-        return primaryProviderName;
+        return fallbackChain.getPrimaryProviderName();
     }
 
     public LLMProvider getPrimary() {
-        return primary;
+        return fallbackChain.getPrimary();
     }
 
-    public List<NamedProvider> getFallbacks() {
-        return fallbacks;
+    public ModelFallbackManager.FallbackChain getFallbackChain() {
+        return fallbackChain;
     }
 
-    public FallbackStrategy getFallbackStrategy() {
-        return fallbackStrategy;
+    /**
+     * 兼容旧 API
+     */
+    @Deprecated
+    public java.util.List<ModelFallbackManager.NamedProvider> getFallbacks() {
+        return fallbackChain.getFallbacks();
     }
 
+    /**
+     * 兼容旧 API
+     */
+    @Deprecated
+    public providers.startegy.FallbackStrategy getFallbackStrategy() {
+        return fallbackChain.getStrategy();
+    }
+
+    /**
+     * 兼容旧 API
+     */
+    @Deprecated
     public int getMaxAttempts() {
-        return maxAttempts;
+        return fallbackChain.getMaxAttempts();
     }
 
     /**
-     * 返回完整 provider/model 链：
-     * primary 在第一个，后面依次为 fallback 节点
+     * 兼容旧 API：返回完整 provider/model 链
      */
-    public List<NamedProvider> fullChain() {
-        List<NamedProvider> chain = new ArrayList<>();
-        chain.add(new NamedProvider(primaryProviderName, model, primary));
-        chain.addAll(fallbacks);
-        return chain;
-    }
-
-    /**
-     * 带名称 + 模型 的 provider 节点
-     *
-     * 一个节点代表一次可执行的 LLM 调用目标：
-     * (providerName, model, providerInstance)
-     */
-    public static final class NamedProvider {
-        private final String name;
-        private final String model;
-        private final LLMProvider provider;
-
-        public NamedProvider(String name, String model, LLMProvider provider) {
-            this.name = name;
-            this.model = model;
-            this.provider = provider;
-        }
-
-        public String getName() {
-            return name;
-        }
-
-        public String getModel() {
-            return model;
-        }
-
-        public LLMProvider getProvider() {
-            return provider;
-        }
+    @Deprecated
+    public java.util.List<ModelFallbackManager.NamedProvider> fullChain() {
+        return fallbackChain.fullChain();
     }
 }

@@ -29,7 +29,7 @@ public class ContextBuilder {
 
     /** 启动引导文件（从工作区读取） */
     public static final List<String> BOOTSTRAP_FILES = List.of(
-            "AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md", "IDENTITY.md"
+            "AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md", "IDENTITY.md", "HEARTBEAT.md", "BOOTSTRAP.md"
     );
 
     /** 运行时元信息标签（仅元数据，不是指令） */
@@ -193,6 +193,7 @@ public class ContextBuilder {
      */
     private String loadBootstrapFiles() {
         List<String> parts = new ArrayList<>();
+        boolean hasSoulFile = false;
 
         for (String filename : BOOTSTRAP_FILES) {
             Path filePath = workspace.resolve(filename);
@@ -201,10 +202,18 @@ public class ContextBuilder {
                 try {
                     String content = Files.readString(filePath);
                     parts.add("## " + filename + "\n\n" + content);
+                    if (filename.equals("SOUL.md")) {
+                        hasSoulFile = true;
+                    }
                 } catch (IOException ignored) {
                     // 读取失败则跳过
                 }
             }
+        }
+
+        // 对齐 OpenClaw：如果 SOUL.md 存在，添加特殊提示
+        if (hasSoulFile) {
+            parts.add(0, "If SOUL.md is present, embody its persona and tone. Avoid stiff, generic replies; follow its guidance unless higher-priority instructions override it.");
         }
 
         return parts.isEmpty() ? "" : String.join("\n\n", parts);
