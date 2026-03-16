@@ -7,6 +7,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * 上下文窗口发现
@@ -32,7 +33,7 @@ public class ContextWindowDiscovery {
     public static final int ANTHROPIC_CONTEXT_1M_TOKENS = 1_048_576;
 
     /** 默认上下文窗口（4K） */
-    public static final int DEFAULT_CONTEXT_WINDOW = 4096;
+    public static final int DEFAULT_CONTEXT_WINDOW = 64000;
 
     /** 模型上下文窗口缓存 */
     private static final Map<String, Integer> MODEL_CACHE = new ConcurrentHashMap<>();
@@ -43,14 +44,16 @@ public class ContextWindowDiscovery {
     /**
      * 初始化上下文窗口缓存
      */
-    public static synchronized void initialize() {
+    public static synchronized void initialize(ConfigSchema.Config currentConfig) {
         if (initialized) {
             return;
         }
 
         try {
-            ConfigSchema.Config config = ConfigIO.loadConfig(null);
-            if (config != null) {
+            if (currentConfig != null) {
+                applyConfiguredContextWindows(currentConfig);
+            }else {
+                ConfigSchema.Config config = ConfigIO.loadConfig(null);
                 applyConfiguredContextWindows(config);
             }
             initialized = true;
@@ -73,22 +76,12 @@ public class ContextWindowDiscovery {
 
         // 确保已初始化
         if (!initialized) {
-            initialize();
+            initialize(null);
         }
 
         return MODEL_CACHE.get(modelId);
     }
 
-    /**
-     * 解析模型的上下文 token 数
-     *
-     * @param provider 提供商
-     * @param model     模型 ID
-     * @return 上下文窗口大小
-     */
-    public static int resolveContextTokensForModel(String provider, String model) {
-        return resolveContextTokensForModel(provider, model, null, DEFAULT_CONTEXT_WINDOW);
-    }
 
     /**
      * 解析模型的上下文 token 数
@@ -103,7 +96,7 @@ public class ContextWindowDiscovery {
             String provider,
             String model,
             Integer contextTokensOverride,
-            Integer fallback
+            Integer fallback, ConfigSchema.Config currentConfig
     ) {
         // 优先使用覆盖值
         if (contextTokensOverride != null && contextTokensOverride > 0) {
@@ -112,11 +105,11 @@ public class ContextWindowDiscovery {
 
         // 确保已初始化
         if (!initialized) {
-            initialize();
+            initialize(currentConfig);
         }
 
         // 解析提供商/模型引用
-        ProviderModelRef ref = resolveProviderModelRef(provider, model);
+        ProviderModelRef ref = resolveProviderModelRef(provider, model, currentConfig);
         if (ref != null) {
             // 检查 Anthropic 1M 模型
             if (isAnthropic1MModel(ref.provider, ref.model)) {
@@ -125,7 +118,7 @@ public class ContextWindowDiscovery {
 
             // 尝试从配置直接查找
             if (provider != null && !provider.isBlank()) {
-                Integer configured = resolveConfiguredProviderContextWindow(ref.provider, ref.model);
+                Integer configured = resolveConfiguredProviderContextWindow(ref.provider, ref.model, currentConfig);
                 if (configured != null) {
                     return configured;
                 }
@@ -214,16 +207,22 @@ public class ContextWindowDiscovery {
     /**
      * 从配置中解析提供商的模型上下文窗口
      */
-    private static Integer resolveConfiguredProviderContextWindow(String provider, String model) {
-        // 这里需要根据实际的配置结构来解析
-        // 暂时返回 null，使用缓存中的值
-        return null;
+    private static Integer resolveConfiguredProviderContextWindow(String provider, String model, ConfigSchema.Config config) {
+        ConfigSchema.ProviderConfig providerConfig = config.getProviders().getByName(normalizeProviderId(provider));
+        AtomicInteger contextWindow = new AtomicInteger(8192);
+        for (ConfigSchema.ModelConfig modelConfig : providerConfig.getModelConfigs()) {
+            if (modelConfig.getName().equals(model)) {
+                contextWindow.set(modelConfig.getMaxTokens());
+                return contextWindow.get();
+            }
+        }
+        return contextWindow.get();
     }
 
     /**
      * 解析提供商/模型引用
      */
-    private static ProviderModelRef resolveProviderModelRef(String provider, String model) {
+    private static ProviderModelRef resolveProviderModelRef(String provider, String model, ConfigSchema.Config currentConfig) {
         if (model == null || model.isBlank()) {
             return null;
         }

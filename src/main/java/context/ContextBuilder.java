@@ -1,5 +1,6 @@
 package context;
 
+import config.ConfigSchema;
 import memory.MemoryStore;
 import skills.SkillsLoader;
 
@@ -28,7 +29,8 @@ import java.util.*;
  */
 public class ContextBuilder {
 
-    /** 启动引导文件（从工作区读取） */
+    /** 启动引导文件（从工作区读取）- 保留向后兼容 */
+    @Deprecated
     public static final List<String> BOOTSTRAP_FILES = List.of(
             "AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md", "IDENTITY.md", "HEARTBEAT.md", "BOOTSTRAP.md"
     );
@@ -39,11 +41,26 @@ public class ContextBuilder {
     private final Path workspace;
     private final MemoryStore memory;
     private final SkillsLoader skills;
+    private final BootstrapLoader bootstrapLoader;
+    private final BootstrapConfig bootstrapConfig;
 
     public ContextBuilder(Path workspace) {
+        this(workspace, null, null);
+    }
+
+    /**
+     * 构造函数（支持配置）
+     *
+     * @param workspace       工作区路径
+     * @param bootstrapConfig Bootstrap 配置（可为 null，使用默认值）
+     * @param warnHandler     警告处理器（可为 null）
+     */
+    public ContextBuilder(Path workspace, BootstrapConfig bootstrapConfig, java.util.function.Consumer<String> warnHandler) {
         this.workspace = Objects.requireNonNull(workspace, "workspace");
         this.memory = new MemoryStore(workspace);
         this.skills = new SkillsLoader(workspace);
+        this.bootstrapConfig = bootstrapConfig != null ? bootstrapConfig : new BootstrapConfig();
+        this.bootstrapLoader = new BootstrapLoader(workspace, this.bootstrapConfig, warnHandler);
     }
 
     /**
@@ -53,10 +70,26 @@ public class ContextBuilder {
      * @return 系统提示词文本
      */
     public String buildSystemPrompt(List<String> skillNames) {
+        return buildSystemPrompt(skillNames, null);
+    }
+
+    /**
+     * 构建系统提示词（支持指定运行类型）
+     *
+     * @param skillNames 预留参数
+     * @param runKind    运行类型（default/heartbeat/cron）
+     * @return 系统提示词文本
+     */
+    public String buildSystemPrompt(List<String> skillNames, BootstrapConfig.RunKind runKind) {
         List<String> parts = new ArrayList<>();
         parts.add(getIdentity());
 
-        String bootstrap = loadBootstrapFiles();
+        // 使用新的 BootstrapLoader
+        if (runKind != null) {
+            bootstrapConfig.setRunKind(runKind);
+        }
+        List<BootstrapFile> bootstrapFiles = bootstrapLoader.resolveBootstrapFiles();
+        String bootstrap = bootstrapLoader.buildProjectContext(bootstrapFiles);
         if (bootstrap != null && !bootstrap.isBlank()) {
             parts.add(bootstrap);
         }
@@ -81,14 +114,7 @@ public class ContextBuilder {
                    - 文件保留在磁盘上
                 """);
 
-        List<String> alwaysSkills = skills.getAlwaysSkills();
-        if (alwaysSkills != null && !alwaysSkills.isEmpty()) {
-            String alwaysContent = skills.loadSkillsForContext(alwaysSkills);
-            if (alwaysContent != null && !alwaysContent.isBlank()) {
-                parts.add("# 活跃技能\n\n" + alwaysContent);
-            }
-        }
-
+        // 技能总览
         String skillsSummary = skills.buildSkillsSummary();
         if (skillsSummary != null && !skillsSummary.isBlank()) {
             parts.add(
@@ -106,10 +132,27 @@ public class ContextBuilder {
                                 7. 当任务需要实际使用技能时，不要仅凭索引摘要或近似判断。
                 
                                 available="false" 的技能需要先安装依赖 - 可以尝试用 apt/brew 安装。
-                                           """ +
-                            skillsSummary
+                     """ + skillsSummary
             );
         }
+
+        List<String> alwaysSkills = skills.getAlwaysSkills();
+        if (alwaysSkills != null && !alwaysSkills.isEmpty()) {
+            // 加载常驻技能
+            String alwaysContent = skills.loadSkillsForContext(alwaysSkills);
+
+            if (alwaysContent != null && !alwaysContent.isBlank()) {
+                parts.add("## 活跃技能\n\n" + alwaysContent);
+            }
+
+            // 加载用户指定技能
+            String userAppointSkills = skills.loadUserAppointSkill();
+            if (userAppointSkills != null && !userAppointSkills.isBlank()) {
+                parts.add("\n\n" + userAppointSkills);
+            }
+        }
+
+
 
         return String.join("\n\n---\n\n", parts);
     }
@@ -188,10 +231,11 @@ public class ContextBuilder {
     /**
      * 从工作区读取引导文件，按顺序拼接
      *
-     * 注意：
-     * - Python：只判断 exists，然后直接 read_text；读取失败会抛异常（但通常文件可读）
-     * - Java：为了稳健，读取异常时跳过，不中断（整体效果更容错）
+     * 注意：此方法已废弃，请使用 BootstrapLoader
+     *
+     * @deprecated 使用 {@link BootstrapLoader#resolveBootstrapFiles()} 和 {@link BootstrapLoader#buildProjectContext(List)} 代替
      */
+    @Deprecated
     private String loadBootstrapFiles() {
         List<String> parts = new ArrayList<>();
         boolean hasSoulFile = false;
@@ -212,12 +256,22 @@ public class ContextBuilder {
             }
         }
 
-        // 对齐 OpenClaw：如果 SOUL.md 存在，添加特殊提示
-        if (hasSoulFile) {
-            parts.add(0, "如果存在 SOUL.md，请体现其中的人格和语气。避免生硬、通用的回复；除非更高优先级的指令覆盖，否则遵循其指导。");
+        if (parts.isEmpty()) {
+            return "";
         }
 
-        return parts.isEmpty() ? "" : String.join("\n\n", parts);
+        // 对齐 OpenClaw：添加 # Project Context 标题和引导性说明
+        List<String> result = new ArrayList<>();
+        result.add("# Project Context");
+        result.add("");
+        result.add("The following project context files have been loaded:");
+        if (hasSoulFile) {
+            result.add("If SOUL.md is present, embody its persona and tone. Avoid stiff, generic replies; follow its guidance unless higher-priority instructions override it.");
+        }
+        result.add("");
+        result.addAll(parts);
+
+        return String.join("\n", result);
     }
 
     /**

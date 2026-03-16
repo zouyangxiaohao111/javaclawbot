@@ -13,10 +13,11 @@ import java.util.*;
  * - 关键词搜索（全文搜索）
  * - 混合搜索（结合向量和关键词）
  * - grep 搜索（历史日志搜索）
+ * - 文件读取（安全读取记忆文件）
  */
-public class MemorySearchTool {
+public class MemorySearch {
 
-    private static final Logger log = LoggerFactory.getLogger(MemorySearchTool.class);
+    private static final Logger log = LoggerFactory.getLogger(MemorySearch.class);
 
     // ==================== 配置 ====================
 
@@ -47,9 +48,15 @@ public class MemorySearchTool {
     /** 混合搜索配置 */
     private MemoryHybridSearch.HybridConfig hybridConfig = new MemoryHybridSearch.HybridConfig();
 
+    /** 搜索来源（"memory" 和/或 "sessions"） */
+    private Set<String> sources = new HashSet<>(Arrays.asList("memory"));
+
+    /** 会话目录（可选） */
+    private Path sessionsDir;
+
     // ==================== 构造函数 ====================
 
-    public MemorySearchTool(Path workspaceDir) {
+    public MemorySearch(Path workspaceDir) {
         this.workspaceDir = Objects.requireNonNull(workspaceDir, "工作目录不能为空");
     }
 
@@ -161,6 +168,72 @@ public class MemorySearchTool {
     }
 
     /**
+     * 读取记忆文件内容
+     *
+     * @param relPath 相对路径（如 "MEMORY.md" 或 "memory/MEMORY.md"）
+     * @param from    起始行号（可选，从 1 开始）
+     * @param lines   读取行数（可选）
+     * @return 文件内容结果
+     */
+    public ReadFileResult readFile(String relPath, Integer from, Integer lines) throws Exception {
+        // 规范化路径
+        Path memoryDir = workspaceDir.resolve("memory");
+        Path targetFile;
+
+        if (relPath.equals("MEMORY.md") || relPath.equals("memory/MEMORY.md")) {
+            targetFile = memoryDir.resolve("MEMORY.md");
+        } else if (relPath.equals("HISTORY.md") || relPath.equals("memory/HISTORY.md")) {
+            targetFile = memoryDir.resolve("HISTORY.md");
+        } else {
+            // 其他文件，在 memory 目录下查找
+            if (relPath.startsWith("memory/")) {
+                targetFile = workspaceDir.resolve(relPath);
+            } else {
+                targetFile = memoryDir.resolve(relPath);
+            }
+        }
+
+        // 安全检查：确保文件在工作目录内
+        Path normalizedTarget = targetFile.normalize();
+        Path normalizedWorkspace = workspaceDir.normalize();
+        if (!normalizedTarget.startsWith(normalizedWorkspace)) {
+            throw new SecurityException("路径超出工作目录范围: " + relPath);
+        }
+
+        // 检查文件是否存在
+        if (!Files.exists(normalizedTarget)) {
+            return new ReadFileResult(relPath, "", false, "文件不存在: " + relPath);
+        }
+
+        // 读取文件内容
+        try {
+            List<String> allLines = Files.readAllLines(normalizedTarget);
+            int totalLines = allLines.size();
+
+            // 计算起始和结束行
+            int startLine = (from != null && from > 0) ? from - 1 : 0; // 转换为 0-based
+            int endLine = totalLines;
+
+            if (lines != null && lines > 0) {
+                endLine = Math.min(startLine + lines, totalLines);
+            }
+
+            // 提取指定行
+            List<String> selectedLines = allLines.subList(
+                Math.max(0, startLine),
+                Math.min(endLine, totalLines)
+            );
+
+            String text = String.join("\n", selectedLines);
+            return new ReadFileResult(relPath, text, true, null);
+
+        } catch (Exception e) {
+            log.error("读取记忆文件失败: {}", relPath, e);
+            return new ReadFileResult(relPath, "", false, "读取失败: " + e.getMessage());
+        }
+    }
+
+    /**
      * 同步索引
      */
     public void sync() throws Exception {
@@ -242,6 +315,30 @@ public class MemorySearchTool {
         }
     }
 
+    /**
+     * 设置搜索来源
+     *
+     * @param sources 来源集合（"memory" 和/或 "sessions"）
+     */
+    public void setSources(Set<String> sources) {
+        this.sources = sources != null ? new HashSet<>(sources) : new HashSet<>(Arrays.asList("memory"));
+        if (indexManager != null) {
+            indexManager.setSources(this.sources);
+        }
+    }
+
+    /**
+     * 设置会话目录
+     *
+     * @param sessionsDir 会话目录路径
+     */
+    public void setSessionsDir(Path sessionsDir) {
+        this.sessionsDir = sessionsDir;
+        if (indexManager != null) {
+            indexManager.setSessionsDir(sessionsDir);
+        }
+    }
+
     // ==================== 关闭 ====================
 
     public void close() {
@@ -297,6 +394,30 @@ public class MemorySearchTool {
         public String toString() {
             return String.format("SearchResult{path='%s', lines=%d-%d, score=%.3f, source='%s'}",
                     path, startLine, endLine, score, source);
+        }
+    }
+
+    /**
+     * 读取文件结果
+     */
+    public static class ReadFileResult {
+        /** 文件路径 */
+        public final String path;
+
+        /** 文件内容 */
+        public final String text;
+
+        /** 是否成功 */
+        public final boolean success;
+
+        /** 错误信息 */
+        public final String error;
+
+        public ReadFileResult(String path, String text, boolean success, String error) {
+            this.path = path;
+            this.text = text;
+            this.success = success;
+            this.error = error;
         }
     }
 }

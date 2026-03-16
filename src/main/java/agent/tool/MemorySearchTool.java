@@ -2,7 +2,6 @@ package agent.tool;
 
 import memory.*;
 import org.slf4j.*;
-import session.SessionManager;
 
 import java.nio.file.*;
 import java.util.*;
@@ -31,14 +30,25 @@ public class MemorySearchTool extends Tool {
     // ==================== 配置 ====================
 
     private final Path workspaceDir;
-    private final SessionManager sessionManager;
-    private memory.MemorySearchTool searchTool;
+    private final Path sessionsDir;
+    private MemorySearch searchTool;
 
     // ==================== 构造函数 ====================
 
-    public MemorySearchTool(Path workspaceDir, SessionManager sessionManager) {
+    public MemorySearchTool(Path workspaceDir) {
         this.workspaceDir = Objects.requireNonNull(workspaceDir, "工作目录不能为空");
-        this.sessionManager = sessionManager;
+        this.sessionsDir = workspaceDir.resolve("sessions");
+    }
+
+    /**
+     * 创建带会话目录的工具
+     *
+     * @param workspaceDir 工作目录
+     * @param sessionsDir  会话目录
+     */
+    public MemorySearchTool(Path workspaceDir, Path sessionsDir) {
+        this.workspaceDir = Objects.requireNonNull(workspaceDir, "工作目录不能为空");
+        this.sessionsDir = sessionsDir;
     }
 
     // ==================== 实现接口 ====================
@@ -133,7 +143,7 @@ public class MemorySearchTool extends Tool {
                 ensureInitialized();
 
                 // 执行搜索
-                List<memory.MemorySearchTool.SearchResult> results = searchTool.search(query, maxResults, minScore);
+                List<MemorySearch.SearchResult> results = searchTool.search(query, maxResults, minScore);
 
                 // 构建结果
                 if (results.isEmpty()) {
@@ -144,7 +154,7 @@ public class MemorySearchTool extends Tool {
                 sb.append("找到 ").append(results.size()).append(" 条相关记忆：\n\n");
 
                 for (int i = 0; i < results.size(); i++) {
-                    memory.MemorySearchTool.SearchResult r = results.get(i);
+                    MemorySearch.SearchResult r = results.get(i);
                     sb.append("### 结果 ").append(i + 1).append("\n");
                     sb.append("- 文件: ").append(r.path).append("\n");
                     sb.append("- 行号: ").append(r.startLine).append("-").append(r.endLine).append("\n");
@@ -166,7 +176,13 @@ public class MemorySearchTool extends Tool {
 
     private void ensureInitialized() throws Exception {
         if (searchTool == null) {
-            searchTool = new memory.MemorySearchTool(workspaceDir);
+            searchTool = new MemorySearch(workspaceDir);
+
+            // 设置会话目录（如果存在）
+            if (sessionsDir != null && java.nio.file.Files.exists(sessionsDir)) {
+                searchTool.setSessionsDir(sessionsDir);
+                searchTool.setSources(new HashSet<>(Arrays.asList("memory", "sessions")));
+            }
 
             // 不设置嵌入提供者，降级为纯关键词搜索
             // 只有在配置了 API Key 时才使用真实的嵌入提供者

@@ -10,40 +10,35 @@ import providers.ProviderCatalog;
 import utils.Helpers;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * Onboard 向导
- * 
- * 对齐 OpenClaw 的 onboarding.ts 功能：
- * - 安全警告确认
- * - 模式选择（quickstart/advanced）
- * - 配置处理（keep/modify/reset）
- * - 提供商配置
- * - 备用模型配置（nanobot 特有，保留）
- * - 技能安装
- * - 工作空间模板
- * - Shell 补全提示
- */
 public final class OnboardWizard {
 
     /** 向导模式 */
     public enum WizardFlow {
-        QUICKSTART,  // 快速开始，使用默认值
-        ADVANCED     // 高级模式，手动配置所有选项
+        QUICKSTART,
+        ADVANCED
     }
 
     /** 配置处理方式 */
     public enum ConfigAction {
-        KEEP,      // 保留现有配置
-        MODIFY,    // 修改配置
-        RESET      // 重置配置
+        KEEP,
+        MODIFY,
+        RESET
     }
 
-    private WizardFlow flow = WizardFlow.QUICKSTART;
+    /**
+     * 注意：
+     * 这里不能默认 QUICKSTART，否则永远不会进入 selectWizardFlow()
+     */
+    private WizardFlow flow = null;
+
+    /** 是否已通过命令行接受风险确认 */
     private boolean acceptRisk = false;
 
     public void run() {
@@ -52,7 +47,6 @@ public final class OnboardWizard {
 
     /**
      * 运行向导
-     * @param args 命令行参数
      */
     public void run(String[] args) {
         parseArgs(args);
@@ -60,8 +54,7 @@ public final class OnboardWizard {
         Path configPath = ConfigIO.getConfigPath();
         ConfigAction configAction = ConfigAction.KEEP;
 
-        // ========== 安全警告确认 ==========
-        // 对齐 OpenClaw 的 requireRiskAcknowledgement
+        // 1) 风险确认
         if (!acceptRisk) {
             if (!showRiskAcknowledgement()) {
                 System.out.println("已取消配置向导。");
@@ -69,21 +62,25 @@ public final class OnboardWizard {
             }
         }
 
-        // ========== 模式选择 ==========
-        // 对齐 OpenClaw 的 flow 选择
+        // 2) 选择模式（仅当命令行未显式指定时）
         if (flow == null) {
             flow = selectWizardFlow();
-        }
-
-        // ========== 配置处理 ==========
-        // 对齐 OpenClaw 的 config handling
-        if (Files.exists(configPath)) {
-            configAction = handleExistingConfig(configPath);
-            if (configAction == null) {
-                return; // 用户取消
+            if (flow == null) {
+                System.out.println("已取消配置向导。");
+                return;
             }
         }
 
+        // 3) 若已存在配置，询问如何处理
+        if (Files.exists(configPath)) {
+            configAction = handleExistingConfig(configPath);
+            if (configAction == null) {
+                System.out.println("已取消配置向导。");
+                return;
+            }
+        }
+
+        // 4) 加载配置
         ConfigSchema.Config cfg;
         if (Files.exists(configPath) && configAction == ConfigAction.RESET) {
             cfg = new ConfigSchema.Config();
@@ -91,47 +88,53 @@ public final class OnboardWizard {
             cfg = ConfigIO.loadConfig(null);
         }
 
+        // 5) 设定 workspace
         Path workspace = Helpers.getWorkspacePath(null);
         cfg.setWorkspacePath(workspace);
 
-        // ========== 创建工作空间模板 ==========
-        createWorkspaceTemplates(workspace);
-
+        // 6) 进入交互
         try (Terminal terminal = TerminalBuilder.builder().system(true).build()) {
             LineReader reader = LineReaderBuilder.builder().terminal(terminal).build();
 
-            int totalSteps = flow == WizardFlow.QUICKSTART ? 2 : 3;
+            // 先创建 workspace 基础目录，但模板文件延后到配置流程后再创建
+            ensureWorkspaceStructure(workspace);
+
+            int totalSteps = (flow == WizardFlow.QUICKSTART) ? 3 : 4;
             int currentStep = 1;
 
-            // ========== 配置提供商 ==========
+            // 第 1 步：配置提供商
             System.out.println();
-            System.out.println("第一步 " + currentStep++ + "/" + totalSteps + "  配置提供商");
-            configurePrimaryProvider(terminal, reader, cfg);
+            System.out.println("第 " + currentStep + "/" + totalSteps + " 步  配置提供商");
+            currentStep++;
+            configurePrimaryProvider(terminal, reader, cfg, configAction);
 
-            // ========== 配置 Channel ==========
-            // 对齐 OpenClaw 的 setupChannels
+            // 第 2 步：配置 Channel
             System.out.println();
-            System.out.println("第" + (flow == WizardFlow.ADVANCED ? "二" : "一") + "步 " + currentStep++ + "/" + (totalSteps + 1) + "  配置 Channel");
+            System.out.println("第 " + currentStep + "/" + totalSteps + " 步  配置 Channel");
+            currentStep++;
             ChannelConfigurator.configureChannels(terminal, reader, cfg, flow == WizardFlow.ADVANCED);
 
-            // ========== 配置备用模型 ==========
-            // nanobot 特有功能，保留
+            // 第 3 步：配置备用模型（仅高级模式）
             if (flow == WizardFlow.ADVANCED) {
                 System.out.println();
-                System.out.println("第三步 " + currentStep++ + "/" + (totalSteps + 1) + "  配置备用模型");
-                System.out.println("(当主模型不可用时,自动请求备用模型)");
+                System.out.println("第 " + currentStep + "/" + totalSteps + " 步  配置备用模型");
+                System.out.println("(当主模型不可用时，自动请求备用模型)");
+                currentStep++;
                 configureFallback(terminal, reader, cfg);
             }
 
-            // ========== 配置技能 ==========
+            // 第 4 / 3 步：配置技能
             System.out.println();
-            System.out.println("第" + (flow == WizardFlow.ADVANCED ? "四" : "二") + "步 " + currentStep + "/" + (totalSteps + 1) + "  配置技能");
+            System.out.println("第 " + currentStep + "/" + totalSteps + " 步  配置技能");
             configureSkills(terminal, cfg, configAction == ConfigAction.RESET);
 
-            // ========== 保存配置 ==========
+            // 7) 配置完成后，再创建/补齐模板文件
+            createWorkspaceTemplates(workspace);
+
+            // 8) 保存配置
             ConfigIO.saveConfig(cfg, null);
 
-            // ========== 完成提示 ==========
+            // 9) 完成提示
             showCompletionMessage(configPath, workspace);
 
         } catch (Exception e) {
@@ -144,18 +147,20 @@ public final class OnboardWizard {
      * 解析命令行参数
      */
     private void parseArgs(String[] args) {
-        for (int i = 0; i < args.length; i++) {
-            switch (args[i]) {
+        for (String arg : args) {
+            switch (arg) {
                 case "--quickstart", "-q" -> flow = WizardFlow.QUICKSTART;
                 case "--advanced", "-a" -> flow = WizardFlow.ADVANCED;
                 case "--accept-risk" -> acceptRisk = true;
+                default -> {
+                    // ignore
+                }
             }
         }
     }
 
     /**
      * 显示安全警告确认
-     * 对齐 OpenClaw 的 requireRiskAcknowledgement
      */
     private boolean showRiskAcknowledgement() {
         System.out.println();
@@ -180,17 +185,19 @@ public final class OnboardWizard {
 
         try (Terminal terminal = TerminalBuilder.builder().system(true).build()) {
             LineReader reader = LineReaderBuilder.builder().terminal(terminal).build();
-            return TerminalPrompts.promptConfirm(reader, 
-                    "我理解这是个人默认设置，多用户使用需要安全加固。继续？", 
-                    false);
+            return TerminalPrompts.promptConfirm(
+                    reader,
+                    "我理解这是个人默认设置，多用户使用需要安全加固。继续？",
+                    false
+            );
         } catch (Exception e) {
+            System.err.println("风险确认失败: " + e.getMessage());
             return false;
         }
     }
 
     /**
      * 选择向导模式
-     * 对齐 OpenClaw 的 flow 选择
      */
     private WizardFlow selectWizardFlow() {
         System.out.println();
@@ -209,26 +216,28 @@ public final class OnboardWizard {
                     0,
                     false
             );
+
+            if (selected == null) {
+                return null;
+            }
             return "Advanced".equals(selected) ? WizardFlow.ADVANCED : WizardFlow.QUICKSTART;
         } catch (Exception e) {
-            return WizardFlow.QUICKSTART;
+            System.err.println("选择配置模式失败: " + e.getMessage());
+            return null;
         }
     }
 
     /**
      * 处理现有配置
-     * 对齐 OpenClaw 的 config handling
      */
     private ConfigAction handleExistingConfig(Path configPath) {
         System.out.println();
         System.out.println("检测到现有配置: " + configPath);
 
         try (Terminal terminal = TerminalBuilder.builder().system(true).build()) {
-            LineReader reader = LineReaderBuilder.builder().terminal(terminal).build();
-
             List<String> options = List.of(
                     "保留现有值",
-                    "更新配置值", 
+                    "更新配置值",
                     "重置配置"
             );
 
@@ -247,19 +256,30 @@ public final class OnboardWizard {
             if (selected.contains("重置")) return ConfigAction.RESET;
 
         } catch (Exception e) {
-            System.err.println("Failed to handle existing config: " + e.getMessage());
+            System.err.println("处理现有配置失败: " + e.getMessage());
         }
 
         return ConfigAction.KEEP;
     }
 
-    private void configurePrimaryProvider(Terminal terminal, LineReader reader, ConfigSchema.Config cfg) {
+    /**
+     * 配置主提供商
+     */
+    private void configurePrimaryProvider(
+            Terminal terminal,
+            LineReader reader,
+            ConfigSchema.Config cfg,
+            ConfigAction configAction
+    ) {
         List<ProviderCatalog.ProviderMeta> providers = ProviderCatalog.supportedProviders();
         String currentProvider = cfg.getAgents().getDefaults().getProvider();
         int defaultIndex = indexOfProvider(providers, currentProvider);
 
-        // QuickStart 模式：如果已有配置，直接使用
-        if (flow == WizardFlow.QUICKSTART && currentProvider != null && !currentProvider.isBlank()) {
+        // QuickStart + KEEP：沿用现有配置
+        if (flow == WizardFlow.QUICKSTART
+                && configAction == ConfigAction.KEEP
+                && currentProvider != null
+                && !currentProvider.isBlank()) {
             System.out.println("  使用现有提供商配置: " + currentProvider);
             return;
         }
@@ -276,29 +296,43 @@ public final class OnboardWizard {
 
         String providerName = selected.getName();
         ConfigSchema.ProviderConfig providerConfig = cfg.getProviders().getByName(providerName);
-        if (providerConfig == null) return;
+        if (providerConfig == null) {
+            System.err.println("未找到提供商配置: " + providerName);
+            return;
+        }
 
+        // API Base
         if (selected.isSupportsApiBase()) {
             String defaultBase = (providerConfig.getApiBase() != null && !providerConfig.getApiBase().isBlank())
                     ? providerConfig.getApiBase()
                     : selected.getDefaultApiBase();
-            
-            if (flow == WizardFlow.ADVANCED) {
-                providerConfig.setApiBase(TerminalPrompts.promptText(reader, "API base", defaultBase));
+
+            if (flow == WizardFlow.ADVANCED
+                    || configAction == ConfigAction.MODIFY
+                    || configAction == ConfigAction.RESET) {
+                String input = TerminalPrompts.promptText(reader, "API base", defaultBase);
+                providerConfig.setApiBase(input);
             } else if (defaultBase != null && !defaultBase.isBlank()) {
                 providerConfig.setApiBase(defaultBase);
             }
         }
 
+        // API Key
         if (selected.isSupportsApiKey()) {
             String existingKey = providerConfig.getApiKey();
-            if (flow == WizardFlow.QUICKSTART && existingKey != null && !existingKey.isBlank()) {
+
+            if (flow == WizardFlow.QUICKSTART
+                    && configAction == ConfigAction.KEEP
+                    && existingKey != null
+                    && !existingKey.isBlank()) {
                 System.out.println("  使用现有 API key");
             } else {
-                providerConfig.setApiKey(TerminalPrompts.promptSecret(reader, "API key", existingKey));
+                String apiKey = TerminalPrompts.promptSecret(reader, "API key", existingKey);
+                providerConfig.setApiKey(apiKey);
             }
         }
 
+        // 模型
         String model;
         if (selected.isManualModelOnly() || selected.getRecommendedModels().isEmpty()) {
             model = TerminalPrompts.promptText(
@@ -307,11 +341,11 @@ public final class OnboardWizard {
                     cfg.getAgents().getDefaults().getModel()
             );
         } else {
-            // 构建选项列表：推荐模型 + 手动输入选项
             List<String> modelOptions = new ArrayList<>(selected.getRecommendedModels());
             modelOptions.add("✏️ 手动输入模型名称");
-            
+
             int modelDefaultIndex = indexOfString(modelOptions, cfg.getAgents().getDefaults().getModel());
+
             String chosenModel = TerminalPrompts.singleSelect(
                     terminal,
                     modelOptions,
@@ -320,9 +354,8 @@ public final class OnboardWizard {
                     modelDefaultIndex,
                     false
             );
-            
-            if (chosenModel != null && chosenModel.equals("✏️ 手动输入模型名称")) {
-                // 用户选择手动输入
+
+            if ("✏️ 手动输入模型名称".equals(chosenModel)) {
                 model = TerminalPrompts.promptText(
                         reader,
                         "输入模型名称",
@@ -337,6 +370,9 @@ public final class OnboardWizard {
         cfg.getAgents().getDefaults().setModel(model);
     }
 
+    /**
+     * 配置备用模型
+     */
     private void configureFallback(Terminal terminal, LineReader reader, ConfigSchema.Config cfg) {
         boolean enabled = TerminalPrompts.promptConfirm(
                 reader,
@@ -419,10 +455,16 @@ public final class OnboardWizard {
         );
         try {
             int n = Integer.parseInt(maxAttemptsRaw);
-            if (n > 0) cfg.getAgents().getDefaults().getFallback().setMaxAttempts(n);
-        } catch (Exception ignored) {}
+            if (n > 0) {
+                cfg.getAgents().getDefaults().getFallback().setMaxAttempts(n);
+            }
+        } catch (Exception ignored) {
+        }
     }
 
+    /**
+     * 配置技能
+     */
     private void configureSkills(Terminal terminal, ConfigSchema.Config cfg, boolean overwrite) {
         List<BuiltinSkillsInstaller.SkillResource> builtinSkills = BuiltinSkillsInstaller.discoverBuiltinSkills();
 
@@ -431,7 +473,7 @@ public final class OnboardWizard {
             return;
         }
 
-        // QuickStart 模式：跳过技能选择，使用默认
+        // QuickStart 默认跳过技能安装
         if (flow == WizardFlow.QUICKSTART) {
             System.out.println("  跳过技能安装（可稍后使用 'nanobot skills' 安装）");
             return;
@@ -441,7 +483,7 @@ public final class OnboardWizard {
                 BuiltinSkillsInstaller.promptSelection(terminal, builtinSkills);
 
         if (selection.isSkipped()) {
-            System.out.println("跳过预构建的技能安装.");
+            System.out.println("跳过预构建的技能安装。");
             return;
         }
 
@@ -456,8 +498,7 @@ public final class OnboardWizard {
     }
 
     /**
-     * 显示完成消息
-     * 对齐 OpenClaw 的 finalizeOnboardingWizard
+     * 完成提示
      */
     private void showCompletionMessage(Path configPath, Path workspace) {
         System.out.println();
@@ -473,7 +514,7 @@ public final class OnboardWizard {
         System.out.println("───────────────────────────────────────────────────────────────");
         System.out.println("  下一步：");
         System.out.println();
-        System.out.println("  1. 确认模型配置: cat ~/.nanobot/config.json");
+        System.out.println("  1. 确认模型配置: cat " + configPath);
         System.out.println("  2. 开始对话: nanobot agent -m \"Hello!\"");
         System.out.println("  3. 查看帮助: nanobot --help");
         System.out.println();
@@ -486,7 +527,9 @@ public final class OnboardWizard {
     private int indexOfProvider(List<ProviderCatalog.ProviderMeta> providers, String providerName) {
         if (providerName == null) return 0;
         for (int i = 0; i < providers.size(); i++) {
-            if (providers.get(i).getName().equalsIgnoreCase(providerName)) return i;
+            if (providers.get(i).getName().equalsIgnoreCase(providerName)) {
+                return i;
+            }
         }
         return 0;
     }
@@ -494,47 +537,94 @@ public final class OnboardWizard {
     private int indexOfString(List<String> items, String value) {
         if (value == null) return 0;
         for (int i = 0; i < items.size(); i++) {
-            if (items.get(i).equalsIgnoreCase(value)) return i;
+            if (items.get(i).equalsIgnoreCase(value)) {
+                return i;
+            }
         }
         return 0;
     }
 
-    private static void createWorkspaceTemplates(Path workspace) {
-        try { Files.createDirectories(workspace); } catch (IOException ignored) {}
+    /**
+     * 只创建基础目录，不创建模板文件
+     */
+    private static void ensureWorkspaceStructure(Path workspace) {
+        try {
+            Files.createDirectories(workspace);
+        } catch (IOException ignored) {
+        }
 
         try {
-            Path skills = workspace.resolve("skills");
-            Files.createDirectories(skills);
-        } catch (IOException ignored) {}
+            Files.createDirectories(workspace.resolve("skills"));
+        } catch (IOException ignored) {
+        }
 
         Path memoryDir = workspace.resolve("memory");
-        try { Files.createDirectories(memoryDir); } catch (IOException ignored) {}
+        try {
+            Files.createDirectories(memoryDir);
+        } catch (IOException ignored) {
+        }
 
         Path memoryFile = memoryDir.resolve("MEMORY.md");
         if (Files.notExists(memoryFile)) {
             try {
-                Files.writeString(memoryFile, "");
-            } catch (IOException ignored) {}
+                Files.writeString(memoryFile, "", StandardCharsets.UTF_8);
+            } catch (IOException ignored) {
+            }
         }
 
         Path historyFile = memoryDir.resolve("HISTORY.md");
         if (Files.notExists(historyFile)) {
             try {
-                Files.writeString(historyFile, "");
-            } catch (IOException ignored) {}
+                Files.writeString(historyFile, "", StandardCharsets.UTF_8);
+            } catch (IOException ignored) {
+            }
+        }
+    }
+
+    /**
+     * 创建工作空间模板
+     */
+    private static void createWorkspaceTemplates(Path workspace) {
+        try {
+            Files.createDirectories(workspace);
+        } catch (IOException ignored) {
         }
 
-        // 复制模板文件到工作空间
-        // 对齐 OpenClaw 的 onboard 流程
+        try {
+            Files.createDirectories(workspace.resolve("skills"));
+        } catch (IOException ignored) {
+        }
+
+        Path memoryDir = workspace.resolve("memory");
+        try {
+            Files.createDirectories(memoryDir);
+        } catch (IOException ignored) {
+        }
+
+        Path memoryFile = memoryDir.resolve("MEMORY.md");
+        if (Files.notExists(memoryFile)) {
+            try {
+                Files.writeString(memoryFile, "", StandardCharsets.UTF_8);
+            } catch (IOException ignored) {
+            }
+        }
+
+        Path historyFile = memoryDir.resolve("HISTORY.md");
+        if (Files.notExists(historyFile)) {
+            try {
+                Files.writeString(historyFile, "", StandardCharsets.UTF_8);
+            } catch (IOException ignored) {
+            }
+        }
+
+        createBootstrapIfNeeded(workspace);
+
         copyTemplateIfMissing(workspace, "AGENTS.md");
         copyTemplateIfMissing(workspace, "SOUL.md");
         copyTemplateIfMissing(workspace, "TOOLS.md");
         copyTemplateIfMissing(workspace, "USER.md");
         copyTemplateIfMissing(workspace, "IDENTITY.md");
         copyTemplateIfMissing(workspace, "HEARTBEAT.md");
-        
-        // BOOTSTRAP.md: 仅在全新 workspace 时创建
-        createBootstrapIfNeeded(workspace);
     }
 
     /**
@@ -543,18 +633,17 @@ public final class OnboardWizard {
     private static void copyTemplateIfMissing(Path workspace, String filename) {
         Path targetPath = workspace.resolve(filename);
         if (Files.exists(targetPath)) {
-            return; // 已存在，不覆盖
+            return;
         }
 
-        try {
-            // 从 classpath 读取模板
-            var is = OnboardWizard.class.getClassLoader().getResourceAsStream("templates/" + filename);
+        try (InputStream is = OnboardWizard.class.getClassLoader().getResourceAsStream("templates/" + filename)) {
             if (is != null) {
-                String content = new String(is.readAllBytes());
-                // 移除 YAML front matter（如果存在）
+                String content = new String(is.readAllBytes(), StandardCharsets.UTF_8);
                 content = stripFrontMatter(content);
-                Files.writeString(targetPath, content);
+                Files.writeString(targetPath, content, StandardCharsets.UTF_8);
                 System.out.println("  ✓ Created: " + filename);
+            } else {
+                System.err.println("  ⚠ 模板不存在: templates/" + filename);
             }
         } catch (Exception e) {
             System.err.println("  ⚠ Failed to create " + filename + ": " + e.getMessage());
@@ -579,55 +668,61 @@ public final class OnboardWizard {
 
     /**
      * 创建 BOOTSTRAP.md（仅在全新 workspace 时）
-     * 对齐 OpenClaw 的逻辑：
-     * - 如果 USER.md 或 IDENTITY.md 已被修改，则跳过
-     * - 如果 memory 目录已存在内容，则跳过
      */
     private static void createBootstrapIfNeeded(Path workspace) {
         Path bootstrapPath = workspace.resolve("BOOTSTRAP.md");
-        
-        // 如果已存在，不重复创建
+
         if (Files.exists(bootstrapPath)) {
             return;
         }
-        
-        // 检查是否是遗留 workspace（已有用户内容）
-        try {
+
+        copyTemplateIfMissing(workspace, "BOOTSTRAP.md");
+        /*try {
             Path userPath = workspace.resolve("USER.md");
+            Path identityPath = workspace.resolve("IDENTITY.md");
             Path memoryDir = workspace.resolve("memory");
-            
+
             boolean hasUserContent = false;
-            
-            // 检查 memory 目录是否有内容
+
+            // memory 目录是否已有内容
             if (Files.exists(memoryDir) && Files.isDirectory(memoryDir)) {
-                long memoryFiles = Files.list(memoryDir)
-                        .filter(p -> p.toString().endsWith(".md"))
-                        .count();
-                if (memoryFiles > 0) {
+                try (var stream = Files.list(memoryDir)) {
+                    long memoryFiles = stream
+                            .filter(p -> p.toString().endsWith(".md"))
+                            .count();
+                    if (memoryFiles > 0) {
+                        hasUserContent = true;
+                    }
+                }
+            }
+
+            // USER.md 是否已有真实内容
+            if (!hasUserContent && Files.exists(userPath)) {
+                String userContent = Files.readString(userPath, StandardCharsets.UTF_8);
+                if (!userContent.isBlank()
+                        && (!userContent.contains("_(your name)_"))
+                        && (!userContent.contains("Name:") || userContent.replace("Name:", "").trim().length() > 0)) {
                     hasUserContent = true;
                 }
             }
-            
-            // 检查 USER.md 是否有用户内容（非空且非模板）
-            if (Files.exists(userPath)) {
-                String userContent = Files.readString(userPath);
-                // 简单检查：如果包含实际内容（非模板占位符）
-                if (userContent.contains("Name:") && !userContent.contains("_(your name)_")) {
+
+            // IDENTITY.md 是否已有真实内容
+            if (!hasUserContent && Files.exists(identityPath)) {
+                String identityContent = Files.readString(identityPath, StandardCharsets.UTF_8);
+                if (!identityContent.isBlank()) {
                     hasUserContent = true;
                 }
             }
-            
-            // 如果已有用户内容，不创建 BOOTSTRAP.md
+
             if (hasUserContent) {
-                System.out.println("  ℹ Skipping BOOTSTRAP.md (workspace already initialized)");
+                System.out.println("  Skipping BOOTSTRAP.md (workspace already initialized)");
                 return;
             }
-            
-            // 创建 BOOTSTRAP.md
+
             copyTemplateIfMissing(workspace, "BOOTSTRAP.md");
-            
+
         } catch (IOException e) {
             System.err.println("  ⚠ Failed to check workspace state: " + e.getMessage());
-        }
+        }*/
     }
 }

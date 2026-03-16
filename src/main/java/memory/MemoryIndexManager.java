@@ -26,6 +26,7 @@ import java.util.stream.*;
  * - 混合搜索：结合向量和关键词搜索
  * - 文件监视：自动检测文件变更并更新索引
  * - 增量同步：只处理变更的文件
+ * - 会话搜索：支持搜索会话历史记录
  */
 public class MemoryIndexManager implements AutoCloseable {
 
@@ -91,6 +92,12 @@ public class MemoryIndexManager implements AutoCloseable {
 
     /** 混合搜索配置 */
     private MemoryHybridSearch.HybridConfig hybridConfig = new MemoryHybridSearch.HybridConfig();
+
+    /** 搜索来源（"memory" 和/或 "sessions"） */
+    private Set<String> sources = new HashSet<>(Arrays.asList("memory"));
+
+    /** 会话目录（可选） */
+    private Path sessionsDir;
 
     // ==================== 状态 ====================
 
@@ -476,14 +483,23 @@ public class MemoryIndexManager implements AutoCloseable {
             // 获取所有记忆文件
             List<Path> memoryFiles = listMemoryFiles();
 
+            // 获取会话文件（如果启用）
+            List<SessionFiles.SessionFileEntry> sessionFiles = Collections.emptyList();
+            if (sources.contains("sessions") && sessionsDir != null) {
+                sessionFiles = listAndBuildSessionFiles();
+            }
+
             // 获取已索引的文件
             Map<String, FileEntry> indexedFiles = loadIndexedFiles();
 
             // 检测变更
             List<Path> toAdd = new ArrayList<>();
+            List<SessionFiles.SessionFileEntry> sessionsToAdd = new ArrayList<>();
             List<String> toRemove = new ArrayList<>();
 
             Set<String> currentPaths = new HashSet<>();
+
+            // 处理 memory 文件
             for (Path file : memoryFiles) {
                 String relativePath = workspaceDir.relativize(file).toString();
                 currentPaths.add(relativePath);
@@ -491,6 +507,16 @@ public class MemoryIndexManager implements AutoCloseable {
                 FileEntry indexed = indexedFiles.get(relativePath);
                 if (indexed == null || isFileChanged(file, indexed)) {
                     toAdd.add(file);
+                }
+            }
+
+            // 处理 sessions 文件
+            for (SessionFiles.SessionFileEntry session : sessionFiles) {
+                currentPaths.add(session.path);
+
+                FileEntry indexed = indexedFiles.get(session.path);
+                if (indexed == null || !indexed.hash.equals(session.hash)) {
+                    sessionsToAdd.add(session);
                 }
             }
 
@@ -506,19 +532,54 @@ public class MemoryIndexManager implements AutoCloseable {
                 removeFileFromIndex(path);
             }
 
-            // 添加新的索引
+            // 添加新的 memory 索引
             for (Path file : toAdd) {
                 indexFile(file);
+            }
+
+            // 添加新的 sessions 索引
+            for (SessionFiles.SessionFileEntry session : sessionsToAdd) {
+                indexSessionFile(session);
             }
 
             dirty = false;
             lastSyncTime = LocalDateTime.now();
 
-            log.info("记忆索引同步完成: 新增 {}, 删除 {}", toAdd.size(), toRemove.size());
+            log.info("记忆索引同步完成: memory 新增 {}, sessions 新增 {}, 删除 {}", 
+                    toAdd.size(), sessionsToAdd.size(), toRemove.size());
 
         } catch (IOException e) {
             throw new SQLException("同步记忆索引失败", e);
         }
+    }
+
+    /**
+     * 同步会话文件
+     *
+     * @param sessionFiles 要同步的会话文件列表
+     */
+    public synchronized void syncSessions(List<String> sessionFiles) throws SQLException {
+        if (sessionFiles == null || sessionFiles.isEmpty()) {
+            return;
+        }
+
+        ensureInitialized();
+
+        log.info("开始同步会话文件: {} 个", sessionFiles.size());
+
+        for (String sessionFile : sessionFiles) {
+            Path absPath = sessionsDir != null ? sessionsDir.resolve(sessionFile) : null;
+            if (absPath == null || !Files.exists(absPath)) {
+                continue;
+            }
+
+            SessionFiles.SessionFileEntry entry = SessionFiles.buildSessionEntry(absPath, sessionsDir);
+            if (entry != null) {
+                indexSessionFile(entry);
+            }
+        }
+
+        log.info("会话文件同步完成");
     }
 
     /**
@@ -570,54 +631,123 @@ public class MemoryIndexManager implements AutoCloseable {
             }
 
             // 插入分块
-            String insertSql = """
-                INSERT INTO chunks (id, path, source, start_line, end_line, hash, model, text, embedding, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """;
-
-            try (PreparedStatement stmt = dbConnection.prepareStatement(insertSql)) {
-                stmt.setString(1, chunkId);
-                stmt.setString(2, relativePath);
-                stmt.setString(3, "memory");
-                stmt.setInt(4, chunk.startLine);
-                stmt.setInt(5, chunk.endLine);
-                stmt.setString(6, chunkHash);
-                stmt.setString(7, model);
-                stmt.setString(8, chunk.text);
-                stmt.setString(9, embedding);
-                stmt.setLong(10, System.currentTimeMillis());
-                stmt.executeUpdate();
-            }
-
-            // 插入 FTS 索引
-            if (ftsEnabled) {
-                String ftsSql = """
-                    INSERT INTO %s (text, id, path, source, model, start_line, end_line)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                    """.formatted(FTS_TABLE);
-
-                try (PreparedStatement stmt = dbConnection.prepareStatement(ftsSql)) {
-                    stmt.setString(1, chunk.text);
-                    stmt.setString(2, chunkId);
-                    stmt.setString(3, relativePath);
-                    stmt.setString(4, "memory");
-                    stmt.setString(5, model);
-                    stmt.setInt(6, chunk.startLine);
-                    stmt.setInt(7, chunk.endLine);
-                    stmt.executeUpdate();
-                }
-            }
+            insertChunk(chunkId, relativePath, "memory", chunk.startLine, chunk.endLine,
+                    chunkHash, model, chunk.text, embedding);
         }
 
         // 更新文件记录
-        String fileSql = """
+        updateFileRecord(relativePath, "memory", hash, mtime, size);
+    }
+
+    /**
+     * 索引会话文件
+     */
+    private void indexSessionFile(SessionFiles.SessionFileEntry session) throws SQLException {
+        // 删除旧的分块
+        removeFileFromIndex(session.path);
+
+        // 分块
+        List<TextChunk> chunks = chunkText(session.content);
+
+        // 插入新的分块
+        String model = embeddingProvider != null ? embeddingProvider.getModel() : "none";
+
+        for (TextChunk chunk : chunks) {
+            String chunkId = UUID.randomUUID().toString();
+            String chunkHash = hashText(chunk.text);
+
+            // 映射行号到 JSONL 源行号
+            int jsonlStartLine = mapToSourceLine(session.lineMap, chunk.startLine);
+            int jsonlEndLine = mapToSourceLine(session.lineMap, chunk.endLine);
+
+            // 生成嵌入
+            String embedding = "";
+            if (embeddingProvider != null && vectorEnabled) {
+                try {
+                    float[] vec = embeddingProvider.embedQuery(chunk.text);
+                    embedding = VectorUtils.encode(vec);
+                } catch (Exception e) {
+                    log.warn("生成嵌入失败: {}", e.getMessage());
+                }
+            }
+
+            // 插入分块
+            insertChunk(chunkId, session.path, "sessions", jsonlStartLine, jsonlEndLine,
+                    chunkHash, model, chunk.text, embedding);
+        }
+
+        // 更新文件记录
+        updateFileRecord(session.path, "sessions", session.hash, session.mtimeMs, session.size);
+    }
+
+    /**
+     * 映射内容行号到 JSONL 源行号
+     */
+    private int mapToSourceLine(int[] lineMap, int contentLine) {
+        int idx = contentLine - 1; // 转为 0-based
+        if (idx >= 0 && idx < lineMap.length) {
+            return lineMap[idx];
+        }
+        return contentLine;
+    }
+
+    /**
+     * 插入分块
+     */
+    private void insertChunk(String id, String path, String source, int startLine, int endLine,
+                             String hash, String model, String text, String embedding) throws SQLException {
+        // 插入分块表
+        String insertSql = """
+            INSERT INTO chunks (id, path, source, start_line, end_line, hash, model, text, embedding, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """;
+
+        try (PreparedStatement stmt = dbConnection.prepareStatement(insertSql)) {
+            stmt.setString(1, id);
+            stmt.setString(2, path);
+            stmt.setString(3, source);
+            stmt.setInt(4, startLine);
+            stmt.setInt(5, endLine);
+            stmt.setString(6, hash);
+            stmt.setString(7, model);
+            stmt.setString(8, text);
+            stmt.setString(9, embedding);
+            stmt.setLong(10, System.currentTimeMillis());
+            stmt.executeUpdate();
+        }
+
+        // 插入 FTS 索引
+        if (ftsEnabled) {
+            String ftsSql = """
+                INSERT INTO %s (text, id, path, source, model, start_line, end_line)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """.formatted(FTS_TABLE);
+
+            try (PreparedStatement stmt = dbConnection.prepareStatement(ftsSql)) {
+                stmt.setString(1, text);
+                stmt.setString(2, id);
+                stmt.setString(3, path);
+                stmt.setString(4, source);
+                stmt.setString(5, model);
+                stmt.setInt(6, startLine);
+                stmt.setInt(7, endLine);
+                stmt.executeUpdate();
+            }
+        }
+    }
+
+    /**
+     * 更新文件记录
+     */
+    private void updateFileRecord(String path, String source, String hash, long mtime, long size) throws SQLException {
+        String sql = """
             INSERT OR REPLACE INTO files (path, source, hash, mtime, size)
             VALUES (?, ?, ?, ?, ?)
             """;
 
-        try (PreparedStatement stmt = dbConnection.prepareStatement(fileSql)) {
-            stmt.setString(1, relativePath);
-            stmt.setString(2, "memory");
+        try (PreparedStatement stmt = dbConnection.prepareStatement(sql)) {
+            stmt.setString(1, path);
+            stmt.setString(2, source);
             stmt.setString(3, hash);
             stmt.setLong(4, mtime);
             stmt.setLong(5, size);
@@ -721,6 +851,14 @@ public class MemoryIndexManager implements AutoCloseable {
                         StandardWatchEventKinds.ENTRY_MODIFY);
             }
 
+            // 监视 sessions 目录
+            if (sessionsDir != null && Files.exists(sessionsDir)) {
+                sessionsDir.register(watchService,
+                        StandardWatchEventKinds.ENTRY_CREATE,
+                        StandardWatchEventKinds.ENTRY_DELETE,
+                        StandardWatchEventKinds.ENTRY_MODIFY);
+            }
+
             // 启动监视线程
             watchThread = new Thread(this::watchLoop, "memory-watcher");
             watchThread.setDaemon(true);
@@ -808,6 +946,27 @@ public class MemoryIndexManager implements AutoCloseable {
         }
 
         return files;
+    }
+
+    /**
+     * 列出并构建会话文件条目
+     */
+    private List<SessionFiles.SessionFileEntry> listAndBuildSessionFiles() {
+        if (sessionsDir == null || !Files.exists(sessionsDir)) {
+            return Collections.emptyList();
+        }
+
+        List<SessionFiles.SessionFileEntry> entries = new ArrayList<>();
+        List<Path> files = SessionFiles.listSessionFiles(sessionsDir);
+
+        for (Path file : files) {
+            SessionFiles.SessionFileEntry entry = SessionFiles.buildSessionEntry(file, sessionsDir);
+            if (entry != null) {
+                entries.add(entry);
+            }
+        }
+
+        return entries;
     }
 
     private Map<String, FileEntry> loadIndexedFiles() throws SQLException {
@@ -913,12 +1072,40 @@ public class MemoryIndexManager implements AutoCloseable {
         this.hybridConfig = config != null ? config : new MemoryHybridSearch.HybridConfig();
     }
 
+    /**
+     * 设置搜索来源
+     *
+     * @param sources 来源集合（"memory" 和/或 "sessions"）
+     */
+    public void setSources(Set<String> sources) {
+        this.sources = sources != null ? new HashSet<>(sources) : new HashSet<>(Arrays.asList("memory"));
+        this.dirty = true;
+    }
+
+    /**
+     * 设置会话目录
+     *
+     * @param sessionsDir 会话目录路径
+     */
+    public void setSessionsDir(Path sessionsDir) {
+        this.sessionsDir = sessionsDir;
+        this.dirty = true;
+    }
+
     public boolean isDirty() {
         return dirty;
     }
 
     public LocalDateTime getLastSyncTime() {
         return lastSyncTime;
+    }
+
+    public Set<String> getSources() {
+        return Collections.unmodifiableSet(sources);
+    }
+
+    public Path getSessionsDir() {
+        return sessionsDir;
     }
 
     // ==================== 关闭 ====================

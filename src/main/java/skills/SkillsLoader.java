@@ -40,7 +40,7 @@ public class SkillsLoader {
     /**
      * 技能装载队列
      */
-    private volatile ConcurrentLinkedDeque<String> loadSkillQueue = new ConcurrentLinkedDeque<>();
+    private volatile List<String> loadSkillQueue = Collections.synchronizedList(new ArrayList<>());
 
     /**
      * 构造方法
@@ -55,7 +55,6 @@ public class SkillsLoader {
     /**
      * 构造方法
      * @param workspace 工作区根目录
-     * @param builtinSkillsDir 内置技能目录（可为 null，表示使用默认目录）
      */
     public SkillsLoader(Path workspace) {
         this(workspace, null);
@@ -138,7 +137,7 @@ public class SkillsLoader {
             return "错误，技能装载过多，超过最大允许值：" + skillMaxLoad + "，请告知用户需卸载一些技能，技能过多影响稳定性与准确性！";
         }
 
-        loadSkillQueue.addLast(name);
+        loadSkillQueue.add(name);
         var context = loadSkill(name);
         log.info("技能已装载，技能内容：{}", context);
         return context;
@@ -180,6 +179,19 @@ public class SkillsLoader {
         }
 
         return null;
+    }
+
+
+    /**
+     * 加载用户指定的技能
+     * @return
+     */
+    public String loadUserAppointSkill() {
+
+        if (loadSkillQueue.isEmpty()) {
+            return "";
+        }
+        return loadSkillsForContext(loadSkillQueue);
     }
 
     /**

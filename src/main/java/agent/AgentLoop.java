@@ -129,14 +129,20 @@ public class AgentLoop {
         );
         this.mcpServers = (mcpServers != null) ? mcpServers : Map.of();
 
+        // 注册工具
+        this.sharedTools = new ToolRegistry();
+        registerSharedTools();
+
         int maxConcurrent = 4;
         if (runtimeSettings != null) {
             var cfg = runtimeSettings.getCurrentConfig();
             maxConcurrent = cfg.getAgents().getDefaults().getMaxConcurrent();
         }
         this.queue = new AgentLoopQueue(maxConcurrent);
-        this.sharedTools = new ToolRegistry();
+
+
         this.cronToolFacade = (cronService != null) ? new CronTool(cronService) : null;
+
     }
 
     private AgentRuntimeSettings.Snapshot runtimeSnapshot() {
@@ -213,6 +219,12 @@ public class AgentLoop {
         SkillsLoader skillsLoader = new SkillsLoader(workspace);
         sharedTools.register(new LoadSkillTool(skillsLoader));
         sharedTools.register(new UninstallSkillTool(skillsLoader));
+
+        // 记忆搜索工具
+        sharedTools.register(new MemorySearchTool(workspace));
+
+        // 记忆读取工具
+        sharedTools.register(new MemoryGetTool(workspace));
 
         // 注意：
         // MessageTool / CronTool 不在这里注册，改为“每请求单独创建”
@@ -588,9 +600,9 @@ public class AgentLoop {
                     }
                 }
 
-                session.clear();
+                // 保存旧会话并创建新会话（使用新的 sessionId）
                 sessions.save(session);
-                sessions.invalidate(session.getKey());
+                Session newSession = sessions.createNew(session.getKey());
 
                 out.complete(new OutboundMessage(
                         msg.getChannel(),
@@ -638,7 +650,7 @@ public class AgentLoop {
 
         ContextPruningSettings pruningSettings = ContextPruningSettings.DEFAULT;
         int contextWindow = ContextWindowDiscovery.resolveContextTokensForModel(
-                null, model, null, currentMaxTokens());
+                null, model, null, currentMaxTokens(), runtimeSettings.getCurrentConfig());
 
         final int maxOverflowCompactionAttempts = 3;
         int[] overflowCompactionAttempts = {0};

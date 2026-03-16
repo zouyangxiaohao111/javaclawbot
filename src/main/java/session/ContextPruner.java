@@ -294,7 +294,14 @@ public class ContextPruner {
             return 0;
         }
 
-        return 256; // 默认估算
+        Object content = msg.get("content");
+        if (content instanceof String s) {
+            return s.length();
+        }
+        if (content instanceof List<?> list) {
+            return estimateTextAndImageChars(list);
+        }
+        return 256;
     }
 
     /**

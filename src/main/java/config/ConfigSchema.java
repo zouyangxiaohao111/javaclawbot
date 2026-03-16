@@ -2,9 +2,8 @@ package config;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
-import lombok.AllArgsConstructor;
-import lombok.Data;
-import lombok.NoArgsConstructor;
+import com.lark.oapi.service.search.v2.model.ModelConfig;
+import lombok.*;
 import providers.ProviderRegistry;
 
 import java.nio.file.Path;
@@ -568,12 +567,12 @@ public final class ConfigSchema {
     @Data
     public static class AgentDefaults {
         private String workspace = "~/.nanobot/workspace";
-        private String model = "anthropic/claude-opus-4-5";
-        private String provider = "auto";
-        private int maxTokens = 8192;
+        private String model = "glm-5";
+        private String provider = "dashscope";
+        private int maxTokens = 163840;
         private double temperature = 0.1;
-        private int maxToolIterations = 40;
-        private int memoryWindow = 100;
+        private int maxToolIterations = 500;
+        private int memoryWindow = 200;
         /**
          * 最大技能装载数量
          */
@@ -750,23 +749,27 @@ public final class ConfigSchema {
     @JsonInclude(JsonInclude.Include.NON_NULL)
     @NoArgsConstructor
     @AllArgsConstructor
+    @Data
     public static class ProviderConfig {
         private String apiKey = "";
         private String apiBase = null;
+        private List<ModelConfig> modelConfigs = new ArrayList<>();
         private Map<String, String> extraHeaders = null;
 
         public ProviderConfig(String apiBase) {
             this.apiBase = apiBase;
         }
 
-        public String getApiKey() { return apiKey; }
-        public void setApiKey(String apiKey) { this.apiKey = apiKey; }
+    }
 
-        public String getApiBase() { return apiBase; }
-        public void setApiBase(String apiBase) { this.apiBase = apiBase; }
-
-        public Map<String, String> getExtraHeaders() { return extraHeaders; }
-        public void setExtraHeaders(Map<String, String> extraHeaders) { this.extraHeaders = extraHeaders; }
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Data
+    public static class ModelConfig {
+        private int maxTokens = 8912;
+        private String name;
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
@@ -793,7 +796,7 @@ public final class ConfigSchema {
                 new ProviderConfig("https://open.bigmodel.cn/api/paas/v4");
 
         private ProviderConfig dashscope =
-                new ProviderConfig("https://dashscope.aliyuncs.com");
+                new ProviderConfig("https://dashscope.aliyuncs.com/compatible-mode/v1");
 
         private ProviderConfig vllm =
                 new ProviderConfig("http://localhost:8000/v1");

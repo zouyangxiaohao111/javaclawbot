@@ -11,11 +11,59 @@ import java.util.*;
  * - 支持追加消息
  * - 获取用于模型输入的历史消息（仅未归并部分，并对齐到用户轮次）
  * - 支持清空会话
+ * - 支持生成唯一的 sessionId（对齐 OpenClaw）
+ *
+ * Session Key vs Session ID：
+ * - sessionKey：用于标识会话路由（如 "cli:direct"），是固定的
+ * - sessionId：用于标识具体的会话实例（如 "amber-atlas"），每次新会话生成新的
  */
 public final class Session {
 
-    /** 会话标识：channel:chat_id */
+    // ==================== Session Slug 生成（对齐 OpenClaw session-slug.ts） ====================
+
+    private static final String[] SLUG_ADJECTIVES = {
+        "amber", "briny", "brisk", "calm", "clear", "cool", "crisp", "dawn", "delta", "ember",
+        "faint", "fast", "fresh", "gentle", "glow", "good", "grand", "keen", "kind", "lucky",
+        "marine", "mellow", "mild", "neat", "nimble", "nova", "oceanic", "plaid", "quick", "quiet",
+        "rapid", "salty", "sharp", "swift", "tender", "tidal", "tidy", "tide", "vivid", "warm", "wild", "young"
+    };
+
+    private static final String[] SLUG_NOUNS = {
+        "atlas", "basil", "bison", "bloom", "breeze", "canyon", "cedar", "claw", "cloud", "comet",
+        "coral", "cove", "crest", "crustacean", "daisy", "dune", "ember", "falcon", "fjord", "forest",
+        "glade", "gulf", "harbor", "haven", "kelp", "lagoon", "lobster", "meadow", "mist", "nudibranch",
+        "nexus", "ocean", "orbit", "otter", "pine", "prairie", "reef", "ridge", "river", "rook",
+        "sable", "sage", "seaslug", "shell", "shoal", "shore", "slug", "summit", "tidepool", "trail",
+        "valley", "wharf", "willow", "zephyr"
+    };
+
+    private static final Random RANDOM = new Random();
+
+    /**
+     * 生成唯一的 session slug（对齐 OpenClaw createSessionSlug）
+     *
+     * @return 格式如 "amber-atlas" 或 "brisk-harbor-2"
+     */
+    public static String generateSessionId() {
+        String adj = SLUG_ADJECTIVES[RANDOM.nextInt(SLUG_ADJECTIVES.length)];
+        String noun = SLUG_NOUNS[RANDOM.nextInt(SLUG_NOUNS.length)];
+        String base = adj + "-" + noun;
+
+        // 10% 概率添加后缀
+        if (RANDOM.nextDouble() < 0.1) {
+            return base + "-" + (RANDOM.nextInt(10) + 2);
+        }
+
+        return base;
+    }
+
+    // ==================== 字段 ====================
+
+    /** 会话标识：channel:chat_id（用于路由） */
     private final String key;
+
+    /** 会话实例 ID：唯一标识一个会话实例（用于文件名） */
+    private String sessionId;
 
     /** 消息列表（追加式） */
     private List<Map<String, Object>> messages = new ArrayList<>();
@@ -55,17 +103,27 @@ public final class Session {
     /** 提供商名称 */
     private String modelProvider;
 
+    // ==================== 构造函数 ====================
+
     public Session(String key) {
         this.key = key;
+        this.sessionId = generateSessionId();
+    }
+
+    public Session(String key, String sessionId) {
+        this.key = key;
+        this.sessionId = sessionId != null ? sessionId : generateSessionId();
     }
 
     public Session(String key,
+                   String sessionId,
                    List<Map<String, Object>> messages,
                    LocalDateTime createdAt,
                    LocalDateTime updatedAt,
                    Map<String, Object> metadata,
                    int lastConsolidated) {
         this.key = key;
+        this.sessionId = sessionId != null ? sessionId : generateSessionId();
         if (messages != null) this.messages = messages;
         if (createdAt != null) this.createdAt = createdAt;
         if (updatedAt != null) this.updatedAt = updatedAt;
@@ -73,8 +131,38 @@ public final class Session {
         this.lastConsolidated = Math.max(0, lastConsolidated);
     }
 
+    // ==================== Getter/Setter ====================
+
     public String getKey() {
         return key;
+    }
+
+    /**
+     * 获取会话实例 ID
+     *
+     * 用于标识具体的会话实例，每次新会话生成新的 sessionId
+     * 文件名格式：{sessionId}.jsonl
+     */
+    public String getSessionId() {
+        return sessionId;
+    }
+
+    /**
+     * 设置会话实例 ID
+     *
+     * 用于从文件加载时恢复 sessionId
+     */
+    public void setSessionId(String sessionId) {
+        if (sessionId != null && !sessionId.trim().isEmpty()) {
+            this.sessionId = sessionId.trim();
+        }
+    }
+
+    /**
+     * 生成新的 sessionId（用于 /new 命令）
+     */
+    public void renewSessionId() {
+        this.sessionId = generateSessionId();
     }
 
     public List<Map<String, Object>> getMessages() {

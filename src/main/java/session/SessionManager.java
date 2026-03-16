@@ -23,6 +23,11 @@ import java.util.logging.Logger;
  * 2. 使用 tmp 文件 + 原子替换，避免写一半把正式文件写坏
  * 3. 对同一 session key 做串行化保存，避免并发写乱文件
  * 4. 加载时尽量容错：坏行跳过，严重损坏时备份文件
+ * 5. 使用 sessionId 作为文件名，每次新会话生成新的 sessionId（对齐 OpenClaw）
+ *
+ * Session Key vs Session ID：
+ * - sessionKey：用于标识会话路由（如 "cli:direct"），是固定的
+ * - sessionId：用于标识具体的会话实例（如 "amber-atlas"），每次新会话生成新的
  */
 public final class SessionManager {
 
@@ -32,8 +37,11 @@ public final class SessionManager {
     private final Path sessionsDir;
     private final Path legacySessionsDir;
 
-    /** 会话缓存：线程安全 */
+    /** 会话缓存：sessionKey -> Session */
     private final Map<String, Session> cache = new ConcurrentHashMap<>();
+
+    /** sessionKey -> sessionId 映射（用于从 key 找到对应的文件） */
+    private final Map<String, String> keyToIdMap = new ConcurrentHashMap<>();
 
     /** 每个 session key 一把锁，避免同一个文件被并发写 */
     private final Map<String, ReentrantLock> sessionLocks = new ConcurrentHashMap<>();
@@ -44,16 +52,69 @@ public final class SessionManager {
         this.workspace = workspace;
         this.sessionsDir = Helpers.ensureDir(workspace.resolve("sessions"));
         this.legacySessionsDir = Path.of(System.getProperty("user.home"), ".nanobot", "sessions");
+        
+        // 加载 sessionKey -> sessionId 映射
+        loadKeyToIdMap();
     }
 
     /**
      * 获取或创建会话
+     *
+     * 如果缓存中有，返回缓存的会话
+     * 如果缓存中没有，尝试从文件加载
+     * 如果文件也不存在，创建新会话（生成新的 sessionId）
      */
     public Session getOrCreate(String key) {
         return cache.computeIfAbsent(key, k -> {
-            Session loaded = load(k);
-            return loaded != null ? loaded : new Session(k);
+            // 尝试从映射中找到对应的 sessionId
+            String sessionId = keyToIdMap.get(k);
+            
+            if (sessionId != null) {
+                // 有映射，尝试加载对应的文件
+                Session loaded = loadBySessionId(k, sessionId);
+                if (loaded != null) {
+                    return loaded;
+                }
+            }
+            
+            // 没有映射或加载失败，尝试从旧文件加载（兼容旧版本）
+            Session legacy = loadLegacy(k);
+            if (legacy != null) {
+                // 更新映射
+                keyToIdMap.put(k, legacy.getSessionId());
+                saveKeyToIdMap();
+                return legacy;
+            }
+            
+            // 创建新会话
+            Session newSession = new Session(k);
+            keyToIdMap.put(k, newSession.getSessionId());
+            saveKeyToIdMap();
+            return newSession;
         });
+    }
+
+    /**
+     * 创建新会话（用于 /new 命令）
+     *
+     * 生成新的 sessionId，保存旧会话到文件，然后创建新会话
+     */
+    public Session createNew(String key) {
+        // 先保存旧会话（如果存在）
+        Session oldSession = cache.get(key);
+        if (oldSession != null) {
+            save(oldSession);
+        }
+        
+        // 创建新会话
+        Session newSession = new Session(key);
+        
+        // 更新映射和缓存
+        keyToIdMap.put(key, newSession.getSessionId());
+        saveKeyToIdMap();
+        cache.put(key, newSession);
+        
+        return newSession;
     }
 
     /**
@@ -61,11 +122,13 @@ public final class SessionManager {
      */
     public void save(Session session) {
         String key = session.getKey();
+        String sessionId = session.getSessionId();
+        
         ReentrantLock lock = sessionLocks.computeIfAbsent(key, k -> new ReentrantLock());
 
         lock.lock();
         try {
-            Path target = getSessionPath(key);
+            Path target = getSessionPath(sessionId);
             Helpers.ensureDir(target.getParent());
 
             // 临时文件：与目标文件放同目录，保证 move 更稳
@@ -85,6 +148,7 @@ public final class SessionManager {
                 Map<String, Object> metaLine = new LinkedHashMap<>();
                 metaLine.put("_type", "metadata");
                 metaLine.put("key", sanitizeString(session.getKey()));
+                metaLine.put("session_id", sanitizeString(session.getSessionId()));
                 metaLine.put("created_at", session.getCreatedAt().toString());
                 metaLine.put("updated_at", session.getUpdatedAt().toString());
                 metaLine.put("metadata", safeMetadata);
@@ -104,17 +168,13 @@ public final class SessionManager {
             // 原子替换：避免正式文件写一半损坏
             atomicReplace(tmp, target);
 
-            // 缓存里也放“已清洗版本”，避免下次 save 继续炸
-            Session safeSession = new Session(
-                    key,
-                    safeMessages,
-                    session.getCreatedAt(),
-                    session.getUpdatedAt(),
-                    safeMetadata,
-                    session.getLastConsolidated()
-            );
-            session.setMessages(safeSession.getMessages());
-            session.setMetadata(safeSession.getMetadata());
+            // 更新映射
+            keyToIdMap.put(key, sessionId);
+            saveKeyToIdMap();
+
+            // 缓存里也放"已清洗版本"，避免下次 save 继续炸
+            session.setMessages(safeMessages);
+            session.setMetadata(safeMetadata);
             cache.put(key, session);
 
         } catch (Exception e) {
@@ -152,12 +212,14 @@ public final class SessionManager {
                     if (!"metadata".equals(data.get("_type"))) continue;
 
                     String key = (String) data.get("key");
+                    String sessionId = (String) data.get("session_id");
                     if (key == null || key.isBlank()) {
-                        key = stripExtension(path.getFileName().toString()).replaceFirst("_", ":");
+                        key = stripExtension(path.getFileName().toString());
                     }
 
                     Map<String, Object> item = new LinkedHashMap<>();
                     item.put("key", key);
+                    item.put("session_id", sessionId);
                     item.put("created_at", data.get("created_at"));
                     item.put("updated_at", data.get("updated_at"));
                     item.put("path", path.toString());
@@ -184,9 +246,12 @@ public final class SessionManager {
     // 内部方法
     // =========================
 
-    private Path getSessionPath(String key) {
-        String safeKey = Helpers.safeFilename(key.replace(":", "_"));
-        return sessionsDir.resolve(safeKey + ".jsonl");
+    /**
+     * 获取会话文件路径（使用 sessionId 作为文件名）
+     */
+    private Path getSessionPath(String sessionId) {
+        String safeId = Helpers.safeFilename(sessionId);
+        return sessionsDir.resolve(safeId + ".jsonl");
     }
 
     private Path getLegacySessionPath(String key) {
@@ -195,33 +260,54 @@ public final class SessionManager {
     }
 
     /**
-     * 加载会话：
-     * - 支持旧目录迁移
-     * - 坏行跳过
-     * - 若文件严重损坏，记录警告并尽量恢复可读部分
+     * 按 sessionId 加载会话
      */
-    private Session load(String key) {
-        Path path = getSessionPath(key);
+    private Session loadBySessionId(String key, String sessionId) {
+        Path path = getSessionPath(sessionId);
+        if (!Files.exists(path)) return null;
+        
+        return loadFromPath(key, path);
+    }
 
-        // 如果新目录不存在，但旧目录存在，则迁移
-        if (!Files.exists(path)) {
-            Path legacyPath = getLegacySessionPath(key);
-            if (Files.exists(legacyPath)) {
-                try {
-                    Helpers.ensureDir(path.getParent());
-                    Files.move(legacyPath, path, StandardCopyOption.REPLACE_EXISTING);
-                    LOG.log(Level.INFO, "已迁移旧会话文件：{0}", key);
-                } catch (Exception e) {
-                    LOG.log(Level.WARNING, "迁移会话失败：" + key, e);
-                }
-            }
+    /**
+     * 从旧文件加载会话（兼容旧版本）
+     */
+    private Session loadLegacy(String key) {
+        // 尝试新目录
+        Path newPath = sessionsDir.resolve(Helpers.safeFilename(key.replace(":", "_")) + ".jsonl");
+        if (Files.exists(newPath)) {
+            Session session = loadFromPath(key, newPath);
+            if (session != null) return session;
         }
+        
+        // 尝试旧目录
+        Path legacyPath = getLegacySessionPath(key);
+        if (Files.exists(legacyPath)) {
+            try {
+                Helpers.ensureDir(newPath.getParent());
+                Files.move(legacyPath, newPath, StandardCopyOption.REPLACE_EXISTING);
+                LOG.log(Level.INFO, "已迁移旧会话文件：{0}", key);
+            } catch (Exception e) {
+                LOG.log(Level.WARNING, "迁移会话失败：" + key, e);
+            }
+            
+            Session session = loadFromPath(key, newPath);
+            if (session != null) return session;
+        }
+        
+        return null;
+    }
 
+    /**
+     * 从指定路径加载会话
+     */
+    private Session loadFromPath(String key, Path path) {
         if (!Files.exists(path)) return null;
 
         List<Map<String, Object>> messages = new ArrayList<>();
         Map<String, Object> metadata = new HashMap<>();
         LocalDateTime createdAt = null;
+        String sessionId = null;
         int lastConsolidated = 0;
 
         int lineNo = 0;
@@ -241,6 +327,12 @@ public final class SessionManager {
                     );
 
                     if ("metadata".equals(data.get("_type"))) {
+                        // 读取 sessionId
+                        Object sid = data.get("session_id");
+                        if (sid instanceof String s && !s.isBlank()) {
+                            sessionId = s;
+                        }
+
                         Object md = data.get("metadata");
                         if (md instanceof Map<?, ?> m) {
                             metadata = castMap(deepSanitize(m));
@@ -279,8 +371,14 @@ public final class SessionManager {
                 LOG.log(Level.WARNING, "加载会话完成，但发现坏行：key={0}, badLines={1}", new Object[]{key, badLines});
             }
 
+            // 如果没有 sessionId，生成一个新的
+            if (sessionId == null || sessionId.isBlank()) {
+                sessionId = Session.generateSessionId();
+            }
+
             return new Session(
                     key,
+                    sessionId,
                     messages,
                     (createdAt != null) ? createdAt : LocalDateTime.now(),
                     LocalDateTime.now(),
@@ -292,6 +390,49 @@ public final class SessionManager {
             LOG.log(Level.WARNING, "加载会话失败：" + key + "，原因：" + e.getMessage(), e);
             backupCorruptedFile(path);
             return null;
+        }
+    }
+
+    /**
+     * 加载 sessionKey -> sessionId 映射
+     */
+    private void loadKeyToIdMap() {
+        Path mapFile = sessionsDir.resolve("sessions.json");
+        if (!Files.exists(mapFile)) return;
+        
+        try (BufferedReader r = Files.newBufferedReader(mapFile, StandardCharsets.UTF_8)) {
+            Map<String, String> map = objectMapper.readValue(r, new TypeReference<Map<String, String>>() {});
+            if (map != null) {
+                keyToIdMap.putAll(map);
+            }
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "加载会话映射失败", e);
+        }
+    }
+
+    /**
+     * 保存 sessionKey -> sessionId 映射
+     */
+    private void saveKeyToIdMap() {
+        Path mapFile = sessionsDir.resolve("sessions.json");
+        Path tmpFile = mapFile.resolveSibling("sessions.json.tmp");
+        
+        try (BufferedWriter w = Files.newBufferedWriter(tmpFile, StandardCharsets.UTF_8,
+                StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)) {
+            objectMapper.writeValue(w, new HashMap<>(keyToIdMap));
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "保存会话映射失败", e);
+            return;
+        }
+        
+        try {
+            Files.move(tmpFile, mapFile, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+        } catch (Exception e) {
+            try {
+                Files.move(tmpFile, mapFile, StandardCopyOption.REPLACE_EXISTING);
+            } catch (Exception ex) {
+                LOG.log(Level.WARNING, "保存会话映射失败", ex);
+            }
         }
     }
 
@@ -568,7 +709,6 @@ public final class SessionManager {
             String activeSessionKey
     ) {
         int pruned = 0;
-        long now = System.currentTimeMillis();
         
         for (Map<String, Object> session : sessions) {
             String key = (String) session.get("key");
@@ -581,15 +721,23 @@ public final class SessionManager {
                     long ageMs = java.time.Duration.between(updated, LocalDateTime.now()).toMillis();
                     if (ageMs > pruneAfterMs) {
                         // 删除会话文件
-                        Path sessionPath = getSessionPath(key);
-                        if (Files.exists(sessionPath)) {
-                            Files.delete(sessionPath);
-                            cache.remove(key);
-                            pruned++;
+                        String sessionId = (String) session.get("session_id");
+                        if (sessionId != null) {
+                            Path sessionPath = getSessionPath(sessionId);
+                            if (Files.exists(sessionPath)) {
+                                Files.delete(sessionPath);
+                                cache.remove(key);
+                                keyToIdMap.remove(key);
+                                pruned++;
+                            }
                         }
                     }
                 } catch (Exception ignored) {}
             }
+        }
+        
+        if (pruned > 0) {
+            saveKeyToIdMap();
         }
         
         return pruned;
@@ -615,13 +763,21 @@ public final class SessionManager {
             if (key == null || key.equals(activeSessionKey)) continue;
             
             try {
-                Path sessionPath = getSessionPath(key);
-                if (Files.exists(sessionPath)) {
-                    Files.delete(sessionPath);
-                    cache.remove(key);
-                    capped++;
+                String sessionId = (String) sessions.get(i).get("session_id");
+                if (sessionId != null) {
+                    Path sessionPath = getSessionPath(sessionId);
+                    if (Files.exists(sessionPath)) {
+                        Files.delete(sessionPath);
+                        cache.remove(key);
+                        keyToIdMap.remove(key);
+                        capped++;
+                    }
                 }
             } catch (Exception ignored) {}
+        }
+        
+        if (capped > 0) {
+            saveKeyToIdMap();
         }
         
         return capped;

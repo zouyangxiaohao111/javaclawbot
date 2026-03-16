@@ -51,7 +51,7 @@ public class MemoryStore {
     private final Path historyFile;
 
     /** 记忆搜索工具（支持 memory 目录下多文件） */
-    private MemorySearchTool searchTool;
+    private MemorySearch searchTool;
 
     public MemoryStore(Path workspace) {
         this.workspaceDir = Objects.requireNonNull(workspace, "workspace");
@@ -59,6 +59,7 @@ public class MemoryStore {
         this.memoryDir = Helpers.ensureDir(workspaceDir.resolve("memory"));
         this.memoryFile = this.memoryDir.resolve("MEMORY.md");
         this.historyFile = this.memoryDir.resolve("HISTORY.md");
+        searchTool = new MemorySearch(workspaceDir);
     }
 
     /**
@@ -668,7 +669,7 @@ public class MemoryStore {
      * @param query 查询文本
      * @return 搜索结果
      */
-    public List<MemorySearchTool.SearchResult> search(String query) {
+    public List<MemorySearch.SearchResult> search(String query) {
         try {
             ensureSearchToolInitialized();
             return searchTool.search(query);
@@ -686,7 +687,7 @@ public class MemoryStore {
      * @param minScore   最小分数
      * @return 搜索结果
      */
-    public List<MemorySearchTool.SearchResult> search(String query, int maxResults, double minScore) {
+    public List<MemorySearch.SearchResult> search(String query, int maxResults, double minScore) {
         try {
             ensureSearchToolInitialized();
             return searchTool.search(query, maxResults, minScore);
@@ -745,7 +746,7 @@ public class MemoryStore {
      */
     private synchronized void ensureSearchToolInitialized() throws Exception {
         if (searchTool == null) {
-            searchTool = new MemorySearchTool(workspaceDir);
+            searchTool = new MemorySearch(workspaceDir);
             if (pendingEmbeddingProvider != null) {
                 searchTool.setEmbeddingProvider(pendingEmbeddingProvider);
             }
