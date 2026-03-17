@@ -1,5 +1,7 @@
 package providers;
 
+import lombok.extern.slf4j.Slf4j;
+
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -18,6 +20,7 @@ import java.util.concurrent.TimeUnit;
  * - chat_with_retry() - 重试逻辑
  * - get_default_model()
  */
+@Slf4j
 public abstract class LLMProvider {
 
     protected final String apiKey;
@@ -181,6 +184,8 @@ public abstract class LLMProvider {
     ) {
         return chat(messages, tools, model, maxTokens, temperature, reasoningEffort)
                 .exceptionally(ex -> {
+                    log.error("调用LLM失败", ex);
+
                     // 捕获异常，返回错误响应
                     return new LLMResponse(
                             "调用 LLM 失败: " + ex.getMessage(),
@@ -198,9 +203,9 @@ public abstract class LLMProvider {
                     }
 
                     // 如果不是瞬态错误，直接返回
-                    if (!isTransientError(response.getContent())) {
+                    /*if (!isTransientError(response.getContent())) {
                         return CompletableFuture.completedFuture(response);
-                    }
+                    }*/
 
                     // 检查是否还有重试机会
                     if (attempt >= CHAT_RETRY_DELAYS.size()) {
@@ -217,18 +222,18 @@ public abstract class LLMProvider {
                     }
 
                     // 延迟后重试
-                    int delaySeconds = CHAT_RETRY_DELAYS.get(attempt);
+                    int delayMs = CHAT_RETRY_DELAYS.get(attempt) * 100;
                     String errPreview = response.getContent() != null && response.getContent().length() > 120
                             ? response.getContent().substring(0, 120)
                             : response.getContent();
 
                     System.getLogger(LLMProvider.class.getName()).log(System.Logger.Level.WARNING,
                             "LLM transient error (attempt {0}/{1}), retrying in {2}s: {3}",
-                            attempt + 1, CHAT_RETRY_DELAYS.size(), delaySeconds, errPreview);
+                            attempt + 1, CHAT_RETRY_DELAYS.size(), delayMs, errPreview);
 
                     return CompletableFuture.supplyAsync(() -> {
                         try {
-                            TimeUnit.SECONDS.sleep(delaySeconds);
+                            TimeUnit.MICROSECONDS.sleep(delayMs);
                         } catch (InterruptedException e) {
                             Thread.currentThread().interrupt();
                         }
