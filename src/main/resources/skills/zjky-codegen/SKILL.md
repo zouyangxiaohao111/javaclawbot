@@ -25,7 +25,7 @@ description: "Route and execute ZJKY-style code generation tasks for company fra
 3. 判断是否需要建计划
 4. 只加载当前场景需要的规则文档
 5. 调度后端、前端、文档、测试、菜单 SQL、路由等生成阶段
-6. 统一更新 active plan、history、memory，并在满足条件时触发通知
+6. 统一更新 active plan、history、codememory(技能内部的)，并在满足条件时触发通知
 
 本 skill 不应在一开始就把所有规则、模板和场景文档全部混在一次响应里使用。
 

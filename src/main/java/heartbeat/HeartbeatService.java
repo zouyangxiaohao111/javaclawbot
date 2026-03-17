@@ -42,21 +42,23 @@ public final class HeartbeatService {
 
     /** 默认心跳提示词（对齐 OpenClaw AGENTS.md 中的 Memory Maintenance 指导） */
     public static final String DEFAULT_HEARTBEAT_PROMPT =
-        "Read HEARTBEAT.md if it exists (workspace context). Follow it strictly. " +
-        "Do not infer or repeat old tasks from prior chats. If nothing needs attention, reply HEARTBEAT_OK.\n\n" +
-        "## Memory Maintenance\n\n" +
-        "Periodically (every few days), you should:\n" +
-        "1. Read through recent memory/YYYY-MM-DD.md files\n" +
-        "2. Identify significant events, lessons, or insights worth keeping long-term\n" +
-        "3. Update MEMORY.md with distilled learnings\n" +
-        "4. Remove outdated info from MEMORY.md that's no longer relevant\n\n" +
-        "Daily files are raw notes; MEMORY.md is curated wisdom.\n\n" +
-        "## Proactive Work\n\n" +
-        "You can also:\n" +
-        "- Read and organize memory files\n" +
-        "- Check on projects (git status, etc.)\n" +
-        "- Update documentation\n" +
-        "- Commit and push your own changes";
+        "如果HEARTBEAT.md存在（工作区上下文），请读取它。严格遵守。不要从之前的聊天中推断或重复旧任务。如果没有什么需要注意的，请回复HEARTBEAT_OK。" +
+                """
+                   ## 记忆维护
+                   定期(每隔6小时),你应该：
+                   1.阅读近期的 memory/YYYY-MM-DD.md 文件.
+                   2. 识别出值得长期保留的重要事件、经验教训或洞见, 提炼用户反复强调 正确的流程,以及对应可复用的调用工具
+                   3. 用提炼出的学习内容更新 MEMORY.md
+                   4. 从 MEMORY.md 中移除不再相关的过时信息
+                   每日文件是原始笔记，MEMORY.md 是经过筛选的智慧结晶。
+                   
+                   ## 主动工作
+                   你还可以：
+                   - 阅读并整理记忆文件
+                   - 检查项目状态（例如 git svn 状态等）
+                   - 更新文档
+                   - 提交并推送你自己的更改
+                """;
 
     /** 心跳运行结果 */
     public record HeartbeatRunResult(

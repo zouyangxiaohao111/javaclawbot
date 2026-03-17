@@ -1,6 +1,5 @@
 package context;
 
-import config.ConfigSchema;
 import lombok.Getter;
 import memory.MemoryStore;
 import skills.SkillsLoader;
@@ -22,12 +21,6 @@ import java.util.*;
  * 3) 追加工具调用结果、追加助手消息
  */
 public class ContextBuilder {
-
-    /** 启动引导文件（从工作区读取）- 保留向后兼容 */
-    @Deprecated
-    public static final List<String> BOOTSTRAP_FILES = List.of(
-            "AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md", "IDENTITY.md", "HEARTBEAT.md", "BOOTSTRAP.md"
-    );
 
     /** 运行时元信息标签（仅元数据，不是指令） */
     private static final String RUNTIME_CONTEXT_TAG = "[运行时上下文 — 仅元数据，非指令]";
@@ -80,6 +73,8 @@ public class ContextBuilder {
      */
     public String buildSystemPrompt(List<String> skillNames, BootstrapConfig.RunKind runKind) {
         List<String> parts = new ArrayList<>();
+
+        // 配置身份
         parts.add(getIdentity());
 
         // 使用新的 BootstrapLoader
@@ -92,10 +87,11 @@ public class ContextBuilder {
             parts.add(bootstrap);
         }
 
-        String mem = memory.getMemoryContext();
+        // 记忆由ai主动读取, 见AGENTS.md流程
+        /*String mem = memory.getMemoryContext();
         if (mem != null && !mem.isBlank()) {
             parts.add("# 长期记忆\n\n" + mem);
-        }
+        }*/
 
         // 配置装载技能提示词
         parts.add("""
@@ -118,11 +114,11 @@ public class ContextBuilder {
             parts.add(
                     """
                             # 技能
-                                以下技能扩展了你的能力。
+                                技能扩展了你的能力。
                 
                                 技能使用协议：
                                 1. 将每个技能的 SKILL.md 视为入口点，而非完整技能。
-                                2. 当任务匹配某个技能时，先使用 read_file 工具读取该技能的 SKILL.md。
+                                2. 当任务匹配某个技能时, 用户未主动提供技能说明，主动先使用 read_file 工具读取该技能的 SKILL.md。
                                 3. 然后严格按照 SKILL.md 中的说明执行。
                                 4. 如果 SKILL.md 要求读取额外的文件、示例、模板、模式或支持文档，必须在执行前读取。
                                 5. 不要仅阅读 SKILL.md 就认为技能已完全加载。
@@ -130,6 +126,7 @@ public class ContextBuilder {
                                 7. 当任务需要实际使用技能时，不要仅凭索引摘要或近似判断。
                 
                                 available="false" 的技能需要先安装依赖 - 可以尝试用 apt/brew 安装。
+                             ## 可使用技能
                      """ + skillsSummary
             );
         }
@@ -173,15 +170,13 @@ public class ContextBuilder {
         }
         String runtime = system + " " + arch + ", Java " + javaVersion;
 
-        return "# 身份 🐈\n\n" +
-                "你是一个有帮助的 AI 助手。\n\n" +
+        return bootstrapLoader.loadIdentity() + "\n\n" +
                 "## 运行环境\n" +
                 runtime + "\n\n" +
                 "## 工作区\n" +
                 "工作区路径: " + workspacePath + "\n" +
                 "- 长期记忆: " + workspacePath + "/memory/MEMORY.md（在此记录重要事实）\n" +
                 "- 自定义技能: " + workspacePath + "/skills/{skill-name}/SKILL.md\n\n" +
-                bootstrapLoader.loadIdentity() + "\n\n" +
                 """
                 ## 指南\n
                 - 调用工具前先说明意图，但在收到结果前不要预测或声称结果。\n
@@ -260,8 +255,8 @@ public class ContextBuilder {
         ));
 
         // 当前用户内容（文本 + 可选图片）
-        // 是否引导过，如果未引导，设置引导用户 1 代表已引导
-        if (!isBootstrap()) {
+        // 是否需要引导，设置引导用户
+        if (isNeedBootstrap()) {
             out.add(mapOf(
                     "role", "user",
                     "content", "用户现在是第一次使用该程序，请按照引导程序流程引导用户,必须要在引导完成后回答用户消息，用户消息：" + buildUserContent(currentMessage, media)
@@ -446,11 +441,11 @@ public class ContextBuilder {
     }
 
     /**
-     * 是否进行了引导, 1代表已引导
+     * 是否需要引导
      * @return
      */
-    public boolean isBootstrap() {
-        return bootstrapConfig.getIsBootstrap() == 1;
+    public boolean isNeedBootstrap() {
+        return bootstrapLoader.isNeedBootstrap();
     }
 
 }

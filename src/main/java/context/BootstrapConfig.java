@@ -47,10 +47,6 @@ public class BootstrapConfig {
     private ContextMode contextMode = ContextMode.FULL;
     private RunKind runKind = RunKind.DEFAULT;
 
-    @Getter
-    @Setter
-    private int isBootstrap = 0;
-
     public int getMaxChars() {
         return maxChars;
     }

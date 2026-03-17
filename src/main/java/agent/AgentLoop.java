@@ -821,16 +821,6 @@ public class AgentLoop {
                         return;
                     }
 
-                    // 如果未引导
-                    if (!context.isBootstrap()) {
-                        // 设置为已引导
-                        context.getBootstrapConfig().setIsBootstrap(1);
-                        try {
-                            ConfigIO.saveConfig(runtimeSettings.getCurrentConfig(), ConfigIO.getConfigPath(workspace));
-                        } catch (Exception e) {
-                            log.error("修改引导程序异常！", e);
-                        }
-                    }
 
                     log.info("思考: \n{}", resp.getReasoningContent());
                     String clean = stripThink(resp.getContent());

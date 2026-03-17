@@ -174,6 +174,10 @@ public abstract class BaseChannel {
 
         String senderStr = String.valueOf(senderId);
 
+        // * 代表全部放行
+        if(allowList.contains("*")) {
+            return true;
+        }
         // 直接命中
         if (allowList.contains(senderStr)) {
             return true;

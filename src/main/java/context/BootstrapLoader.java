@@ -143,6 +143,7 @@ public class BootstrapLoader {
                 break;
             }
 
+            // 文件最大字符
             int fileMaxChars = Math.min(config.getMaxChars(), remainingTotalChars);
             String trimmedContent = trimContent(file.getContent(), file.getName(), fileMaxChars);
 
@@ -217,27 +218,30 @@ public class BootstrapLoader {
                 .anyMatch(f -> "SOUL.md".equalsIgnoreCase(f.getName()));
 
         List<String> lines = new ArrayList<>();
-        lines.add("# Project Context");
+        lines.add("# 项目上下文");
         lines.add("");
-        lines.add("The following project context files have been loaded:");
+        lines.add("已加载的项目上下文(在标签<project_context>)中):");
         if (hasSoulFile) {
-            lines.add("If SOUL.md is present, embody its persona and tone. Avoid stiff, generic replies; follow its guidance unless higher-priority instructions override it.");
+            lines.add("若存在SOUL.md文件，需体现其人格特质与语气风格。避免生硬、通用的回复；除非更高优先级的指令覆盖，否则遵循其指导原则。");
         }
-        lines.add("");
-
+        lines.add("<project_context>");
         for (BootstrapFile file : files) {
-            if (file.getName().contains("BOOTSTRAP.md")) {
-                continue;
-            }
             lines.add("## " + file.getPath());
             lines.add("");
             if (file.isMissing()) {
                 lines.add("[MISSING] Expected at: " + file.getPath());
             } else {
-                lines.add(file.getContent());
+                // 基础 AGENTS.md SOUL.md USER.md 直接读取, 省下工具调用
+                if ("AGENTS.md".equalsIgnoreCase(file.getName())
+                        || "SOUL.md".equalsIgnoreCase(file.getName())
+                        || "USER.md".equalsIgnoreCase(file.getName())) {
+                    lines.add(file.getContent());
+                }
+                  lines.add("如需要读取,则调用read_file工具加载");
             }
             lines.add("");
         }
+        lines.add("</project_context>");
 
         return String.join("\n", lines);
     }
@@ -248,5 +252,19 @@ public class BootstrapLoader {
         } else {
             LOGGER.warning(message);
         }
+    }
+
+    /**
+     * 是否需要引导
+     * @return
+     */
+    public boolean isNeedBootstrap() {
+        Path filePath = workspace.resolve("BOOTSTRAP.md");
+        if (Files.exists(filePath) && Files.isRegularFile(filePath)) {
+            // 存在文件代表需要引导
+            return true;
+        }
+        // 不存在代表已经引导成功了
+        return false;
     }
 }
