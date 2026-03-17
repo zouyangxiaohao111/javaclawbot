@@ -272,7 +272,7 @@ public final class ModelFallbackManager {
         String model = current.getModel();
         LLMProvider provider = current.getProvider();
 
-        provider.chat(params.getMessages(), params.getTools(), model, params.getMaxTokens(), params.getTemperature(), params.getReasoningEffort())
+        provider.chatWithRetry(params.getMessages(), params.getTools(), model, params.getMaxTokens(), params.getTemperature(), params.getReasoningEffort())
                 .whenComplete((resp, ex) -> {
                     boolean shouldFallback = chain.getStrategy().shouldFallback(resp, ex, index);
 
