@@ -168,7 +168,7 @@ public final class OnboardWizard {
         System.out.println("  ⚠️  安全警告 — 请仔细阅读");
         System.out.println("═══════════════════════════════════════════════════════════════");
         System.out.println();
-        System.out.println("nanobot 是一个个人 AI 助手，默认为单一可信操作边界。");
+        System.out.println("javaclawbot 是一个个人 AI 助手，默认为单一可信操作边界。");
         System.out.println();
         System.out.println("重要提示：");
         System.out.println("  • 此助手可以读取文件并执行操作（如果启用了工具）");
@@ -475,7 +475,7 @@ public final class OnboardWizard {
 
         // QuickStart 默认跳过技能安装
         if (flow == WizardFlow.QUICKSTART) {
-            System.out.println("  跳过技能安装（可稍后使用 'nanobot skills' 安装）");
+            System.out.println("  跳过技能安装（可稍后使用 'javaclawbot skills' 安装）");
             return;
         }
 
@@ -509,17 +509,17 @@ public final class OnboardWizard {
         System.out.println("  配置文件: " + configPath);
         System.out.println("  工作空间: " + workspace);
         System.out.println();
-        System.out.println("  🐈 nanobot is ready!");
+        System.out.println("  🐈 javaclawbot is ready!");
         System.out.println();
         System.out.println("───────────────────────────────────────────────────────────────");
         System.out.println("  下一步：");
         System.out.println();
         System.out.println("  1. 确认模型配置: cat " + configPath);
-        System.out.println("  2. 开始对话: nanobot agent -m \"Hello!\"");
-        System.out.println("  3. 查看帮助: nanobot --help");
+        System.out.println("  2. 开始对话: javaclawbot agent -m \"Hello!\"");
+        System.out.println("  3. 查看帮助: javaclawbot --help");
         System.out.println();
         System.out.println("  Shell 补全:");
-        System.out.println("    nanobot completion --install");
+        System.out.println("    javaclawbot completion --install");
         System.out.println();
         System.out.println("═══════════════════════════════════════════════════════════════");
     }

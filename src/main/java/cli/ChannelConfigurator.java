@@ -57,7 +57,7 @@ public class ChannelConfigurator {
         System.out.println("  Channel 配置");
         System.out.println("───────────────────────────────────────────────────────────────");
         System.out.println();
-        System.out.println("Channel 用于连接外部聊天平台，让 nanobot 可以在飞书、Telegram 等平台运行。");
+        System.out.println("Channel 用于连接外部聊天平台，让 javaclawbot 可以在飞书、Telegram 等平台运行。");
         System.out.println();
 
         // 显示当前状态
@@ -71,7 +71,7 @@ public class ChannelConfigurator {
         );
 
         if (!shouldConfigure) {
-            System.out.println("  跳过 Channel 配置（可稍后编辑 ~/.nanobot/config.json）");
+            System.out.println("  跳过 Channel 配置（可稍后编辑 ~/.javaclawbot/config.json）");
             return;
         }
 

@@ -15,7 +15,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
-import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -24,7 +23,7 @@ import java.util.regex.Pattern;
  * - 技能以目录形式存在，每个技能目录内包含 SKILL.md
  * - 支持从“工作区技能目录”和“内置技能目录”加载，工作区优先级更高
  * - 支持解析 SKILL.md 顶部的 YAML 头信息（仅支持简单 key: value）
- * - 支持从头信息中的 metadata 字段解析 JSON，并读取 nanobot/openclaw 下的配置
+ * - 支持从头信息中的 metadata 字段解析 JSON，并读取 javaclawbot/openclaw 下的配置
  * - 支持检查技能依赖（可执行命令、环境变量），并按需过滤不可用技能
  */
 @Slf4j
@@ -257,7 +256,7 @@ public class SkillsLoader {
 
     /**
      * 返回标记为 always=true 且依赖满足的技能名称列表
-     * - always 可以在 JSON 的 nanobot/openclaw 中出现
+     * - always 可以在 JSON 的 javaclawbot/openclaw 中出现
      * - 也可以直接出现在 YAML 头信息中
      */
     public List<String> getAlwaysSkills() {
@@ -266,7 +265,7 @@ public class SkillsLoader {
             Map<String, String> meta = getSkillMetadata(s.get("name"));
             if (meta == null) meta = Collections.emptyMap();
 
-            Map<String, Object> skillMeta = parseNanobotMetadata(meta.getOrDefault("metadata", ""));
+            Map<String, Object> skillMeta = parseJavaClawBotMetadata(meta.getOrDefault("metadata", ""));
             Object always1 = skillMeta.get("always");
             String always2 = meta.get("always");
 
@@ -397,10 +396,10 @@ public class SkillsLoader {
 
     /**
      * 解析 YAML 头信息中的 metadata（JSON 字符串）：
-     * - 如果是对象，优先取 nanobot，其次取 openclaw
+     * - 如果是对象，优先取 javaclawbot，其次取 openclaw
      * - 解析失败或结构不符合则返回空 Map
      */
-    private Map<String, Object> parseNanobotMetadata(String raw) {
+    private Map<String, Object> parseJavaClawBotMetadata(String raw) {
         if (raw == null) return new LinkedHashMap<>();
         String s = raw.trim();
         if (s.isEmpty()) return new LinkedHashMap<>();
@@ -410,7 +409,13 @@ public class SkillsLoader {
             @SuppressWarnings("unchecked")
             Map<String, Object> data = (Map<String, Object>) parsed;
 
-            Object nb = data.get("nanobot");
+            Object jcb = data.get("javaclawbot");
+            if (jcb instanceof Map) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> m = (Map<String, Object>) jcb;
+                return m;
+            }
+            Object nb = data.get("javaclawbot");
             if (nb instanceof Map) {
                 @SuppressWarnings("unchecked")
                 Map<String, Object> m = (Map<String, Object>) nb;
@@ -459,12 +464,12 @@ public class SkillsLoader {
     }
 
     /**
-     * 获取技能的 nanobot/openclaw 元数据
+     * 获取技能的 javaclawbot/openclaw 元数据
      */
     private Map<String, Object> getSkillMeta(String name) {
         Map<String, String> meta = getSkillMetadata(name);
         if (meta == null) meta = Collections.emptyMap();
-        return parseNanobotMetadata(meta.getOrDefault("metadata", ""));
+        return parseJavaClawBotMetadata(meta.getOrDefault("metadata", ""));
     }
 
     // ==========================

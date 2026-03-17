@@ -15,6 +15,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
@@ -24,11 +25,11 @@ import java.util.stream.Collectors;
  * 持久化记忆系统（对齐 OpenClaw 架构）：
  * - MEMORY.md：长期记忆（自动压缩生成）
  * - memory/YYYY-MM-DD.md：每日文件（原始日志）
- * - .nanobot/memory.db：SQLite 索引（向量/关键词搜索）
+ * - .javaclawbot/memory.db：SQLite 索引（向量/关键词搜索）
  *
  * 工作方式：
  * - 日常对话 → 记录到 memory/YYYY-MM-DD.md
- * - 对话历史压缩 → 更新 MEMORY.md
+ * - 对话历史摘要总结 → 更新 MEMORY.md
  * - 心跳任务 → 定期整理每日文件到 MEMORY.md，清理旧文件
  *
  * 搜索能力：
@@ -101,9 +102,9 @@ public class MemoryStore {
                     StandardOpenOption.WRITE,
                     StandardOpenOption.APPEND
             )) {
-                w.write(rstrip(content));
-                w.newLine();
-                w.newLine();
+                w.write(LocalDateTime.now() + ":" + rstrip(content) + "\n----------------------------\n");
+                //w.newLine();
+                //w.newLine();
             }
         } catch (Exception e) {
             throw new RuntimeException("追加写入每日文件失败: " + filePath, e);

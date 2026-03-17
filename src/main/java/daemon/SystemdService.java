@@ -12,8 +12,8 @@ import java.util.concurrent.TimeUnit;
  */
 public class SystemdService implements DaemonService {
 
-    private static final String SERVICE_NAME = "nanobot";
-    private static final String SERVICE_DESCRIPTION = "nanobot Gateway - Personal AI Assistant";
+    private static final String SERVICE_NAME = "javaclawbot";
+    private static final String SERVICE_DESCRIPTION = "javaclawbot Gateway - Personal AI Assistant";
     
     private final Path unitDir;
     private final Path logDir;
@@ -21,7 +21,7 @@ public class SystemdService implements DaemonService {
     public SystemdService() {
         String home = System.getProperty("user.home");
         this.unitDir = Paths.get(home, ".config", "systemd", "user");
-        this.logDir = Paths.get(home, ".nanobot", "logs");
+        this.logDir = Paths.get(home, ".javaclawbot", "logs");
     }
     
     @Override
@@ -97,7 +97,7 @@ public class SystemdService implements DaemonService {
     public ServiceResult start() {
         try {
             if (!isInstalled()) {
-                return ServiceResult.failure("服务未安装，请先运行: nanobot service install");
+                return ServiceResult.failure("服务未安装，请先运行: javaclawbot service install");
             }
             
             ServiceResult result = executeCommand("systemctl", "--user", "start", SERVICE_NAME);
@@ -133,7 +133,7 @@ public class SystemdService implements DaemonService {
     public ServiceResult restart() {
         try {
             if (!isInstalled()) {
-                return ServiceResult.failure("服务未安装，请先运行: nanobot service install");
+                return ServiceResult.failure("服务未安装，请先运行: javaclawbot service install");
             }
             
             ServiceResult result = executeCommand("systemctl", "--user", "restart", SERVICE_NAME);
@@ -221,7 +221,7 @@ public class SystemdService implements DaemonService {
         sb.append("[Unit]\n");
         sb.append("Description=").append(SERVICE_DESCRIPTION).append("\n");
         sb.append("After=network.target\n");
-        sb.append("Documentation=https://github.com/HKUDS/nanobot\n");
+        sb.append("Documentation=https://github.com/HKUDS/javaclawbot\n");
         sb.append("\n");
         sb.append("[Service]\n");
         sb.append("Type=simple\n");

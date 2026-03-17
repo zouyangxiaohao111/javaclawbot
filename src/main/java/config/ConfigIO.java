@@ -18,7 +18,7 @@ import java.util.Map;
  * 配置加载与保存工具
  *
  * 功能对齐 Python 源码：
- * - get_config_path：默认 ~/.nanobot/config.json
+ * - get_config_path：默认 ~/.javaclawbot/config.json
  * - get_data_dir：调用 helpers.get_data_path（Java 侧对应 Helpers.getDataPath）
  * - load_config：
  *   - 如果配置文件存在：读取 JSON -> 迁移旧格式 -> 反序列化为 Config
@@ -38,10 +38,10 @@ public final class ConfigIO {
     private ConfigIO() {}
 
     /**
-     * 获取默认配置文件路径：~/.nanobot/config.json
+     * 获取默认配置文件路径：~/.javaclawbot/config.json
      */
     public static Path getConfigPath() {
-        return Paths.get(System.getProperty("user.home"), ".nanobot", "config.json");
+        return Paths.get(System.getProperty("user.home"), ".javaclawbot", "config.json");
     }
     /**
      * 获取指定的工作空间对应的配置文件路径
@@ -56,10 +56,10 @@ public final class ConfigIO {
     }
 
     /**
-     * 获取 nanobot 数据目录（对齐 Python 的 get_data_dir）
+     * 获取 javaclawbot 数据目录（对齐 Python 的 get_data_dir）
      *
      * Python 版本：
-     * - from nanobot.utils.helpers import get_data_path
+     * - from javaclawbot.utils.helpers import get_data_path
      * - return get_data_path()
      *
      * Java 版本：

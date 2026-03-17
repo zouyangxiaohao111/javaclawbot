@@ -20,7 +20,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 
 /**
- * Java port of nanobot/agent/tools/web.py -> WebSearchTool
+ * Java port of javaclawbot/agent/tools/web.py -> WebSearchTool
  *
  * 对齐 Python:
  * - proxy 支持
@@ -121,7 +121,7 @@ public class WebSearchTool extends Tool {
         if (apiKey.isBlank()) {
             return CompletableFuture.completedFuture(
                     "Error: Brave Search API key not configured. " +
-                    "Set it in ~/.nanobot/config.json under tools.web.search.apiKey " +
+                    "Set it in ~/.javaclawbot/config.json under tools.web.search.apiKey " +
                     "(or export BRAVE_API_KEY), then restart the gateway."
             );
         }

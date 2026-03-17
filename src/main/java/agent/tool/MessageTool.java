@@ -10,7 +10,7 @@ import java.util.function.Function;
 /**
  * Message tool for sending messages to users on chat channels.
  *
- * 1:1 with Python nanobot.agent.tools.message.MessageTool:
+ * 1:1 with Python javaclawbot.agent.tools.message.MessageTool:
  * - set_context(channel, chat_id, message_id)
  * - execute(): explicit args override defaults from context
  * - requires channel & chat_id

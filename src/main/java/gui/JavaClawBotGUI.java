@@ -40,7 +40,7 @@ import static config.ConfigReloader.createRuntimeComponents;
 
 
 /**
- * Nanobot Swing GUI
+ * javaclawbot Swing GUI
  *
  * 目标：
  * 1) 保留 Swing 实现
@@ -51,7 +51,7 @@ import static config.ConfigReloader.createRuntimeComponents;
  * 6) System / Progress 左侧显示
  * 7) 启动信息不进入聊天流
  */
-public class NanobotGUI extends JFrame {
+public class JavaClawBotGUI extends JFrame {
 
     // =========================
     // 主题色
@@ -111,8 +111,8 @@ public class NanobotGUI extends JFrame {
     private final String cliChannel = "cli";
     private final String cliChatId = "direct";
 
-    public NanobotGUI() {
-        super("Nanobot");
+    public JavaClawBotGUI() {
+        super("javaclawbot");
         initializeWindow();
         initializeUI();
         initializeCore();
@@ -131,7 +131,7 @@ public class NanobotGUI extends JFrame {
 
         try {
             System.setProperty("apple.laf.useScreenMenuBar", "true");
-            System.setProperty("apple.awt.application.name", "Nanobot");
+            System.setProperty("apple.awt.application.name", "javaclawbot");
         } catch (Exception ignored) {
         }
 
@@ -173,7 +173,7 @@ public class NanobotGUI extends JFrame {
         left.setOpaque(false);
         left.setLayout(new BoxLayout(left, BoxLayout.Y_AXIS));
 
-        JLabel titleLabel = new JLabel("🐈 Nanobot");
+        JLabel titleLabel = new JLabel("🐈 javaclawbot");
         titleLabel.setFont(UiFonts.bold(20));
         titleLabel.setForeground(TEXT_PRIMARY);
 
@@ -458,17 +458,17 @@ public class NanobotGUI extends JFrame {
 
             JOptionPane.showMessageDialog(
                     this,
-                    "🐈 nanobot is ready!\n\n"
+                    "🐈 javaclawbot is ready!\n\n"
                             + "Next steps:\n"
-                            + "1. Add your API key to ~/.nanobot/config.json\n"
+                            + "1. Add your API key to ~/.javaclawbot/config.json\n"
                             + "2. Start chatting in this GUI",
                     "Onboard 完成",
                     JOptionPane.INFORMATION_MESSAGE
             );
 
-            appendSystem("🐈 nanobot is ready!");
+            appendSystem("🐈 javaclawbot is ready!");
             appendSystem("Next steps:");
-            appendSystem("1. Add your API key to ~/.nanobot/config.json");
+            appendSystem("1. Add your API key to ~/.javaclawbot/config.json");
             appendSystem("2. Start chatting in this GUI");
 
         } catch (Exception e) {
@@ -562,7 +562,7 @@ public class NanobotGUI extends JFrame {
     }
 
     private void appendBot(String message) {
-        addBubble(BubbleType.BOT, "🐈 Nanobot", message);
+        addBubble(BubbleType.BOT, "🐈 javaclawbot", message);
     }
 
     private void appendSystem(String message) {
@@ -650,7 +650,7 @@ public class NanobotGUI extends JFrame {
         Path workspace = config.getWorkspacePath();
 
         StringBuilder sb = new StringBuilder();
-        sb.append("🐈 Nanobot 状态\n\n");
+        sb.append("🐈 javaclawbot 状态\n\n");
         sb.append("配置文件: ").append(configPath).append(Files.exists(configPath) ? " ＜（＾－＾）＞" : "┭┮﹏┭┮").append("\n");
         sb.append("工作空间: ").append(workspace).append(Files.exists(workspace) ? " ＜（＾－＾）＞" : "┭┮﹏┭┮").append("\n");
         sb.append("模型: ").append(safeModel()).append("\n\n");
@@ -739,7 +739,7 @@ public class NanobotGUI extends JFrame {
 
     private void showAbout() {
         String about = ""
-                + "🐈 Nanobot - AI Assistant\n\n"
+                + "🐈 javaclawbot - AI Assistant\n\n"
                 + "版本: 1.0\n"
                 + "UI: FlatLaf / FlatMacLightLaf\n"
                 + "聊天布局: 左右气泡 + Markdown 展示\n"
@@ -923,7 +923,7 @@ public class NanobotGUI extends JFrame {
                 }
             } catch (Exception ignored) {
             }
-            return Paths.get(System.getProperty("user.home"), ".nanobot", "workspace");
+            return Paths.get(System.getProperty("user.home"), ".javaclawbot", "workspace");
         }
     }
 
@@ -1415,7 +1415,7 @@ public class NanobotGUI extends JFrame {
         }
 
         SwingUtilities.invokeLater(() -> {
-            NanobotGUI gui = new NanobotGUI();
+            JavaClawBotGUI gui = new JavaClawBotGUI();
             gui.setVisible(true);
         });
     }

@@ -173,7 +173,7 @@ public class ContextBuilder {
         }
         String runtime = system + " " + arch + ", Java " + javaVersion;
 
-        return "# nanobot 🐈\n\n" +
+        return "# 身份 🐈\n\n" +
                 "你是一个有帮助的 AI 助手。\n\n" +
                 "## 运行环境\n" +
                 runtime + "\n\n" +
@@ -183,7 +183,7 @@ public class ContextBuilder {
                 "- 自定义技能: " + workspacePath + "/skills/{skill-name}/SKILL.md\n\n" +
                 bootstrapLoader.loadIdentity() + "\n\n" +
                 """
-                ## nanobot 指南\n
+                ## 指南\n
                 - 调用工具前先说明意图，但在收到结果前不要预测或声称结果。\n
                 - 修改文件前先读取。不要假设文件或目录存在。\n
                 - 写入或编辑文件后，如果准确性重要，请重新读取确认。\n
@@ -199,7 +199,6 @@ public class ContextBuilder {
      * 构建运行时元信息块（放在用户消息之前的单独 user 消息里）
      *
      * 说明：
-     * - Python 使用 datetime.now() + time.strftime("%Z") 获取时区缩写
      * - Java 这里用 ZonedDateTime + TimeZone.getDefault().getID() 作为时区标识
      * - 该块只是"元数据"，不是指令（tag 文本保持一致）
      */
@@ -454,13 +453,4 @@ public class ContextBuilder {
         return bootstrapConfig.getIsBootstrap() == 1;
     }
 
-    /**
-     * 清除引导文件
-     */
-    public void cleanBootstrapMd() throws Exception{
-        Path resolve = workspace.resolve("BOOTSTRAP.md");
-        if (Files.exists(resolve)) {
-            Files.delete(resolve);
-        }
-    }
 }

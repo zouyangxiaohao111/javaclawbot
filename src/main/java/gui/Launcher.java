@@ -1,11 +1,11 @@
 package gui;
 
 /**
- * Nanobot GUI 启动器
+ * javaclawbot GUI 启动器
  * 提供简单的启动入口
  */
 public class Launcher {
     public static void main(String[] args) {
-        NanobotGUI.main(args);
+        JavaClawBotGUI.main(args);
     }
 }

@@ -110,9 +110,9 @@ public class CompletionCmd implements Runnable {
      */
     private String generateZshCompletion() {
         return """
-            #compdef nanobot
+            #compdef javaclawbot
             
-            _nanobot_root_completion() {
+            _javaclawbot_root_completion() {
               local -a commands
               local -a options
               
@@ -122,28 +122,28 @@ public class CompletionCmd implements Runnable {
               case $state in
                 (args)
                   case $line[1] in
-                    (onboard) _nanobot_onboard ;;
-                    (gateway) _nanobot_gateway ;;
-                    (agent) _nanobot_agent ;;
-                    (status) _nanobot_status ;;
-                    (channels) _nanobot_channels ;;
-                    (cron) _nanobot_cron ;;
-                    (provider) _nanobot_provider ;;
-                    (cost) _nanobot_cost ;;
-                    (completion) _nanobot_completion ;;
+                    (onboard) _javaclawbot_onboard ;;
+                    (gateway) _javaclawbot_gateway ;;
+                    (agent) _javaclawbot_agent ;;
+                    (status) _javaclawbot_status ;;
+                    (channels) _javaclawbot_channels ;;
+                    (cron) _javaclawbot_cron ;;
+                    (provider) _javaclawbot_provider ;;
+                    (cost) _javaclawbot_cost ;;
+                    (completion) _javaclawbot_completion ;;
                   esac
                   ;;
               esac
             }
             
-            _nanobot_onboard() {
+            _javaclawbot_onboard() {
               _arguments \\
                 '--quickstart[Quick start mode]' \\
                 '--advanced[Advanced mode]' \\
                 '--accept-risk[Accept risk warning]'
             }
             
-            _nanobot_gateway() {
+            _javaclawbot_gateway() {
               _arguments \\
                 '-p+[Gateway port]:port' \\
                 '--port+[Gateway port]:port' \\
@@ -155,7 +155,7 @@ public class CompletionCmd implements Runnable {
                 '--verbose[Verbose output]'
             }
             
-            _nanobot_agent() {
+            _javaclawbot_agent() {
               _arguments \\
                 '-m+[Message to send]:message' \\
                 '--message+[Message to send]:message' \\
@@ -171,11 +171,11 @@ public class CompletionCmd implements Runnable {
                 '--no-logs[Hide runtime logs]'
             }
             
-            _nanobot_status() {
+            _javaclawbot_status() {
               _arguments
             }
             
-            _nanobot_channels() {
+            _javaclawbot_channels() {
               local -a subcommands
               subcommands=(
                 'status:Show channel status'
@@ -184,7 +184,7 @@ public class CompletionCmd implements Runnable {
               _describe 'subcommand' subcommands
             }
             
-            _nanobot_cron() {
+            _javaclawbot_cron() {
               local -a subcommands
               subcommands=(
                 'list:List scheduled jobs'
@@ -196,7 +196,7 @@ public class CompletionCmd implements Runnable {
               _describe 'subcommand' subcommands
             }
             
-            _nanobot_provider() {
+            _javaclawbot_provider() {
               local -a subcommands
               subcommands=(
                 'login:Authenticate with an OAuth provider'
@@ -204,7 +204,7 @@ public class CompletionCmd implements Runnable {
               _describe 'subcommand' subcommands
             }
             
-            _nanobot_cost() {
+            _javaclawbot_cost() {
               _arguments \\
                 '-d+[Number of days to show]:days' \\
                 '--days+[Number of days to show]:days' \\
@@ -212,7 +212,7 @@ public class CompletionCmd implements Runnable {
                 '--session+[Show cost for specific session]:session'
             }
             
-            _nanobot_completion() {
+            _javaclawbot_completion() {
               _arguments \\
                 '-s+[Shell type]:shell:(zsh bash fish powershell)' \\
                 '--shell+[Shell type]:shell:(zsh bash fish powershell)' \\
@@ -223,7 +223,7 @@ public class CompletionCmd implements Runnable {
                 '--write-state[Write to state directory]'
             }
             
-            compdef _nanobot_root_completion nanobot
+            compdef _javaclawbot_root_completion javaclawbot
             """;
     }
 
@@ -232,7 +232,7 @@ public class CompletionCmd implements Runnable {
      */
     private String generateBashCompletion() {
         return """
-            _nanobot_completion() {
+            _javaclawbot_completion() {
                 local cur prev opts
                 COMPREPLY=()
                 cur="${COMP_WORDS[COMP_CWORD]}"
@@ -295,7 +295,7 @@ public class CompletionCmd implements Runnable {
                 COMPREPLY=( $(compgen -W "${opts}" -- ${cur}) )
             }
             
-            complete -F _nanobot_completion nanobot
+            complete -F _javaclawbot_completion javaclawbot
             """;
     }
 
@@ -304,68 +304,68 @@ public class CompletionCmd implements Runnable {
      */
     private String generateFishCompletion() {
         return """
-            # nanobot completion for fish
+            # javaclawbot completion for fish
             
             # Root commands
-            complete -c nanobot -n __fish_use_subcommand -a onboard -d 'Initialize nanobot configuration'
-            complete -c nanobot -n __fish_use_subcommand -a gateway -d 'Start the nanobot gateway'
-            complete -c nanobot -n __fish_use_subcommand -a agent -d 'Interact with the agent directly'
-            complete -c nanobot -n __fish_use_subcommand -a status -d 'Show nanobot status'
-            complete -c nanobot -n __fish_use_subcommand -a channels -d 'Manage channels'
-            complete -c nanobot -n __fish_use_subcommand -a cron -d 'Manage scheduled tasks'
-            complete -c nanobot -n __fish_use_subcommand -a provider -d 'Manage providers'
-            complete -c nanobot -n __fish_use_subcommand -a cost -d 'Show session cost and usage'
-            complete -c nanobot -n __fish_use_subcommand -a completion -d 'Generate shell completion'
+            complete -c javaclawbot -n __fish_use_subcommand -a onboard -d 'Initialize javaclawbot configuration'
+            complete -c javaclawbot -n __fish_use_subcommand -a gateway -d 'Start the javaclawbot gateway'
+            complete -c javaclawbot -n __fish_use_subcommand -a agent -d 'Interact with the agent directly'
+            complete -c javaclawbot -n __fish_use_subcommand -a status -d 'Show javaclawbot status'
+            complete -c javaclawbot -n __fish_use_subcommand -a channels -d 'Manage channels'
+            complete -c javaclawbot -n __fish_use_subcommand -a cron -d 'Manage scheduled tasks'
+            complete -c javaclawbot -n __fish_use_subcommand -a provider -d 'Manage providers'
+            complete -c javaclawbot -n __fish_use_subcommand -a cost -d 'Show session cost and usage'
+            complete -c javaclawbot -n __fish_use_subcommand -a completion -d 'Generate shell completion'
             
             # Global options
-            complete -c nanobot -n __fish_use_subcommand -l help -d 'Show help'
-            complete -c nanobot -n __fish_use_subcommand -l version -d 'Show version'
+            complete -c javaclawbot -n __fish_use_subcommand -l help -d 'Show help'
+            complete -c javaclawbot -n __fish_use_subcommand -l version -d 'Show version'
             
             # onboard options
-            complete -c nanobot -n '__fish_seen_subcommand_from onboard' -l quickstart -d 'Quick start mode'
-            complete -c nanobot -n '__fish_seen_subcommand_from onboard' -l advanced -d 'Advanced mode'
-            complete -c nanobot -n '__fish_seen_subcommand_from onboard' -l accept-risk -d 'Accept risk warning'
+            complete -c javaclawbot -n '__fish_seen_subcommand_from onboard' -l quickstart -d 'Quick start mode'
+            complete -c javaclawbot -n '__fish_seen_subcommand_from onboard' -l advanced -d 'Advanced mode'
+            complete -c javaclawbot -n '__fish_seen_subcommand_from onboard' -l accept-risk -d 'Accept risk warning'
             
             # gateway options
-            complete -c nanobot -n '__fish_seen_subcommand_from gateway' -s p -l port -d 'Gateway port'
-            complete -c nanobot -n '__fish_seen_subcommand_from gateway' -s w -l workspace -d 'Workspace directory' -r
-            complete -c nanobot -n '__fish_seen_subcommand_from gateway' -s c -l config -d 'Config file path' -r
-            complete -c nanobot -n '__fish_seen_subcommand_from gateway' -s v -l verbose -d 'Verbose output'
+            complete -c javaclawbot -n '__fish_seen_subcommand_from gateway' -s p -l port -d 'Gateway port'
+            complete -c javaclawbot -n '__fish_seen_subcommand_from gateway' -s w -l workspace -d 'Workspace directory' -r
+            complete -c javaclawbot -n '__fish_seen_subcommand_from gateway' -s c -l config -d 'Config file path' -r
+            complete -c javaclawbot -n '__fish_seen_subcommand_from gateway' -s v -l verbose -d 'Verbose output'
             
             # agent options
-            complete -c nanobot -n '__fish_seen_subcommand_from agent' -s m -l message -d 'Message to send'
-            complete -c nanobot -n '__fish_seen_subcommand_from agent' -s s -l session -d 'Session ID'
-            complete -c nanobot -n '__fish_seen_subcommand_from agent' -s w -l workspace -d 'Workspace directory' -r
-            complete -c nanobot -n '__fish_seen_subcommand_from agent' -s c -l config -d 'Config file path' -r
-            complete -c nanobot -n '__fish_seen_subcommand_from agent' -l markdown -d 'Render as Markdown'
-            complete -c nanobot -n '__fish_seen_subcommand_from agent' -l logs -d 'Show runtime logs'
+            complete -c javaclawbot -n '__fish_seen_subcommand_from agent' -s m -l message -d 'Message to send'
+            complete -c javaclawbot -n '__fish_seen_subcommand_from agent' -s s -l session -d 'Session ID'
+            complete -c javaclawbot -n '__fish_seen_subcommand_from agent' -s w -l workspace -d 'Workspace directory' -r
+            complete -c javaclawbot -n '__fish_seen_subcommand_from agent' -s c -l config -d 'Config file path' -r
+            complete -c javaclawbot -n '__fish_seen_subcommand_from agent' -l markdown -d 'Render as Markdown'
+            complete -c javaclawbot -n '__fish_seen_subcommand_from agent' -l logs -d 'Show runtime logs'
             
             # channels subcommands
-            complete -c nanobot -n '__fish_seen_subcommand_from channels' -a status -d 'Show channel status'
-            complete -c nanobot -n '__fish_seen_subcommand_from channels' -a login -d 'Link device via QR code'
+            complete -c javaclawbot -n '__fish_seen_subcommand_from channels' -a status -d 'Show channel status'
+            complete -c javaclawbot -n '__fish_seen_subcommand_from channels' -a login -d 'Link device via QR code'
             
             # cron subcommands
-            complete -c nanobot -n '__fish_seen_subcommand_from cron' -a list -d 'List scheduled jobs'
-            complete -c nanobot -n '__fish_seen_subcommand_from cron' -a add -d 'Add a scheduled job'
-            complete -c nanobot -n '__fish_seen_subcommand_from cron' -a remove -d 'Remove a scheduled job'
-            complete -c nanobot -n '__fish_seen_subcommand_from cron' -a enable -d 'Enable or disable a job'
-            complete -c nanobot -n '__fish_seen_subcommand_from cron' -a run -d 'Manually run a job'
+            complete -c javaclawbot -n '__fish_seen_subcommand_from cron' -a list -d 'List scheduled jobs'
+            complete -c javaclawbot -n '__fish_seen_subcommand_from cron' -a add -d 'Add a scheduled job'
+            complete -c javaclawbot -n '__fish_seen_subcommand_from cron' -a remove -d 'Remove a scheduled job'
+            complete -c javaclawbot -n '__fish_seen_subcommand_from cron' -a enable -d 'Enable or disable a job'
+            complete -c javaclawbot -n '__fish_seen_subcommand_from cron' -a run -d 'Manually run a job'
             
             # cron add options
-            complete -c nanobot -n '__fish_seen_subcommand_from add' -s n -l name -d 'Job name' -r
-            complete -c nanobot -n '__fish_seen_subcommand_from add' -s m -l message -d 'Message for agent' -r
-            complete -c nanobot -n '__fish_seen_subcommand_from add' -s e -l every -d 'Run every N seconds' -r
-            complete -c nanobot -n '__fish_seen_subcommand_from add' -s c -l cron -d 'Cron expression' -r
+            complete -c javaclawbot -n '__fish_seen_subcommand_from add' -s n -l name -d 'Job name' -r
+            complete -c javaclawbot -n '__fish_seen_subcommand_from add' -s m -l message -d 'Message for agent' -r
+            complete -c javaclawbot -n '__fish_seen_subcommand_from add' -s e -l every -d 'Run every N seconds' -r
+            complete -c javaclawbot -n '__fish_seen_subcommand_from add' -s c -l cron -d 'Cron expression' -r
             
             # cost options
-            complete -c nanobot -n '__fish_seen_subcommand_from cost' -s d -l days -d 'Number of days' -r
-            complete -c nanobot -n '__fish_seen_subcommand_from cost' -s s -l session -d 'Session ID' -r
+            complete -c javaclawbot -n '__fish_seen_subcommand_from cost' -s d -l days -d 'Number of days' -r
+            complete -c javaclawbot -n '__fish_seen_subcommand_from cost' -s s -l session -d 'Session ID' -r
             
             # completion options
-            complete -c nanobot -n '__fish_seen_subcommand_from completion' -s s -l shell -d 'Shell type' -xa 'zsh bash fish powershell'
-            complete -c nanobot -n '__fish_seen_subcommand_from completion' -s i -l install -d 'Install to profile'
-            complete -c nanobot -n '__fish_seen_subcommand_from completion' -s y -l yes -d 'Skip confirmation'
-            complete -c nanobot -n '__fish_seen_subcommand_from completion' -l write-state -d 'Write to state directory'
+            complete -c javaclawbot -n '__fish_seen_subcommand_from completion' -s s -l shell -d 'Shell type' -xa 'zsh bash fish powershell'
+            complete -c javaclawbot -n '__fish_seen_subcommand_from completion' -s i -l install -d 'Install to profile'
+            complete -c javaclawbot -n '__fish_seen_subcommand_from completion' -s y -l yes -d 'Skip confirmation'
+            complete -c javaclawbot -n '__fish_seen_subcommand_from completion' -l write-state -d 'Write to state directory'
             """;
     }
 
@@ -374,7 +374,7 @@ public class CompletionCmd implements Runnable {
      */
     private String generatePowerShellCompletion() {
         return """
-            Register-ArgumentCompleter -Native -CommandName nanobot -ScriptBlock {
+            Register-ArgumentCompleter -Native -CommandName javaclawbot -ScriptBlock {
                 param($wordToComplete, $commandAst, $cursorPosition)
                 
                 $commandElements = $commandAst.CommandElements
@@ -423,9 +423,9 @@ public class CompletionCmd implements Runnable {
         String home = System.getProperty("user.home");
         String stateDir = System.getenv("XDG_STATE_HOME");
         if (stateDir != null && !stateDir.isBlank()) {
-            return Paths.get(stateDir, "nanobot", "completions");
+            return Paths.get(stateDir, "javaclawbot", "completions");
         }
-        return Paths.get(home, ".local", "state", "nanobot", "completions");
+        return Paths.get(home, ".local", "state", "javaclawbot", "completions");
     }
 
     /**
@@ -438,7 +438,7 @@ public class CompletionCmd implements Runnable {
             case "bash" -> "bash";
             default -> "zsh";
         };
-        return getCompletionCacheDir().resolve("nanobot." + ext);
+        return getCompletionCacheDir().resolve("javaclawbot." + ext);
     }
 
     /**
@@ -484,7 +484,7 @@ public class CompletionCmd implements Runnable {
             String content = Files.readString(profilePath);
             
             // 检查是否已安装
-            if (content.contains("nanobot completion") || content.contains(cachePath.toString())) {
+            if (content.contains("javaclawbot completion") || content.contains(cachePath.toString())) {
                 if (!skipConfirm) {
                     System.out.println("补全已安装到: " + profilePath);
                 }
@@ -492,7 +492,7 @@ public class CompletionCmd implements Runnable {
             }
             
             // 添加补全
-            String block = "\n# nanobot Completion\n" + sourceLine + "\n";
+            String block = "\n# javaclawbot Completion\n" + sourceLine + "\n";
             String newContent = content.trim() + block;
             
             Files.writeString(profilePath, newContent);

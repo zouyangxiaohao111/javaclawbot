@@ -5,7 +5,7 @@ import java.nio.file.Path;
 import java.time.LocalDateTime;
 
 /**
- * nanobot 工具方法
+ * javaclawbot 工具方法
  *
  * 功能：
  * - 确保目录存在
@@ -33,29 +33,29 @@ public final class Helpers {
     }
 
     /**
-     * 获取数据目录：~/.nanobot
+     * 获取数据目录：~/.javaclawbot
      */
     public static Path getDataPath() {
-        return ensureDir(Path.of(System.getProperty("user.home"), ".nanobot"));
+        return ensureDir(Path.of(System.getProperty("user.home"), ".javaclawbot"));
     }
 
     /**
      * 获取工作区目录
      *
-     * @param workspace 可选；为空则使用 ~/.nanobot/workspace
+     * @param workspace 可选；为空则使用 ~/.javaclawbot/workspace
      */
     public static Path getWorkspacePath(String workspace) {
         Path path;
         if (workspace != null && !workspace.isBlank()) {
             path = expandUserHome(workspace);
         } else {
-            path = Path.of(System.getProperty("user.home"), ".nanobot", "workspace");
+            path = Path.of(System.getProperty("user.home"), ".javaclawbot", "workspace");
         }
         return ensureDir(path);
     }
 
     /**
-     * 获取会话存储目录：~/.nanobot/sessions
+     * 获取会话存储目录：~/.javaclawbot/sessions
      */
     public static Path getSessionsPath() {
         return ensureDir(getDataPath().resolve("sessions"));

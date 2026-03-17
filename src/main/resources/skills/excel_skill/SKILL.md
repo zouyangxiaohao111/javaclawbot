@@ -1,5 +1,5 @@
 ---
-name: excel-ai-skill
+name: excel-skill
 description: 通用 Excel 读写与分析 Skill。适用于读取 workbook/sheet、自动识别表头与多级表头、识别交叉表、按行读取、任意写入、公式、样式、结果 sheet 输出、轻量透视与图表。
 allowed-tools: Read, Write, Bash, Python
 ---

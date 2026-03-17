@@ -51,7 +51,7 @@ public final class SessionManager {
     public SessionManager(Path workspace) {
         this.workspace = workspace;
         this.sessionsDir = Helpers.ensureDir(workspace.resolve("sessions"));
-        this.legacySessionsDir = Path.of(System.getProperty("user.home"), ".nanobot", "sessions");
+        this.legacySessionsDir = Path.of(System.getProperty("user.home"), ".javaclawbot", "sessions");
         
         // 加载 sessionKey -> sessionId 映射
         loadKeyToIdMap();

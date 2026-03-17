@@ -12,9 +12,9 @@ import java.util.concurrent.TimeUnit;
  */
 public class LaunchdService implements DaemonService {
 
-    private static final String SERVICE_ID = "ai.nanobot.gateway";
-    private static final String SERVICE_NAME = "nanobot";
-    private static final String SERVICE_DESCRIPTION = "nanobot Gateway - Personal AI Assistant";
+    private static final String SERVICE_ID = "ai.javaclawbot.gateway";
+    private static final String SERVICE_NAME = "javaclawbot";
+    private static final String SERVICE_DESCRIPTION = "javaclawbot Gateway - Personal AI Assistant";
     
     private final Path launchAgentsDir;
     private final Path logDir;
@@ -22,7 +22,7 @@ public class LaunchdService implements DaemonService {
     public LaunchdService() {
         String home = System.getProperty("user.home");
         this.launchAgentsDir = Paths.get(home, "Library", "LaunchAgents");
-        this.logDir = Paths.get(home, ".nanobot", "logs");
+        this.logDir = Paths.get(home, ".javaclawbot", "logs");
     }
     
     @Override
@@ -87,7 +87,7 @@ public class LaunchdService implements DaemonService {
     public ServiceResult start() {
         try {
             if (!isInstalled()) {
-                return ServiceResult.failure("服务未安装，请先运行: nanobot service install");
+                return ServiceResult.failure("服务未安装，请先运行: javaclawbot service install");
             }
             
             Path plistPath = getPlistPath();
@@ -132,7 +132,7 @@ public class LaunchdService implements DaemonService {
     public ServiceResult restart() {
         try {
             if (!isInstalled()) {
-                return ServiceResult.failure("服务未安装，请先运行: nanobot service install");
+                return ServiceResult.failure("服务未安装，请先运行: javaclawbot service install");
             }
             
             Path plistPath = getPlistPath();

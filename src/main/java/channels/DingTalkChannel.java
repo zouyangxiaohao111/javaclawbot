@@ -273,7 +273,7 @@ public class DingTalkChannel extends BaseChannel {
     private boolean sendMarkdownTextBlocking(String token, String chatId, String content) {
         Map<String, Object> param = new LinkedHashMap<>();
         param.put("text", content);
-        param.put("title", "Nanobot Reply");
+        param.put("title", "javaclawbot Reply");
         return sendBatchMessageBlocking(token, chatId, "sampleMarkdown", param);
     }
 
@@ -410,7 +410,7 @@ public class DingTalkChannel extends BaseChannel {
                     : guessMime(filename);
 
             // 构造 multipart/form-data body
-            String boundary = "----NanobotBoundary" + UUID.randomUUID();
+            String boundary = "----javaclawbotBoundary" + UUID.randomUUID();
             byte[] body = buildMultipartBody(boundary, "media", filename, mime, data);
 
             HttpRequest req = HttpRequest.newBuilder()

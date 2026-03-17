@@ -30,7 +30,7 @@ import java.util.logging.Logger;
  * <p>实现要点：</p>
  * <ul>
  *   <li>Gateway：连接 -> 收到 HELLO(op=10) -> 启动 heartbeat -> IDENTIFY(op=2)</li>
- *   <li>事件：MESSAGE_CREATE -> 下载附件（<=20MB）到 ~/.nanobot/media -> 发布到 bus</li>
+ *   <li>事件：MESSAGE_CREATE -> 下载附件（<=20MB）到 ~/.javaclawbot/media -> 发布到 bus</li>
  *   <li>发送：REST /channels/{channelId}/messages，自动分片（<=2000 字符）</li>
  *   <li>Typing：收到入站消息时开始定时 typing，发出回复后停止 typing</li>
  *   <li>重连：连接异常或 op=7/op=9 时退出当前连接并 5 秒后重连</li>
@@ -422,9 +422,9 @@ public class DiscordChannel extends BaseChannel {
         d.put("intents", cfg.getIntents());
 
         Map<String, Object> props = new LinkedHashMap<>();
-        props.put("os", "nanobot");
-        props.put("browser", "nanobot");
-        props.put("device", "nanobot");
+        props.put("os", "javaclawbot");
+        props.put("browser", "javaclawbot");
+        props.put("device", "javaclawbot");
 
         d.put("properties", props);
         identify.put("d", d);
@@ -514,7 +514,7 @@ public class DiscordChannel extends BaseChannel {
         }
 
         List<String> mediaPaths = new ArrayList<>();
-        Path mediaDir = Path.of(System.getProperty("user.home", ""), ".nanobot", "media");
+        Path mediaDir = Path.of(System.getProperty("user.home", ""), ".javaclawbot", "media");
 
         // 处理 attachments
         List<Map<String, Object>> attachments = castListOfMaps(payload.get("attachments"));

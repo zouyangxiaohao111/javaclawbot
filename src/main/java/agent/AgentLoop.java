@@ -124,7 +124,7 @@ public class AgentLoop {
         this.executor = Executors.newCachedThreadPool(r -> {
             Thread t = new Thread(r);
             t.setDaemon(true);
-            t.setName("nanobot-agent-" + t.getId());
+            t.setName("javaclawbot-agent-" + t.getId());
             return t;
         });
         this.subagents = new SubagentManager(
@@ -493,7 +493,7 @@ public class AgentLoop {
             return CompletableFuture.completedFuture(new OutboundMessage(
                     msg.getChannel(),
                     msg.getChatId(),
-                    "🐈 nanobot 命令:\n/new — 开始新对话\n/stop — 停止当前任务\n/help — 显示可用命令",
+                    "🐈 javaclawbot 命令:\n/new — 开始新对话\n/stop — 停止当前任务\n/help — 显示可用命令",
                     List.of(),
                     Map.of()
             ));
@@ -665,10 +665,11 @@ public class AgentLoop {
         }
         State st = new State();
 
-        // 最后一个必定是用户消息
-        Map<String, Object> userMsg = initialMessages.get(initialMessages.size() - 1);
+        // 每次对花钱最后2个必定是用户消息
+        Map<String, Object> userMsg1 = initialMessages.get(initialMessages.size() - 1);
+        Map<String, Object> userMsg2 = initialMessages.get(initialMessages.size() - 2);
         // 添加用户消息至历史的memory 形式为 YYYY-mm-dd.md
-        String msg = getContextFromMap(userMsg);
+        String msg = getContextFromMap(userMsg1, userMsg2);
         memoryStore.appendToToday("用户: " + msg);
         Runnable step = new Runnable() {
             @Override
@@ -825,7 +826,6 @@ public class AgentLoop {
                         // 设置为已引导
                         context.getBootstrapConfig().setIsBootstrap(1);
                         try {
-                            context.cleanBootstrapMd();
                             ConfigIO.saveConfig(runtimeSettings.getCurrentConfig(), ConfigIO.getConfigPath(workspace));
                         } catch (Exception e) {
                             log.error("修改引导程序异常！", e);
@@ -861,19 +861,26 @@ public class AgentLoop {
         return out;
     }
 
-    private static String getContextFromMap(Map<String, Object> userMsg) {
-        Object content = userMsg.get("content");
-        String msg;
-        if (content instanceof String str) {
-            msg = str;
-        }else {
-            try {
-                msg = new Gson().toJson(content);
-            }catch (Exception e) {
-                msg = content.toString();
+    private static String getContextFromMap(Map<String, Object> ... userMsgs) {
+        StringBuilder sb = new StringBuilder();
+        for (Map<String, Object> userMsg : userMsgs) {
+            if (!userMsg.get("role").equals("user")) {
+                continue;
             }
+            Object content = userMsg.get("content");
+            String msg;
+            if (content instanceof String str) {
+                msg = str;
+            }else {
+                try {
+                    msg = new Gson().toJson(content);
+                }catch (Exception e) {
+                    msg = content.toString();
+                }
+            }
+            sb.append(msg).append("\n");
         }
-        return msg;
+        return sb.toString();
     }
 
     private CompletionStage<Void> executeToolCallsSequential(

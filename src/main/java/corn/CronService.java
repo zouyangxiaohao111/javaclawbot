@@ -36,7 +36,7 @@ public class CronService {
     private volatile long lastModifiedTime = 0;  // 用于检测外部文件变更
     private final ScheduledExecutorService scheduler =
             Executors.newSingleThreadScheduledExecutor(r -> {
-                Thread t = new Thread(r, "nanobot-cron");
+                Thread t = new Thread(r, "javaclawbot-cron");
                 t.setDaemon(true);
                 return t;
             });

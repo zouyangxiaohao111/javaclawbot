@@ -108,7 +108,7 @@ public final class ConfigReloader {
      * 创建运行时组件（支持自定义配置路径和 workspace 路径）
      *
      * 对齐 Python 的 _load_runtime_config(config, workspace)：
-     * - config: 指定配置文件路径，null 则使用默认 ~/.nanobot/config.json
+     * - config: 指定配置文件路径，null 则使用默认 ~/.javaclawbot/config.json
      * - workspace: 覆盖配置中的 workspace 路径
      *
      * @param configPath    自定义配置文件路径，null 则使用默认路径

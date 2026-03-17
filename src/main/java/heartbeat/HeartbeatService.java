@@ -149,7 +149,7 @@ public final class HeartbeatService {
         running = true;
 
         scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
-            Thread t = new Thread(r, "nanobot-heartbeat");
+            Thread t = new Thread(r, "javaclawbot-heartbeat");
             t.setDaemon(true);
             return t;
         });

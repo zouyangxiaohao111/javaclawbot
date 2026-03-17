@@ -672,7 +672,7 @@ public class FeishuChannel extends BaseChannel {
             Path file,
             String expectKeyName
     ) {
-        String boundary = "----nanobot-" + UUID.randomUUID();
+        String boundary = "----javaclawbot-" + UUID.randomUUID();
         try {
             byte[] fileBytes = Files.readAllBytes(file);
 
@@ -777,7 +777,7 @@ public class FeishuChannel extends BaseChannel {
                 filename = fallbackName != null ? fallbackName : (fileKey.substring(0, Math.min(16, fileKey.length())) + guessExt(msgType));
             }
 
-            Path mediaDir = Paths.get(System.getProperty("user.home"), ".nanobot", "media");
+            Path mediaDir = Paths.get(System.getProperty("user.home"), ".javaclawbot", "media");
             Files.createDirectories(mediaDir);
 
             Path out = mediaDir.resolve(filename);

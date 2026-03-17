@@ -12,7 +12,7 @@ import java.util.concurrent.TimeUnit;
  *
  * 对齐 Python: MCPToolWrapper
  *
- * 将 MCP 服务器的工具包装为 nanobot Tool
+ * 将 MCP 服务器的工具包装为 javaclawbot Tool
  */
 public class MCPToolWrapper extends Tool {
 

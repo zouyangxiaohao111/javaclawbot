@@ -10,7 +10,7 @@ import java.util.concurrent.CompletionStage;
  * Tools are capabilities that the agent can use to interact with
  * the environment, such as reading files, executing commands, etc.
  *
- * This is a Java port of nanobot/agent/tools/base.py
+ * This is a Java port of javaclawbot/agent/tools/base.py
  */
 public abstract class Tool {
 

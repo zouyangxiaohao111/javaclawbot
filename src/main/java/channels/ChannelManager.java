@@ -85,7 +85,7 @@ public class ChannelManager {
             } catch (Exception ignored) {
             }
 
-            // 约定你的类名：nanobot.channels.telegram.TelegramChannel -> Java 侧可能是 channels.TelegramChannel
+            // 约定你的类名：javaclawbot.channels.telegram.TelegramChannel -> Java 侧可能是 channels.TelegramChannel
             // 这里用更常见的：channels.TelegramChannel
             tryLoadChannel(
                     "telegram",

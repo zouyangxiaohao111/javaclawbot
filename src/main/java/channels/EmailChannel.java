@@ -219,7 +219,7 @@ public class EmailChannel extends BaseChannel {
                 return;
             }
 
-            String baseSubject = lastSubjectByChat.getOrDefault(toAddr, "nanobot reply");
+            String baseSubject = lastSubjectByChat.getOrDefault(toAddr, "javaclawbot reply");
             String subject = replySubject(baseSubject);
 
             // 支持 metadata.subject 覆盖主题
@@ -546,7 +546,7 @@ public class EmailChannel extends BaseChannel {
      */
     private String replySubject(String baseSubject) {
         String subject = (baseSubject != null ? baseSubject : "").trim();
-        if (subject.isBlank()) subject = "nanobot reply";
+        if (subject.isBlank()) subject = "javaclawbot reply";
 
         String prefix = (cfg.getSubjectPrefix() != null && !cfg.getSubjectPrefix().isBlank())
                 ? cfg.getSubjectPrefix()

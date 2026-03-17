@@ -3,7 +3,7 @@ import picocli.CommandLine;
 import java.util.*;
 import java.util.Scanner;
 
-public final class NanobotShell {
+public final class JavaClawBotShell {
 
     public static void main(String[] args) {
 
@@ -17,11 +17,11 @@ public final class NanobotShell {
             return;
         }
 
-        System.out.println("nanobot interactive shell");
+        System.out.println("javaclawbot interactive shell");
         System.out.println("Examples: onboard | agent -m \"hello\" | status | exit | gateway");
 
         while (true) {
-            System.out.print("nanobot> ");
+            System.out.print("javaclawbot> ");
             String line;
             try {
                 line = scanner.nextLine();
@@ -42,8 +42,8 @@ public final class NanobotShell {
             try {
                 String[] argv = splitArgs(line);
 
-                // 兼容用户输入 "nanobot xxx"
-                if (argv.length > 0 && "nanobot".equalsIgnoreCase(argv[0])) {
+                // 兼容用户输入 "javaclawbot xxx"
+                if (argv.length > 0 && "javaclawbot".equalsIgnoreCase(argv[0])) {
                     argv = Arrays.copyOfRange(argv, 1, argv.length);
                 }
 

@@ -1,6 +1,6 @@
-# nanobot Skills
+# javaclawbot Skills
 
-This directory contains built-in skills that extend nanobot's capabilities.
+This directory contains built-in skills that extend javaclawbot's capabilities.
 
 ## Skill Format
 

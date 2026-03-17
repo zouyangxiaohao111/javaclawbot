@@ -40,7 +40,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * <ul>
  *   <li>长轮询收消息（文本 / 图片 / 语音 / 音频 / 文件）</li>
  *   <li>/start /new /stop /help 命令处理（/new /stop 转发到 bus）</li>
- *   <li>媒体下载到 ~/.nanobot/media/</li>
+ *   <li>媒体下载到 ~/.javaclawbot/media/</li>
  *   <li>typing 指示器（每 4 秒刷新一次，直到处理结束或取消）</li>
  *   <li>媒体组（相册）短暂缓冲 0.6s，合并成一次输入转发</li>
  *   <li>出站：支持回复 message_id（可选），支持发送媒体文件 + 文本（markdown->Telegram HTML）</li>
@@ -275,7 +275,7 @@ public class TelegramChannel extends BaseChannel {
         @Override
         public String getBotUsername() {
             // 机器人用户名可不配置；不影响 long polling
-            return "nanobot";
+            return "javaclawbot";
         }
 
         @Override
@@ -339,7 +339,7 @@ public class TelegramChannel extends BaseChannel {
         // /start：不经过 ACL，直接欢迎
         if (cmd.startsWith("/start")) {
             safeSendText(Long.parseLong(chatId),
-                    "👋 Hi " + safeUserFirstName(user) + "! I'm nanobot.\n\n"
+                    "👋 Hi " + safeUserFirstName(user) + "! I'm javaclawbot.\n\n"
                             + "Send me a message and I'll respond!\n"
                             + "Type /help to see available commands.",
                     null);
@@ -349,7 +349,7 @@ public class TelegramChannel extends BaseChannel {
         // /help：不经过 ACL（与 Python 一致）
         if (cmd.startsWith("/help")) {
             safeSendText(Long.parseLong(chatId),
-                    "🐈 nanobot commands:\n"
+                    "🐈 javaclawbot commands:\n"
                             + "/new — Start a new conversation\n"
                             + "/stop — Stop the current task\n"
                             + "/help — Show available commands",
@@ -571,7 +571,7 @@ public class TelegramChannel extends BaseChannel {
     }
 
     /**
-     * 下载 Telegram file_id 对应文件，并保存到 ~/.nanobot/media/
+     * 下载 Telegram file_id 对应文件，并保存到 ~/.javaclawbot/media/
      */
     private Path downloadTelegramFile(String fileId, String mediaType, String mimeType) throws TelegramApiException {
         if (bot == null) throw new IllegalStateException("bot not initialized");
@@ -583,7 +583,7 @@ public class TelegramChannel extends BaseChannel {
         File downloaded = bot.downloadFile(tf);
 
         // 3) 决定保存目录与后缀
-        Path mediaDir = Paths.get(System.getProperty("user.home"), ".nanobot", "media");
+        Path mediaDir = Paths.get(System.getProperty("user.home"), ".javaclawbot", "media");
         try {
             Files.createDirectories(mediaDir);
         } catch (Exception ignored) {

@@ -567,7 +567,7 @@ public final class ConfigSchema {
     @JsonInclude(JsonInclude.Include.NON_NULL)
     @Data
     public static class AgentDefaults {
-        private String workspace = "~/.nanobot/workspace";
+        private String workspace = "~/.javaclawbot/workspace";
         private String model = "glm-5";
         private String provider = "dashscope";
         private int maxTokens = 163840;

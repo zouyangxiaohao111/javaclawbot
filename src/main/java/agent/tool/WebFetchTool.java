@@ -22,7 +22,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Java port of nanobot/agent/tools/web.py -> WebFetchTool
+ * Java port of javaclawbot/agent/tools/web.py -> WebFetchTool
  *
  * 对齐 Python:
  * - proxy 支持

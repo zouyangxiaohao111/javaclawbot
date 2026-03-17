@@ -11,8 +11,8 @@ import java.util.concurrent.TimeUnit;
  */
 public class SchtasksService implements DaemonService {
 
-    private static final String TASK_NAME = "nanobot-gateway";
-    private static final String SERVICE_DESCRIPTION = "nanobot Gateway - Personal AI Assistant";
+    private static final String TASK_NAME = "javaclawbot-gateway";
+    private static final String SERVICE_DESCRIPTION = "javaclawbot Gateway - Personal AI Assistant";
     
     private final Path logDir;
     private final Path scriptPath;
@@ -21,9 +21,9 @@ public class SchtasksService implements DaemonService {
         String home = System.getProperty("user.home");
         String appData = System.getenv("APPDATA");
         
-        this.logDir = Paths.get(home, ".nanobot", "logs");
+        this.logDir = Paths.get(home, ".javaclawbot", "logs");
         this.scriptPath = Paths.get(appData != null ? appData : home, 
-            "nanobot", "start-gateway.bat");
+            "javaclawbot", "start-gateway.bat");
     }
     
     @Override
@@ -106,7 +106,7 @@ public class SchtasksService implements DaemonService {
     public ServiceResult start() {
         try {
             if (!isInstalled()) {
-                return ServiceResult.failure("服务未安装，请先运行: nanobot service install");
+                return ServiceResult.failure("服务未安装，请先运行: javaclawbot service install");
             }
             
             ServiceResult result = executeCommand(
@@ -148,7 +148,7 @@ public class SchtasksService implements DaemonService {
     public ServiceResult restart() {
         try {
             if (!isInstalled()) {
-                return ServiceResult.failure("服务未安装，请先运行: nanobot service install");
+                return ServiceResult.failure("服务未安装，请先运行: javaclawbot service install");
             }
             
             // 停止
@@ -260,7 +260,7 @@ public class SchtasksService implements DaemonService {
         
         StringBuilder sb = new StringBuilder();
         sb.append("@echo off\n");
-        sb.append("REM nanobot Gateway 启动脚本\n");
+        sb.append("REM javaclawbot Gateway 启动脚本\n");
         sb.append("\n");
         
         if (config.javaHome() != null) {
@@ -269,7 +269,7 @@ public class SchtasksService implements DaemonService {
         
         sb.append("cd /d ").append(config.getWorkingDirectory()).append("\n");
         sb.append("\n");
-        sb.append("echo Starting nanobot Gateway... >> \"").append(logPath).append("\"\n");
+        sb.append("echo Starting javaclawbot Gateway... >> \"").append(logPath).append("\"\n");
         sb.append("echo %date% %time% >> \"").append(logPath).append("\"\n");
         sb.append("\n");
         sb.append(":restart\n");

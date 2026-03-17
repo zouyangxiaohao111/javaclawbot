@@ -155,7 +155,7 @@ public class MCPClient implements AutoCloseable {
         params.put("protocolVersion", "2024-11-05");
         params.put("capabilities", Map.of());
         params.put("clientInfo", Map.of(
-                "name", "nanobot-java",
+                "name", "javaclawbot-java",
                 "version", "1.0.0"
         ));
         initRequest.put("params", params);

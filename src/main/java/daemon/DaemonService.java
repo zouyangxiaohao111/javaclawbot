@@ -93,7 +93,7 @@ public interface DaemonService {
             }
             // 默认路径
             String home = System.getProperty("user.home");
-            return home + "/.nanobot/nanobot.jar";
+            return home + "/.javaclawbot/javaclawbot.jar";
         }
         
         public String getExecStart() {

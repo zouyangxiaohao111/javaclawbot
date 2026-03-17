@@ -95,7 +95,7 @@ public class ExecTool extends Tool {
         this.pathAppend = (pathAppend == null) ? "" : pathAppend;
 
         this.pool = Executors.newCachedThreadPool(r -> {
-            Thread t = new Thread(r, "nanobot-exec");
+            Thread t = new Thread(r, "javaclawbot-exec");
             t.setDaemon(true);
             return t;
         });

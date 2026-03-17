@@ -43,10 +43,10 @@ import java.util.concurrent.atomic.AtomicReference;
 import static config.ConfigReloader.createRuntimeComponents;
 
 @Command(
-        name = "nanobot",
+        name = "javaclawbot",
         mixinStandardHelpOptions = true,
         versionProvider = Commands.VersionProviderImpl.class,
-        description = "nanobot - Personal AI Assistant",
+        description = "javaclawbot - Personal AI Assistant",
         subcommands = {
                 Commands.OnboardCmd.class,
                 Commands.GatewayCmd.class,
@@ -81,14 +81,14 @@ public class Commands implements Runnable {
     static class VersionProviderImpl implements IVersionProvider {
         @Override
         public String[] getVersion() {
-            return new String[]{"🐈 nanobot v" + 1};
+            return new String[]{"🐈 javaclawbot v" + 1};
         }
     }
 
     static void printAgentResponse(String response, boolean renderMarkdown) {
         String content = response == null ? "" : response;
         System.out.println();
-        System.out.println("🐈 nanobot");
+        System.out.println("🐈 javaclawbot");
         System.out.println(content);
         System.out.println();
     }
@@ -138,7 +138,7 @@ public class Commands implements Runnable {
         return new HotSwappableProvider(reloader);
     }
 
-    @Command(name = "onboard", description = "Initialize nanobot configuration and workspace.")
+    @Command(name = "onboard", description = "Initialize javaclawbot configuration and workspace.")
     static class OnboardCmd implements Runnable {
         @Override
         public void run() {
@@ -146,7 +146,7 @@ public class Commands implements Runnable {
         }
     }
 
-    @Command(name = "gateway", description = "Start the nanobot gateway.")
+    @Command(name = "gateway", description = "Start the javaclawbot gateway.")
     static class GatewayCmd implements Runnable {
 
         @Option(names = {"-p", "--port"}, description = "Gateway port")
@@ -163,7 +163,7 @@ public class Commands implements Runnable {
 
         @Override
         public void run() {
-            System.out.println("🐈 Starting nanobot gateway on port " + port + "...");
+            System.out.println("🐈 Starting javaclawbot gateway on port " + port + "...");
 
             // 支持自定义配置路径和 workspace 路径（对齐 Python 的 --config/--workspace）
             Path configPath = (config != null) ? Paths.get(config).toAbsolutePath() : null;
@@ -324,7 +324,7 @@ public class Commands implements Runnable {
         @Option(names = {"--markdown"}, negatable = true, description = "Render assistant output as Markdown")
         boolean markdown = true;
 
-        @Option(names = {"--logs"}, negatable = true, description = "Show nanobot runtime logs during chat")
+        @Option(names = {"--logs"}, negatable = true, description = "Show javaclawbot runtime logs during chat")
         boolean logs = false;
 
         @Override
@@ -421,7 +421,7 @@ public class Commands implements Runnable {
                 cliChatId = sessionId;
             }
 
-            Path histFile = Paths.get(System.getProperty("user.home"), ".nanobot", "history", "cli_history");
+            Path histFile = Paths.get(System.getProperty("user.home"), ".javaclawbot", "history", "cli_history");
             try { Files.createDirectories(histFile.getParent()); } catch (IOException ignored) {}
 
             Terminal terminal;
@@ -532,7 +532,7 @@ public class Commands implements Runnable {
                     bus.publishInbound(in).toCompletableFuture().join();
 
                     // 等待回复（可改更小/更大超时）
-                    System.out.println("[dim]nanobot is thinking...[/dim]");
+                    System.out.println("[dim]javaclawbot is thinking...[/dim]");
                     boolean ok = latch.await(5, TimeUnit.MINUTES);
                     String resp = turnResponseRef.get();
                     turnLatchRef.set(new CountDownLatch(0));
@@ -569,7 +569,7 @@ public class Commands implements Runnable {
         }
     }
 
-    @Command(name = "status", description = "Show nanobot status.")
+    @Command(name = "status", description = "Show javaclawbot status.")
     static class StatusCmd implements Runnable {
         @Override
         public void run() {
@@ -577,7 +577,7 @@ public class Commands implements Runnable {
             ConfigSchema.Config config = ConfigIO.loadConfig(null);
             Path workspace = config.getWorkspacePath();
 
-            System.out.println("🐈 nanobot Status\n");
+            System.out.println("🐈 javaclawbot Status\n");
             System.out.println("Config: " + configPath + (Files.exists(configPath) ? " ✓" : " ✗"));
             System.out.println("Workspace: " + workspace + (Files.exists(workspace) ? " ✓" : " ✗"));
 
@@ -1147,7 +1147,7 @@ public class Commands implements Runnable {
                     daemon.DaemonService.ServiceStatus status = service.status();
 
                     System.out.println();
-                    System.out.println("🐈 nanobot 服务状态");
+                    System.out.println("🐈 javaclawbot 服务状态");
                     System.out.println();
                     System.out.println("平台: " + daemon.DaemonServiceFactory.getCurrentPlatform() + " (" + service.getLabel() + ")");
                     System.out.println("安装: " + (status.installed() ? "✓ 已安装" : "✗ 未安装"));
