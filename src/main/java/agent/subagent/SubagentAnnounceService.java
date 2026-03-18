@@ -2,8 +2,10 @@ package agent.subagent;
 
 import bus.InboundMessage;
 import bus.MessageBus;
+import com.google.gson.Gson;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import utils.GsonFactory;
 
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -33,7 +35,7 @@ public class SubagentAnnounceService {
     private static final int MAX_RETRY_COUNT = 3;
 
     /** 重试延迟（毫秒） */
-    private static final long[] RETRY_DELAYS_MS = {5_000, 10_000, 20_000};
+    private static final long[] RETRY_DELAYS_MS = {500, 1_000, 1500};
 
     public SubagentAnnounceService(MessageBus messageBus, SubagentSystemPromptBuilder promptBuilder) {
         this.messageBus = messageBus;
@@ -47,6 +49,7 @@ public class SubagentAnnounceService {
      * @return 发送结果
      */
     public CompletionStage<Void> announceCompletion(SubagentRunRecord record) {
+        log.debug("公告子代理完成: {}, 具体信息:{}", record.getRunId(), GsonFactory.getGson().toJson(record));
         if (record == null) {
             return CompletableFuture.completedFuture(null);
         }
@@ -140,7 +143,7 @@ public class SubagentAnnounceService {
 
         // 临时性错误模式
         return message.contains("unavailable")
-                || message.contains("timeout")
+//                || message.contains("timeout")
                 || message.contains("connection")
                 || message.contains("network")
                 || message.contains("econnreset")

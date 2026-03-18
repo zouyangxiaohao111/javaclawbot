@@ -2,6 +2,7 @@ package agent.subagent;
 
 import agent.tool.Tool;
 import bus.MessageBus;
+import com.google.gson.Gson;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -117,8 +118,10 @@ public class SessionsSpawnTool extends Tool {
     public CompletionStage<String> execute(Map<String, Object> args) {
         if (args == null) args = Map.of();
 
+
         // 解析参数
         String task = getString(args, "task", null);
+        log.info("子代理开始启动, 具体参数: {}", new Gson().toJson(args));
         if (task == null || task.isBlank()) {
             return CompletableFuture.completedFuture(
                     "{\"status\":\"error\",\"error\":\"task is required\"}"
@@ -128,7 +131,7 @@ public class SessionsSpawnTool extends Tool {
         String label = getString(args, "label", null);
         String modeStr = getString(args, "mode", "run");
         String cleanupStr = getString(args, "cleanup", "keep");
-        String model = getString(args, "model", null);
+        //String model = getString(args, "model", null);
         String thinking = getString(args, "thinking", null);
         Integer timeoutSeconds = getInt(args, "runTimeoutSeconds", 300);
 
@@ -166,7 +169,7 @@ public class SessionsSpawnTool extends Tool {
                 mode,
                 childDepth
         );
-        record.setModel(model);
+        record.setModel(mode.name().toLowerCase());
         record.setRunTimeoutSeconds(timeoutSeconds);
         record.setWorkspaceDir(workspace.toString());
         record.setExpectsCompletionMessage(true);

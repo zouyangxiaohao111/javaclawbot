@@ -303,9 +303,9 @@ public class LocalSubagentExecutor implements SubagentExecutor {
             tools.register(spawnTool);
 
             // 注册 subagents 控制工具
-            SubagentsTool subagentsTool = new SubagentsTool(registry, childController);
-            subagentsTool.setAgentSessionKey(record.getChildSessionKey());
-            tools.register(subagentsTool);
+            SubagentsControlTool subagentsControlTool = new SubagentsControlTool(registry, childController);
+            subagentsControlTool.setAgentSessionKey(record.getChildSessionKey());
+            tools.register(subagentsControlTool);
 
             log.info("Registered spawn/subagents tools for subagent [{}] at depth {}", 
                     record.getRunId(), currentDepth);

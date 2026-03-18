@@ -64,8 +64,8 @@ public final class SessionManager {
      * 如果缓存中没有，尝试从文件加载
      * 如果文件也不存在，创建新会话（生成新的 sessionId）
      */
-    public Session getOrCreate(String key) {
-        return cache.computeIfAbsent(key, k -> {
+    public Session getOrCreate(String sessionKey) {
+        return cache.computeIfAbsent(sessionKey, k -> {
             // 尝试从映射中找到对应的 sessionId
             String sessionId = keyToIdMap.get(k);
             

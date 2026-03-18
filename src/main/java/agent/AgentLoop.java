@@ -1,13 +1,15 @@
 package agent;
 
+import agent.subagent.LocalSubagentExecutor;
+import agent.subagent.SessionsSpawnTool;
 import agent.subagent.SubagentManager;
+import agent.subagent.SubagentsControlTool;
 import agent.tool.*;
 import bus.InboundMessage;
 import bus.MessageBus;
 import bus.OutboundMessage;
 import com.google.gson.Gson;
 import config.AgentRuntimeSettings;
-import config.ConfigIO;
 import config.ConfigSchema;
 import context.ContextBuilder;
 import context.ContextOverflowDetector;
@@ -25,7 +27,6 @@ import session.Session;
 import session.SessionManager;
 import skills.SkillsLoader;
 
-import java.io.IOException;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.*;
@@ -85,6 +86,11 @@ public class AgentLoop {
      */
     private final CronTool cronToolFacade;
 
+    /**
+     * 子代理执行器
+     */
+    private final LocalSubagentExecutor localExec;
+
     public AgentLoop(
             MessageBus bus,
             LLMProvider provider,
@@ -136,6 +142,11 @@ public class AgentLoop {
         this.memoryStore = new MemoryStore(workspace);
         // 注册工具
         this.sharedTools = new ToolRegistry();
+        localExec = new agent.subagent.LocalSubagentExecutor(
+                provider, workspace, execConfig, braveApiKey, restrictToWorkspace,
+                subagents.getRegistry(), bus
+        );
+
         registerSharedTools();
 
         int maxConcurrent = 4;
@@ -197,27 +208,6 @@ public class AgentLoop {
         sharedTools.register(new WebSearchTool(braveApiKey, null));
         sharedTools.register(new WebFetchTool(null));
 
-        // ========== 多 Agent / subagent 相关 ==========
-        agent.subagent.LocalSubagentExecutor localExec = new agent.subagent.LocalSubagentExecutor(
-                provider, workspace, execConfig, braveApiKey, restrictToWorkspace,
-                subagents.getRegistry(), bus
-        );
-        agent.subagent.SessionsSpawnTool spawnTool = new agent.subagent.SessionsSpawnTool(
-                subagents.getRegistry(),
-                subagents.getAnnounceService(),
-                subagents.getPromptBuilder(),
-                localExec,
-                workspace,
-                bus
-        );
-        sharedTools.register(spawnTool);
-
-        agent.subagent.SubagentsTool subagentsTool = new agent.subagent.SubagentsTool(
-                subagents.getRegistry(),
-                subagents.getController()
-        );
-        sharedTools.register(subagentsTool);
-
         // 技能工具
         SkillsLoader skillsLoader = new SkillsLoader(workspace);
         sharedTools.register(new LoadSkillTool(skillsLoader));
@@ -237,11 +227,31 @@ public class AgentLoop {
      * - sharedTools：全局共享、无上下文工具
      * - localTools：当前请求独有、有上下文工具
      */
-    private ToolView buildRequestToolsAndSetContext(String channel, String chatId, String messageId) {
+    private ToolView buildRequestToolsAndSetContext(String sessionKy, String channel, String chatId, String messageId) {
         ToolRegistry localTools = new ToolRegistry();
 
         // 每次请求独立创建 MessageTool，避免串会话
         localTools.register(new MessageTool(bus::publishOutbound, channel, chatId, messageId));
+        // ========== 多 Agent / subagent 相关 ==========
+
+        SessionsSpawnTool spawnTool = new agent.subagent.SessionsSpawnTool(
+                subagents.getRegistry(),
+                subagents.getAnnounceService(),
+                subagents.getPromptBuilder(),
+                localExec,
+                workspace,
+                bus
+        );
+        // 设置上下文
+        spawnTool.setContext(sessionKy, channel, chatId);
+        localTools.register(spawnTool);
+
+        SubagentsControlTool subagentsControlTool = new SubagentsControlTool(
+                subagents.getRegistry(),
+                subagents.getController()
+        );
+        subagentsControlTool.setAgentSessionKey(sessionKy);
+        localTools.register(subagentsControlTool);
 
         // CronTool 带 channel/chatId 上下文，也做成每请求独立
         if (cronService != null) {
@@ -458,17 +468,17 @@ public class AgentLoop {
             String chat = msg.getChatId();
             String channel = (chat != null && chat.contains(":")) ? chat.split(":", 2)[0] : "cli";
             String chatId = (chat != null && chat.contains(":")) ? chat.split(":", 2)[1] : chat;
-            String key = channel + ":" + chatId;
+            String sessionKy = channel + ":" + chatId;
 
-            ToolView requestTools = buildRequestToolsAndSetContext(channel, chatId, extractMessageId(msg.getMetadata()));
+            ToolView requestTools = buildRequestToolsAndSetContext(sessionKy, channel, chatId, extractMessageId(msg.getMetadata()));
 
-            Session session = sessions.getOrCreate(key);
+            Session session = sessions.getOrCreate(sessionKy);
             List<Map<String, Object>> history = session.getHistory(currentMemoryWindow());
             List<Map<String, Object>> initial = context.buildMessages(
                     history, msg.getContent(), null, null, channel, chatId
             );
 
-            return runAgentLoop(key, initial, requestTools, null).thenApply(rr -> {
+            return runAgentLoop(sessionKy, initial, requestTools, null).thenApply(rr -> {
                 saveTurn(session, rr.messages, 1 + history.size());
                 sessions.save(session);
                 return new OutboundMessage(
@@ -481,8 +491,8 @@ public class AgentLoop {
             });
         }
 
-        String key = (sessionKeyOverride != null) ? sessionKeyOverride : msg.getSessionKey();
-        Session session = sessions.getOrCreate(key);
+        String sessionKey = (sessionKeyOverride != null) ? sessionKeyOverride : msg.getSessionKey();
+        Session session = sessions.getOrCreate(sessionKey);
         String cmd = msg.getContent() == null ? "" : msg.getContent().trim().toLowerCase(Locale.ROOT);
 
         if ("/new".equals(cmd)) {
@@ -519,7 +529,7 @@ public class AgentLoop {
         }
 
         ToolView requestTools = buildRequestToolsAndSetContext(
-                msg.getChannel(),
+                sessionKey, msg.getChannel(),
                 msg.getChatId(),
                 extractMessageId(msg.getMetadata())
         );
@@ -554,7 +564,7 @@ public class AgentLoop {
         };
         ProgressCallback progress = (onProgress != null) ? onProgress : busProgress;
 
-        return runAgentLoop(key, initialMessages, requestTools, progress).thenApply(rr -> {
+        return runAgentLoop(sessionKey, initialMessages, requestTools, progress).thenApply(rr -> {
             String finalContent = rr.finalContent != null
                     ? rr.finalContent
                     : "处理完成但没有响应内容。";

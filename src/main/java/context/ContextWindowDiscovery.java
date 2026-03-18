@@ -201,7 +201,7 @@ public class ContextWindowDiscovery {
         MODEL_CACHE.put("mistral", 32768);
         MODEL_CACHE.put("codellama", 16384);
 
-        log.debug("已应用 {} ", MODEL_CACHE.size());
+        log.debug("已应用 {} 个对应模型上下文窗口", MODEL_CACHE.size());
     }
 
     /**

@@ -17,7 +17,7 @@ import java.util.stream.Collectors;
  * - kill: 终止子Agent运行
  * - steer: 向运行中的子Agent发送指导消息
  */
-public class SubagentsTool extends Tool {
+public class SubagentsControlTool extends Tool {
 
     private static final int DEFAULT_RECENT_MINUTES = 30;
     private static final int MAX_RECENT_MINUTES = 24 * 60;
@@ -27,7 +27,7 @@ public class SubagentsTool extends Tool {
     private final SubagentController controller;
     private String agentSessionKey;
 
-    public SubagentsTool(SubagentRegistry registry, SubagentController controller) {
+    public SubagentsControlTool(SubagentRegistry registry, SubagentController controller) {
         this.registry = registry;
         this.controller = controller;
     }
@@ -38,12 +38,12 @@ public class SubagentsTool extends Tool {
 
     @Override
     public String name() {
-        return "subagents";
+        return "subagents_control";
     }
 
     @Override
     public String description() {
-        return "List, kill, or steer spawned sub-agents for this requester session. Use this for sub-agent orchestration.";
+        return "List, kill, or steer spawned sub-agents for this requester session. Use this for sub-agent orchestration. Control sub-agents.";
     }
 
     @Override
