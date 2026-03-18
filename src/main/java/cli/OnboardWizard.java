@@ -572,13 +572,13 @@ public final class OnboardWizard {
             }
         }
 
-        Path historyFile = memoryDir.resolve("HISTORY.md");
+        /*Path historyFile = memoryDir.resolve("HISTORY.md");
         if (Files.notExists(historyFile)) {
             try {
                 Files.writeString(historyFile, "", StandardCharsets.UTF_8);
             } catch (IOException ignored) {
             }
-        }
+        }*/
     }
 
     /**
@@ -609,13 +609,13 @@ public final class OnboardWizard {
             }
         }
 
-        Path historyFile = memoryDir.resolve("HISTORY.md");
+        /*Path historyFile = memoryDir.resolve("HISTORY.md");
         if (Files.notExists(historyFile)) {
             try {
                 Files.writeString(historyFile, "", StandardCharsets.UTF_8);
             } catch (IOException ignored) {
             }
-        }
+        }*/
 
         createBootstrapIfNeeded(workspace);
 

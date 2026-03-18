@@ -206,7 +206,7 @@ public class BootstrapLoader {
 
 
     /**
-     * 构建 Project Context 字符串
+     * 构建 字符串
      * 对齐 OpenClaw 的 buildAgentSystemPrompt 中的 contextFiles 处理
      */
     public String buildProjectContext(List<BootstrapFile> files) {
@@ -218,13 +218,13 @@ public class BootstrapLoader {
                 .anyMatch(f -> "SOUL.md".equalsIgnoreCase(f.getName()));
 
         List<String> lines = new ArrayList<>();
-        lines.add("# 项目上下文");
+        lines.add("# 前置说明");
         lines.add("");
-        lines.add("已加载的项目上下文(在标签<project_context>)中):");
+        lines.add("已加载的定义说明(在标签<pre_defined>)中):");
         if (hasSoulFile) {
             lines.add("若存在SOUL.md文件，需体现其人格特质与语气风格。避免生硬、通用的回复；除非更高优先级的指令覆盖，否则遵循其指导原则。");
         }
-        lines.add("<project_context>");
+        lines.add("<pre_defined>");
         for (BootstrapFile file : files) {
             lines.add("## " + file.getPath());
             lines.add("");
@@ -241,7 +241,7 @@ public class BootstrapLoader {
             }
             lines.add("");
         }
-        lines.add("</project_context>");
+        lines.add("</pre_defined>");
 
         return String.join("\n", lines);
     }

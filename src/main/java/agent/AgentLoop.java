@@ -675,7 +675,7 @@ public class AgentLoop {
         Map<String, Object> userMsg2 = initialMessages.get(initialMessages.size() - 2);
         // 添加用户消息至历史的memory 形式为 YYYY-mm-dd.md
         String msg = getContextFromMap(userMsg1, userMsg2);
-        memoryStore.appendToToday("用户: " + msg);
+        memoryStore.appendToToday("用户: \n" + msg);
         Runnable step = new Runnable() {
             @Override
             public void run() {
@@ -773,7 +773,7 @@ public class AgentLoop {
 
                         st.done.set(true);
                         // 添加至记忆
-                        memoryStore.appendToToday("系统错误：" + errorMsg);
+                        memoryStore.appendToToday("系统错误：\n" + errorMsg);
                         out.completeExceptionally(ex);
                         return;
                     }
@@ -817,7 +817,7 @@ public class AgentLoop {
                                     }
                                     if (ex2 != null) {
                                         st.done.set(true);
-                                        memoryStore.appendToToday("工具调用异常：" + ex2.getMessage());
+                                        memoryStore.appendToToday("工具调用异常：\n" + ex2.getMessage());
                                         out.completeExceptionally(ex2);
                                     } else {
                                         executor.execute(this);
@@ -831,7 +831,7 @@ public class AgentLoop {
                     String clean = stripThink(resp.getContent());
 
                     // 添加至每日记忆
-                    memoryStore.appendToToday("助手：" + "<思考>" + resp.getReasoningContent() + "</思考>" + "\t" + clean);
+                    memoryStore.appendToToday("助手：\n" + "<思考>" + resp.getReasoningContent() + "</思考>" + "\n" + clean);
 
                     log.info("LLM 回复:\n{}", clean);
 
@@ -896,7 +896,7 @@ public class AgentLoop {
 
                 return tools.execute(tc.getName(), tc.getArguments())
                         .thenAccept(result -> {
-                            memoryStore.appendToToday("助手：工具调用：" + new Gson().toJson(tc) + "，结果：" + result);
+                            memoryStore.appendToToday("助手：\n tool_call, 完整参数: \n" + new Gson().toJson(tc) + "\n 结果：\n ```text\n" + result + "\n```");
                             List<Map<String, Object>> updated = context.addToolResult(messages, tc.getId(), tc.getName(), result);
                             messages.clear();
                             messages.addAll(updated);

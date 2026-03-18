@@ -3,6 +3,7 @@ package skills;
 import cli.RuntimeComponents;
 import com.google.gson.Gson;
 import config.ConfigReloader;
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.File;
@@ -39,6 +40,7 @@ public class SkillsLoader {
     /**
      * 技能装载队列
      */
+    @Getter
     private volatile List<String> loadSkillQueue = Collections.synchronizedList(new ArrayList<>());
 
     /**
@@ -57,6 +59,15 @@ public class SkillsLoader {
      */
     public SkillsLoader(Path workspace) {
         this(workspace, null);
+    }
+
+    /**
+     * 列出所有技能
+     * @param filterUnavailable 是否过滤依赖不满足的技能
+     * @return 技能信息列表，每项包含：name、path、source
+     */
+    public List<String> listSkillNames(boolean filterUnavailable) {
+        return listSkills(filterUnavailable).stream().map(s -> (String) s.get("name")).toList();
     }
 
     /**
@@ -185,7 +196,7 @@ public class SkillsLoader {
      * 加载用户指定的技能
      * @return
      */
-    public String loadUserAppointSkill() {
+    public String loadUserAppointSkill(List<String> alwaysSkills) {
 
         if (loadSkillQueue.isEmpty()) {
             return "";

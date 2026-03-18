@@ -57,7 +57,7 @@ public class ContextBuilder {
     /**
      * 构建系统提示词：身份 + 引导文件 + 记忆 + 常驻技能 + 技能索引摘要
      *
-     * @param skillNames 预留参数：与 Python 一致（当前实现不依赖该参数）
+     * @param skillNames     预留参数：与 Python 一致（当前实现不依赖该参数）
      * @return 系统提示词文本
      */
     public String buildSystemPrompt(List<String> skillNames) {
@@ -88,10 +88,10 @@ public class ContextBuilder {
         }
 
         // 记忆由ai主动读取, 见AGENTS.md流程
-        /*String mem = memory.getMemoryContext();
+        String mem = memory.getMemoryContext();
         if (mem != null && !mem.isBlank()) {
             parts.add("# 长期记忆\n\n" + mem);
-        }*/
+        }
 
         // 配置装载技能提示词
         parts.add("""
@@ -100,7 +100,6 @@ public class ContextBuilder {
                    加载技能 → 调用 `skill_load`
                    触发条件：
                    - 用户要求加载/使用技能
-                   - 命令以 `/skill_name` 开头
                 
                    卸载技能 → 调用 `uninstall_skill`
                    含义：
@@ -113,7 +112,7 @@ public class ContextBuilder {
         if (skillsSummary != null && !skillsSummary.isBlank()) {
             parts.add(
                     """
-                            # 技能
+                            \n\n# 技能
                                 技能扩展了你的能力。
                 
                                 技能使用协议：
@@ -126,7 +125,7 @@ public class ContextBuilder {
                                 7. 当任务需要实际使用技能时，不要仅凭索引摘要或近似判断。
                 
                                 available="false" 的技能需要先安装依赖 - 可以尝试用 apt/brew 安装。
-                             ## 可使用技能
+                             ## 可使用技能总结
                      """ + skillsSummary
             );
         }
@@ -141,13 +140,65 @@ public class ContextBuilder {
             }
 
             // 加载用户指定技能
-            String userAppointSkills = skills.loadUserAppointSkill();
+            String userAppointSkills = skills.loadUserAppointSkill(alwaysSkills);
             if (userAppointSkills != null && !userAppointSkills.isBlank()) {
-                parts.add("\n\n" + userAppointSkills);
+                parts.add("\n\n## 活跃技能\n\n" + userAppointSkills);
             }
         }
 
         return String.join("\n\n---\n\n", parts);
+    }
+
+    /**
+     * 通过用户消息的前缀加载技能
+     * @param userMsg
+     * @return
+     */
+    public String[] loadSkillByPrefix(String userMsg) {
+        String skill = "";
+        String[] results = new String[2];
+        List<String> alwaysSkills = skills.getAlwaysSkills();
+
+        // 常驻技能判断
+        if (alwaysSkills != null && !alwaysSkills.isEmpty()) {
+            for (String alwaysSkill : alwaysSkills) {
+                // 如果是常驻技能 无需指定
+                if (userMsg.startsWith("/" + alwaysSkill)) {
+                    userMsg = userMsg.replace("/" + alwaysSkill, "").trim();
+                    results[0] = userMsg;
+                    results[1] = skill;
+                    return results;
+                }
+            }
+        }
+
+        // 已加载技能判断
+        List<String> loadedSkills = skills.getLoadSkillQueue();
+        for (String loadedSkill : loadedSkills) {
+            // 如果为已加载技能, 无需指定
+            if (userMsg.startsWith("/" + loadedSkill)) {
+                userMsg = userMsg.replace("/" + loadedSkill, "").trim();
+                results[0] = userMsg;
+                results[1] = skill;
+                return results;
+            }
+        }
+
+        // 如果以上条件都不满足则查询所有技能
+        List<String> skillNames = skills.listSkillNames(true);
+        for (String skillName : skillNames) {
+            if (userMsg.startsWith("/" + skillName)) {
+                userMsg = userMsg.replace("/" + skillName, "").trim();
+                results[0] = userMsg;
+                skill = skills.loadSkill(skillName);
+                results[1] = skill;
+                return results;
+            }
+        }
+
+        results[0] = userMsg.replaceFirst("/", "");
+        results[1] = skill;
+        return results;
     }
 
     /**
@@ -237,10 +288,17 @@ public class ContextBuilder {
     ) {
         List<Map<String, Object>> out = new ArrayList<>();
 
-        // system
+        // 构建系统提示词
+        String systemPrompt = buildSystemPrompt(skillNames);
+
+        // 通过用户指定前缀加载技能
+        String[] res = loadSkillByPrefix(currentMessage);
+        currentMessage = res[0];
+        systemPrompt += "\n\n## 活跃技能\n" + res[1];
+
         out.add(mapOf(
                 "role", "system",
-                "content", buildSystemPrompt(skillNames)
+                "content", systemPrompt
         ));
 
         // history（Python 是 *history 直接展开）

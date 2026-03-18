@@ -116,12 +116,12 @@ public class Commands implements Runnable {
             } catch (IOException ignored) {}
         }
 
-        Path historyFile = memoryDir.resolve("HISTORY.md");
+        /*Path historyFile = memoryDir.resolve("HISTORY.md");
         if (Files.notExists(historyFile)) {
             try {
                 Files.writeString(historyFile, "", StandardCharsets.UTF_8, StandardOpenOption.CREATE_NEW);
             } catch (IOException ignored) {}
-        }
+        }*/
     }
 
     /**

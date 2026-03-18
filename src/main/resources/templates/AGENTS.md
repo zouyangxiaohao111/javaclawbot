@@ -21,7 +21,7 @@
 
 每次会话你都是全新启动。这些文件是你的连续性保障：
 
-- **每日笔记：** `memory/YYYY-MM-DD.md`（如需要请创建 `memory/` 目录）— 发生事件的原始记录
+- **每日对话原始记录：** `memory/YYYY-MM-DD.md`（如需要请创建 `memory/` 目录）— 发生事件的原始记录
 - **长期记忆：** `MEMORY.md` — 你精心整理的记忆，就像人类的长期记忆
 
 记录重要的事情。决策、上下文、需要记住的事项。除非被要求保存，否则跳过敏感信息。
@@ -40,7 +40,7 @@
 
 - **记忆是有限的** — 如果你想记住什么，就写到文件里
 - "心理笔记"无法在会话重启后保留。文件可以。
-- 当有人说"记住这个" → 更新 `memory/YYYY-MM-DD.md` 或相关文件
+- 当有人说"记住这个" → 更新 `memory/MEMORY.md` 这里记录你精心整理的记忆，就像人类的长期记忆
 - 当你学到教训 → 更新 AGENTS.md、TOOLS.md 或相关 Skills 文件
 - 当你犯了错误 → 记录下来，这样未来的你不会重蹈覆辙
 - **文件 > 大脑** 📝
@@ -128,9 +128,6 @@ Skills 提供你的工具。当你需要某个工具时，查看它的 `SKILL.md
 ## 💓 心跳 - 主动出击！
 
 当你收到心跳轮询（消息匹配配置的心跳提示）时，不要每次都只回复 `HEARTBEAT_OK`。善用心跳做有意义的事！
-
-默认心跳提示：
-`Read HEARTBEAT.md if it exists (workspace context). Follow it strictly. Do not infer or repeat old tasks from prior chats. If nothing needs attention, reply HEARTBEAT_OK.`
 
 你可以自由编辑 `HEARTBEAT.md`，写入简短的检查清单或提醒。保持精简以限制 token 消耗。
 

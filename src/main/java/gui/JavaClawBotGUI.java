@@ -837,13 +837,13 @@ public class JavaClawBotGUI extends JFrame {
             }
         }
 
-        Path historyFile = memoryDir.resolve("HISTORY.md");
+        /*Path historyFile = memoryDir.resolve("HISTORY.md");
         if (Files.notExists(historyFile)) {
             try {
                 Files.writeString(historyFile, "", StandardCharsets.UTF_8, StandardOpenOption.CREATE_NEW);
             } catch (IOException ignored) {
             }
-        }
+        }*/
     }
 
     private void stylePrimaryButton(JButton btn, int width, int height) {

@@ -1,5 +1,6 @@
 package memory;
 
+import cn.hutool.core.date.DateUtil;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -102,7 +103,14 @@ public class MemoryStore {
                     StandardOpenOption.WRITE,
                     StandardOpenOption.APPEND
             )) {
-                w.write(LocalDateTime.now() + ":" + rstrip(content) + "\n----------------------------\n");
+                String real = rstrip(content);
+                String findContent = """
+                        %s
+                        ```
+                        %s
+                        ```\n\n
+                        """.formatted(LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")), real);
+                w.write(findContent);
                 //w.newLine();
                 //w.newLine();
             }
