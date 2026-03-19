@@ -257,10 +257,8 @@ public class SkillsLoader {
                     lines.add("    <requires>" + escapeXml(missing) + "</requires>");
                 }
             }
-
             lines.add("  </skill>");
         }
-
         lines.add("</skills>");
         return String.join("\n", lines);
     }

@@ -1,5 +1,6 @@
 package context;
 
+import cn.hutool.core.util.StrUtil;
 import config.ConfigSchema;
 
 import java.io.IOException;
@@ -51,20 +52,6 @@ public class BootstrapLoader {
         this.warnHandler = warnHandler;
     }
 
-    public String loadIdentity() {
-        Path filePath = workspace.resolve("IDENTITY.md");
-        if (Files.exists(filePath) && Files.isRegularFile(filePath)) {
-            try {
-                String content = Files.readString(filePath);
-                return content;
-            } catch (IOException e) {
-                warn("Failed to read bootstrap file: " + filePath.getFileName() + " - " + e.getMessage());
-            }
-        }
-
-        return "";
-    }
-
     /**
      * 加载所有 bootstrap 文件
      */
@@ -88,6 +75,26 @@ public class BootstrapLoader {
         }
 
         return files;
+    }
+
+    /**
+     * 加载所有 bootstrap 文件
+     */
+    public BootstrapFile loadFile(String name) {
+        BootstrapFile file = null;
+
+        Path filePath = workspace.resolve(name);
+
+        if (Files.exists(filePath) && Files.isRegularFile(filePath)) {
+            try {
+                String content = Files.readString(filePath);
+                file = BootstrapFile.existing(name, filePath, content);
+            } catch (IOException e) {
+                warn("Failed to read bootstrap file: " + name + " - " + e.getMessage());
+                file = BootstrapFile.missing(name, filePath);
+            }
+        }
+        return file;
     }
 
     /**
@@ -204,6 +211,19 @@ public class BootstrapLoader {
         return files;
     }
 
+    /**
+     * 完整的加载流程
+     */
+    public BootstrapFile resolveFile(String name) {
+        BootstrapFile file = loadFile(name);
+        if (file == null) {
+            return null;
+        }
+        file = applyContextModeFilter(List.of(file)).get(0);
+        file = applyCharLimits(List.of(file)).get(0);
+        return file;
+    }
+
 
     /**
      * 构建 字符串
@@ -267,5 +287,29 @@ public class BootstrapLoader {
         }
         // 不存在代表已经引导成功了
         return false;
+    }
+
+    public String loadAgents() {
+        return doGetContent("AGENTS.md");
+    }
+
+    public String loadIdentity() {
+        return doGetContent("IDENTITY.md");
+    }
+
+    public String loadSoul() {
+        return doGetContent("SOUL.md");
+    }
+
+    private String doGetContent(String name) {
+        BootstrapFile file = resolveFile(name);
+        if (file == null) {
+            return "";
+        }
+        return StrUtil.isBlank(file.getContent()) ? "文件路径为:" + file.getPath() : file.getContent();
+    }
+
+    public String loadUser() {
+        return doGetContent("USER.md");
     }
 }

@@ -296,7 +296,7 @@ public class MemoryIndexManager implements AutoCloseable {
 
         // 执行关键词搜索
         List<MemoryHybridSearch.KeywordResult> keywordResults = Collections.emptyList();
-        if (ftsEnabled && hybridConfig.enabled) {
+        if (hybridConfig.enabled) {
             keywordResults = searchKeyword(cleaned, candidates);
         }
 
@@ -415,6 +415,7 @@ public class MemoryIndexManager implements AutoCloseable {
                 }
             } else {
                 // 使用纯 Java 关键词匹配
+                log.info("FTS搜索不可用,采用java关键词匹配");
                 results = searchKeywordJava(query, limit);
             }
 
@@ -482,15 +483,19 @@ public class MemoryIndexManager implements AutoCloseable {
         try {
             // 获取所有记忆文件
             List<Path> memoryFiles = listMemoryFiles();
+            log.info("扫描到 memory 文件 {} 个: {}", memoryFiles.size(),
+                    memoryFiles.stream().map(p -> workspaceDir.relativize(p).toString()).toList());
 
             // 获取会话文件（如果启用）
             List<SessionFiles.SessionFileEntry> sessionFiles = Collections.emptyList();
             if (sources.contains("sessions") && sessionsDir != null) {
                 sessionFiles = listAndBuildSessionFiles();
+                log.info("扫描到 session 文件 {} 个", sessionFiles.size());
             }
 
             // 获取已索引的文件
             Map<String, FileEntry> indexedFiles = loadIndexedFiles();
+            log.info("当前数据库已索引文件 {} 个", indexedFiles.size());
 
             // 检测变更
             List<Path> toAdd = new ArrayList<>();
@@ -499,7 +504,6 @@ public class MemoryIndexManager implements AutoCloseable {
 
             Set<String> currentPaths = new HashSet<>();
 
-            // 处理 memory 文件
             for (Path file : memoryFiles) {
                 String relativePath = workspaceDir.relativize(file).toString();
                 currentPaths.add(relativePath);
@@ -527,25 +531,30 @@ public class MemoryIndexManager implements AutoCloseable {
                 }
             }
 
-            // 删除过期的索引
+            log.info("本次同步计划: memory新增/更新 {} 个, sessions新增/更新 {} 个, 删除 {} 个",
+                    toAdd.size(), sessionsToAdd.size(), toRemove.size());
+
             for (String path : toRemove) {
+                log.info("删除旧索引: {}", path);
                 removeFileFromIndex(path);
             }
 
             // 添加新的 memory 索引
             for (Path file : toAdd) {
+                log.info("开始索引 memory 文件: {}", file);
                 indexFile(file);
             }
 
             // 添加新的 sessions 索引
             for (SessionFiles.SessionFileEntry session : sessionsToAdd) {
+                log.info("开始索引 session 文件: {}", session.path);
                 indexSessionFile(session);
             }
 
             dirty = false;
             lastSyncTime = LocalDateTime.now();
 
-            log.info("记忆索引同步完成: memory 新增 {}, sessions 新增 {}, 删除 {}", 
+            log.info("记忆索引同步完成: memory 新增 {}, sessions 新增 {}, 删除 {}",
                     toAdd.size(), sessionsToAdd.size(), toRemove.size());
 
         } catch (IOException e) {
@@ -877,7 +886,7 @@ public class MemoryIndexManager implements AutoCloseable {
     private void watchLoop() {
         while (!closed.get() && watchService != null) {
             try {
-                WatchKey key = watchService.poll(1, TimeUnit.SECONDS);
+                WatchKey key = watchService.poll(3, TimeUnit.SECONDS);
                 if (key == null) {
                     continue;
                 }
@@ -888,6 +897,11 @@ public class MemoryIndexManager implements AutoCloseable {
 
                     // 标记需要同步
                     dirty = true;
+                    try {
+                        sync();
+                    } catch (SQLException e) {
+                        log.error("记忆同步索引失败", e);
+                    }
                 }
 
                 key.reset();

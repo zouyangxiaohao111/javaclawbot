@@ -74,36 +74,45 @@ public class ContextBuilder {
     public String buildSystemPrompt(List<String> skillNames, BootstrapConfig.RunKind runKind) {
         List<String> parts = new ArrayList<>();
 
-        // 配置身份
-        parts.add(getIdentity());
+        // 配置工作流程
+        String agents = bootstrapLoader.loadAgents();
+        parts.add(agents);
 
         // 使用新的 BootstrapLoader
         if (runKind != null) {
             bootstrapConfig.setRunKind(runKind);
         }
-        List<BootstrapFile> bootstrapFiles = bootstrapLoader.resolveBootstrapFiles();
+        // 配置身份
+        parts.add(getIdentity());
+        // 配置灵魂
+        parts.add(bootstrapLoader.loadSoul());
+        // 加载用户说明
+        parts.add(bootstrapLoader.loadUser());
+
+        // by zcw 3/19 无需加载其他文件了,改为手动指定加载
+        /*List<BootstrapFile> bootstrapFiles = bootstrapLoader.resolveBootstrapFiles();
         String bootstrap = bootstrapLoader.buildProjectContext(bootstrapFiles);
         if (bootstrap != null && !bootstrap.isBlank()) {
             parts.add(bootstrap);
-        }
+        }*/
 
         // 记忆由ai主动读取, 见AGENTS.md流程
-        String mem = memory.getMemoryContext();
+        /*String mem = memory.getMemoryContext();
         if (mem != null && !mem.isBlank()) {
             parts.add("# 长期记忆\n\n" + mem);
-        }
+        }*/
 
         // 配置装载技能提示词
         parts.add("""
                  # 加载和卸载技能
                    协议：
-                   加载技能 → 调用 `skill_load`
+                   加载技能 → 调用 `skill_load`,返回当前 `SKILL.md` 内容
+                   含义: 下次对话会自动加载该技能`SKILL.md`内容至上下文环境
                    触发条件：
                    - 用户要求加载/使用技能
-                
                    卸载技能 → 调用 `uninstall_skill`
                    含义：
-                   - 从当前环境移除技能 | 忘记技能
+                   - 从当前上下文环境移除技能 | 忘记技能
                    - 文件保留在磁盘上
                 """);
 
@@ -113,19 +122,19 @@ public class ContextBuilder {
             parts.add(
                     """
                         # 技能
-                            技能扩展了你的能力。
-                            技能使用协议：
-                            - 使用技能时，将 SKILL.md 视为入口点；在执行前请阅读其说明和引用的额外文件。
-                            - 如果技能明确需要额外的上下文文件，不要仅凭摘要或 SKILL.md 就认为已完全理解。
-                            - 将每个技能的 SKILL.md 视为入口点，而非完整技能。
-                            - 当任务匹配某个技能时, 用户未主动提供技能说明，主动先使用 read_file 工具读取该技能的 SKILL.md。
-                            - 然后严格按照 SKILL.md 中的说明执行。
-                            - 如果 SKILL.md 要求读取额外的文件、示例、模板、模式或支持文档，必须在执行前读取。
-                            - 不要仅阅读 SKILL.md 就认为技能已完全加载。
-                            - 遵循渐进式加载：只加载当前任务所需的额外技能文件，但如果 SKILL.md 明确指向更多必需上下文，不要止步于此。
-                            - 当任务需要实际使用技能时，不要仅凭索引摘要或近似判断。
-                            - available="false" 的技能需要先安装依赖 - 可以尝试用 apt/brew 安装。
-                         ## 可使用技能总结
+                        技能扩展了你的能力。
+                        技能使用协议：
+                        - 使用技能时，将 SKILL.md 视为入口点；在执行前请阅读其说明和引用的额外文件。
+                        - 如果技能明确需要额外的上下文文件，不要仅凭摘要或 SKILL.md 就认为已完全理解。
+                        - 将每个技能的 SKILL.md 视为入口点，而非完整技能。
+                        - 当任务匹配某个技能时, 用户未主动提供技能说明，主动先使用 read_file 工具读取该技能的 SKILL.md。
+                        - 然后严格按照 SKILL.md 中的说明执行。
+                        - 如果 SKILL.md 要求读取额外的文件、示例、模板、模式或支持文档，必须在执行前读取。
+                        - 不要仅阅读 SKILL.md 就认为技能已完全加载。
+                        - 遵循渐进式加载：只加载当前任务所需的额外技能文件，但如果 SKILL.md 明确指向更多必需上下文，不要止步于此。
+                        - 当任务需要实际使用技能时，不要仅凭索引摘要或近似判断。
+                        - available="false" 的技能需要先安装依赖 - 可以尝试用 apt/brew 安装。
+                        ## 可使用技能总结
                      """ + skillsSummary
             );
         }
@@ -222,23 +231,11 @@ public class ContextBuilder {
         String runtime = system + " " + arch + ", Java " + javaVersion;
 
         return bootstrapLoader.loadIdentity() + "\n\n" +
-                "## 运行环境\n" +
+                "## 当前运行环境\n" +
                 runtime + "\n\n" +
-                "## 工作区\n" +
-                "工作区路径: " + workspacePath + "\n" +
-                "- 长期记忆: " + workspacePath + "/memory/MEMORY.md（在此记录重要事实）\n" +
-                "- 自定义技能: " + workspacePath + "/skills/{skill-name}/SKILL.md\n\n" +
-                """
-                ## 指南\n
-                - 使用技能时，将 SKILL.md 视为入口点；在执行前请阅读其说明和引用的额外文件。\n
-                - 如果技能明确需要额外的上下文文件，不要仅凭摘要或 SKILL.md 就认为已完全理解。\n
-                - 调用工具前先说明意图，但在收到结果前不要预测或声称结果。\n
-                - 修改文件前先读取。不要假设文件或目录存在。\n
-                - 写入或编辑文件后，如果准确性重要，请重新读取确认。\n
-                - 如果工具调用失败，分析错误后再尝试其他方法。\n
-                - 请求不明确时请询问澄清。\n\n
-                - 对话直接回复文本。只有发送到特定聊天频道时才使用 'message' 工具。\n\n
-                """;
+                "## 当前工作区\n" +
+                "工作区路径: " + workspacePath + "\n"
+                ;
     }
 
     /**
