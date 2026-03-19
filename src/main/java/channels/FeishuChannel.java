@@ -423,6 +423,7 @@ public class FeishuChannel extends BaseChannel {
             String replyTo = "group".equalsIgnoreCase(chatType) ? chatId : senderId;
 
             // publish to bus (BaseChannel enforces allowFrom)
+            log.info("飞书已收到消息:{}", finalContent);
             handleMessage(
                     senderId,
                     replyTo,

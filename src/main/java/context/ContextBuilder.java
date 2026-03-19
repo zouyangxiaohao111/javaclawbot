@@ -1,6 +1,8 @@
 package context;
 
+import cn.hutool.core.util.StrUtil;
 import lombok.Getter;
+import lombok.extern.slf4j.Slf4j;
 import memory.MemoryStore;
 import skills.SkillsLoader;
 
@@ -20,6 +22,7 @@ import java.util.*;
  * 2) 生成消息列表：system + 历史 + 运行时元信息 + 用户消息（可带图片）
  * 3) 追加工具调用结果、追加助手消息
  */
+@Slf4j
 public class ContextBuilder {
 
     /** 运行时元信息标签（仅元数据，不是指令） */
@@ -140,19 +143,16 @@ public class ContextBuilder {
         }
 
         List<String> alwaysSkills = skills.getAlwaysSkills();
-        if (alwaysSkills != null && !alwaysSkills.isEmpty()) {
-            // 加载常驻技能
-            String alwaysContent = skills.loadSkillsForContext(alwaysSkills);
+        // 加载常驻技能
+        String alwaysContent = skills.loadSkillsForContext(alwaysSkills);
+        if (StrUtil.isNotBlank(alwaysContent)) {
+            parts.add("## 常驻技能\n\n" + alwaysContent);
+        }
 
-            if (alwaysContent != null && !alwaysContent.isBlank()) {
-                parts.add("## 活跃技能\n\n" + alwaysContent);
-            }
-
-            // 加载用户指定技能
-            String userAppointSkills = skills.loadUserAppointSkill(alwaysSkills);
-            if (userAppointSkills != null && !userAppointSkills.isBlank()) {
-                parts.add("## 活跃技能\n\n" + userAppointSkills);
-            }
+        // 加载用户指定技能
+        String userAppointSkills = skills.loadUserAppointSkill(alwaysSkills);
+        if (StrUtil.isNotBlank(userAppointSkills)) {
+            parts.add("## 用户指定技能\n\n" + userAppointSkills);
         }
 
         return String.join("\n\n---\n\n", parts);

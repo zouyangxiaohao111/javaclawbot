@@ -16,7 +16,7 @@ public class MessageBus {
     public CompletionStage<Void> publishInbound(InboundMessage msg) {
         try {
             inbound.put(msg);
-            log.info("入栈消息已发布到消息总线 {}", msg);
+            //log.info("入栈消息已发布到消息总线 {}", msg);
             return CompletableFuture.completedFuture(null);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -27,7 +27,7 @@ public class MessageBus {
     public CompletionStage<Void> publishOutbound(OutboundMessage msg) {
         try {
             outbound.put(msg);
-            log.info("出栈消息已发布到消息总线 {}", msg);
+            //log.info("出栈消息已发布到消息总线 {}", msg);
             return CompletableFuture.completedFuture(null);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -41,7 +41,7 @@ public class MessageBus {
         if (poll == null) {
             return null;
         }
-        log.info("入栈消息已被消费: {}", poll);
+        //log.info("入栈消息已被消费: {}", poll);
         return poll;
     }
 
@@ -51,7 +51,7 @@ public class MessageBus {
         if (poll == null) {
             return null;
         }
-        log.info("出栈消息已被消费: {}", poll);
+        //log.info("出栈消息已被消费: {}", poll);
         return poll;
     }
 }

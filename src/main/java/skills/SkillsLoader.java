@@ -197,8 +197,8 @@ public class SkillsLoader {
      * @return
      */
     public String loadUserAppointSkill(List<String> alwaysSkills) {
-
         if (loadSkillQueue.isEmpty()) {
+            log.info("用户未指定加载技能...");
             return "";
         }
         return loadSkillsForContext(loadSkillQueue);
@@ -217,6 +217,7 @@ public class SkillsLoader {
             String content = loadSkill(name);
             if (content != null) {
                 content = stripFrontmatter(content);
+                log.info("系统上下文成功加载技能:{}", name);
                 parts.add("### Skill: " + name + "\n\n" + content);
             }
         }

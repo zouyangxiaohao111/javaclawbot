@@ -344,6 +344,7 @@ public class AgentLoop {
             if (msg == null) continue;
 
             String content = msg.getContent() == null ? "" : msg.getContent().trim();
+            log.info("AgentLoop收到消息:{}", content);
             if ("/stop".equalsIgnoreCase(content)) {
                 handleStop(msg).toCompletableFuture().join();
                 continue;
@@ -668,7 +669,7 @@ public class AgentLoop {
         }
         State st = new State();
 
-        // 每次对花钱最后2个必定是用户消息
+        // 每次对话最后2个必定是用户消息
         Map<String, Object> userMsg1 = initialMessages.get(initialMessages.size() - 1);
         Map<String, Object> userMsg2 = initialMessages.get(initialMessages.size() - 2);
         // 添加用户消息至历史的memory 形式为 YYYY-mm-dd.md
