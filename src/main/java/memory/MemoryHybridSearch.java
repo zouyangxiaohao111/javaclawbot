@@ -1,5 +1,6 @@
 package memory;
 
+import java.nio.file.Path;
 import java.util.*;
 
 /**
@@ -250,7 +251,7 @@ public class MemoryHybridSearch {
         if (rank < 0) {
             // 负数表示相关性，转换为正数
             double relevance = -rank;
-            return relevance / (1 + relevance);
+            return 1 / (1 + relevance);
         }
 
         return 1.0 / (1 + rank);
@@ -263,14 +264,15 @@ public class MemoryHybridSearch {
      * @param keywordResults 关键词搜索结果
      * @param config         混合搜索配置
      * @param workspaceDir   工作目录（用于时间衰减）
+     * @param vector 是否启用了向量搜索
      * @return 合并后的结果
      */
     public static List<HybridResult> mergeHybridResults(
             List<VectorResult> vectorResults,
             List<KeywordResult> keywordResults,
             HybridConfig config,
-            java.nio.file.Path workspaceDir
-    ) {
+            Path workspaceDir,
+            boolean vector) {
         if (config == null) {
             config = DEFAULT_CONFIG;
         }
@@ -314,7 +316,13 @@ public class MemoryHybridSearch {
         // 计算混合分数
         List<HybridResult> merged = new ArrayList<>();
         for (HybridResult entry : byId.values()) {
-            double score = config.vectorWeight * entry.vectorScore + config.textWeight * entry.textScore;
+            double score;
+            // 如果启用并进行了向量搜索
+            if (vector) {
+                score = config.vectorWeight * entry.vectorScore + config.textWeight * entry.textScore;
+            }else {
+                score = entry.textScore;
+            }
             merged.add(new HybridResult(
                     entry.id, entry.path, entry.startLine, entry.endLine,
                     entry.source, entry.snippet, score,
@@ -347,6 +355,7 @@ public class MemoryHybridSearch {
      * @param config          混合搜索配置
      * @param maxResults      最大结果数
      * @param workspaceDir    工作目录
+     * @param isVector    是否使用了向量搜索
      * @return 搜索结果
      */
     public static List<HybridResult> search(
@@ -355,7 +364,7 @@ public class MemoryHybridSearch {
             java.util.function.Function<String, List<KeywordResult>> keywordSearch,
             HybridConfig config,
             int maxResults,
-            java.nio.file.Path workspaceDir
+            java.nio.file.Path workspaceDir, boolean isVector
     ) {
         if (query == null || query.trim().isEmpty()) {
             return Collections.emptyList();
@@ -394,7 +403,7 @@ public class MemoryHybridSearch {
         }
 
         // 合并结果
-        List<HybridResult> merged = mergeHybridResults(vectorResults, keywordResults, config, workspaceDir);
+        List<HybridResult> merged = mergeHybridResults(vectorResults, keywordResults, config, workspaceDir, isVector);
 
         // 截取最大结果数
         if (merged.size() > maxResults) {
