@@ -141,7 +141,7 @@ public class AgentLoop {
                 this.reasoningEffort, braveApiKey, this.execConfig, restrictToWorkspace, null
         );
         this.mcpServers = (mcpServers != null) ? mcpServers : Map.of();
-        this.mcpManager = new McpManager(mcpServers, executor);
+        this.mcpManager = new McpManager(workspace, mcpServers, executor);
 
         this.memoryStore = new MemoryStore(workspace);
         // 注册工具
@@ -277,7 +277,11 @@ public class AgentLoop {
     }
 
     private CompletionStage<Void> connectMcp() {
-        return mcpManager.ensureConnected().exceptionally(ex -> {
+        return mcpManager.ensureConnected()
+                .thenApply(v -> {
+                    mcpManager.startAutoRefresh(20, TimeUnit.SECONDS);
+                    return (Void)null;
+                }).exceptionally(ex -> {
             log.warn("MCP 初始化失败，本轮将继续但不包含 MCP 工具: {}", ex.toString());
             return null;
         });

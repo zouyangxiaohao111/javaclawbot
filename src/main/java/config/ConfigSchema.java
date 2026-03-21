@@ -1044,6 +1044,12 @@ public final class ConfigSchema {
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public static class MCPServerConfig {
         private String type = "";
+        /**
+         * 是否开启
+         */
+        @Getter
+        @Setter
+        private boolean enable = true;
         private String command = "";
         private List<String> args = new ArrayList<>();
         private Map<String, String> env = new HashMap<>();

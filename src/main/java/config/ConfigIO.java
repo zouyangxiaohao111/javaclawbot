@@ -11,6 +11,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.attribute.FileTime;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -49,9 +50,9 @@ public final class ConfigIO {
     public static Path getConfigPath(Path workspacePath) {
         Path path = workspacePath.resolve("..").resolve("config.json").normalize();
         // 文件不存在使用默认的
-        /*if (!Files.exists(path)) {
+        if (!Files.exists(path)) {
             return getConfigPath();
-        }*/
+        }
         return path;
     }
 
@@ -80,6 +81,7 @@ public final class ConfigIO {
 
         if (Files.exists(path)) {
             try {
+                lastConfigFingerprint = getConfigFingerprint(path);
                 String json = Files.readString(path, StandardCharsets.UTF_8);
                 Map<String, Object> data = parseJsonToMap(json);
 
@@ -98,6 +100,59 @@ public final class ConfigIO {
 
         // 对齐 Python：文件不存在或读取失败则返回默认配置
         return new ConfigSchema.Config();
+    }
+
+    /**
+     * 上一次文件修改时间
+     */
+    private static volatile String lastConfigFingerprint;
+
+    private static String getConfigFingerprint(Path path) {
+        try {
+            if (path == null) {
+                path = getConfigPath();
+            }
+
+            if (!Files.exists(path)) {
+                return "MISSING";
+            }
+
+            String content = Files.readString(path, StandardCharsets.UTF_8);
+
+            java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+            byte[] digest = md.digest(content.getBytes(StandardCharsets.UTF_8));
+
+            StringBuilder sb = new StringBuilder();
+            for (byte b : digest) {
+                sb.append(String.format("%02x", b));
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            throw new RuntimeException("计算配置文件指纹失败: " + e.getMessage(), e);
+        }
+    }
+
+    public static synchronized boolean isConfigChanged(Path workspace) {
+        Path json = getConfigPath(workspace);
+
+        try {
+            String currentFingerprint = getConfigFingerprint(json);
+
+            if (lastConfigFingerprint == null) {
+                lastConfigFingerprint = currentFingerprint;
+                return true; // 首次检查，视为有变化
+            }
+
+            if (!java.util.Objects.equals(lastConfigFingerprint, currentFingerprint)) {
+                lastConfigFingerprint = currentFingerprint;
+                return true;
+            }
+
+            return false;
+        } catch (Exception e) {
+            System.out.println("警告: 检测配置文件变更失败: " + e.getMessage());
+            return false;
+        }
     }
 
     /**
