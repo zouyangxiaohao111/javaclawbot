@@ -188,10 +188,11 @@ public class ContextBuilder {
                 在回答用户问题时，可以使用以下上下文：
                 # currentDate
                  今天的日期是 %s。
-                # 部分MEMORY.md内容 >200 行会被截断
+                # 部分MEMORY.md内容 >200 行会被截断，阅读更多请使用 `read_file` 和 `memory_search`工具获取更详细的上下文
                  %s
                  
                  重要提示：这个上下文可能与你的任务相关，也可能无关。除非这与你的任务高度相关，否则不应回复此语境。
+                 `memory/YYYY-MM-dd.md` 格式文件为原始相关记忆，切勿直接使用`read_file`阅读整个文件，优先使用memory_search 搜索最近上下文，再根据获取的行数阅读详细上下文
                  </system-reminder>
                 """.formatted(LocalDate.now(), mem));
         return sb.toString();
