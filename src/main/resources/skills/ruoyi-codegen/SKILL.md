@@ -3,9 +3,9 @@ name: zjky-codegen
 description: "Route and execute ZJKY-style code generation tasks for company framework projects. Use this skill when the user explicitly wants to generate, extend, continue, or refine backend modules, frontend pages, CRUD code, DDL-first business modules, menu SQL, route config, tests, or API docs for the company stack. This skill should act as a workflow-driven orchestrator: first load active plan and memory, then classify the request into continue-plan, partial-change, existing-table, no-table, or ui-image, and only then load the required scenario rules, generator rules, templates, and scripts. Prefer stable multi-round execution over one-shot generation. Always keep plan, memory, history, and follow-up notification behavior consistent."
 ---
 
-# zjky-codegen
+# ruoyi-codegen
 
-建科院代码生成总技能。  
+ruoyi架构代码生成总技能。  
 这是一个“总 skill + 内部阶段化路由”的工作流技能，而不是单纯的一次性模板生成器。
 
 目标：
