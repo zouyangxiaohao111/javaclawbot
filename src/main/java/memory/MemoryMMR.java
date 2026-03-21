@@ -140,7 +140,7 @@ public class MemoryMMR {
         // 遍历所有已选项目，找出与候选项目最相似的那个
         for (T selectedItem : selectedItems) {
             // 从缓存获取已选项目的词项集合
-            Set<String> selectedTokens = tokenCache.get(selectedItem);
+            Set<String> selectedTokens = tokenCache.get(selectedItem.getId());
 
             // 如果已选项目无词项，跳过（相似度为 0）
             if (selectedTokens == null || selectedTokens.isEmpty()) {
