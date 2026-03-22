@@ -416,7 +416,7 @@ mvn compile
 mvn package
 
 # 运行测试
-mvn test
+mvn config.json
 ```
 
 ### 扩展渠道

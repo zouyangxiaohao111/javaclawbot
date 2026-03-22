@@ -584,7 +584,7 @@ public final class OnboardWizard {
     /**
      * 创建工作空间模板
      */
-    private static void createWorkspaceTemplates(Path workspace) {
+    public static void createWorkspaceTemplates(Path workspace) {
         try {
             Files.createDirectories(workspace);
         } catch (IOException ignored) {

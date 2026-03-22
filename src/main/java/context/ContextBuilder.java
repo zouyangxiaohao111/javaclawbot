@@ -301,7 +301,7 @@ public class ContextBuilder {
         /*if (isNeedBootstrap()) {
             out.add(mapOf(
                     "role", "user",
-                    "content", "用户现在是第一次使用该程序，请按照引导程序流程引导用户,必须要在引导完成后回答用户消息，用户消息：" + buildUserContent(currentMessage, media)
+                    "content", "用户现在是可能是第一次使用该程序，请按照引导程序流程引导用户,必须要在引导完成后回答用户消息，用户消息：" + buildUserContent(currentMessage, media)
             ));
         }else {
             out.add(mapOf(

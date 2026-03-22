@@ -4,6 +4,8 @@ import agent.AgentLoop;
 import bus.MessageBus;
 import bus.OutboundMessage;
 import channels.ChannelManager;
+import cli.BuiltinSkillsInstaller;
+import cli.OnboardWizard;
 import cli.RuntimeComponents;
 import heartbeat.HeartbeatService;
 import com.formdev.flatlaf.FlatClientProperties;
@@ -14,6 +16,7 @@ import config.ConfigSchema;
 import corn.CronService;
 import providers.CustomProvider;
 import providers.LLMProvider;
+import providers.ProviderCatalog;
 import providers.ProviderRegistry;
 import session.SessionManager;
 
@@ -59,7 +62,16 @@ import static config.ConfigReloader.createRuntimeComponents;
  * 7) 启动信息不进入聊天流
  */
 public class JavaClawBotGUI extends JFrame {
+    private enum WizardFlow {
+        QUICKSTART,
+        ADVANCED
+    }
 
+    private enum ConfigAction {
+        KEEP,
+        MODIFY,
+        RESET
+    }
     // =========================
     // 主题色
     // =========================
@@ -124,6 +136,18 @@ public class JavaClawBotGUI extends JFrame {
     // =========================
     private final AtomicBoolean running = new AtomicBoolean(false);
     private final AtomicBoolean processing = new AtomicBoolean(false);
+
+    /**
+     * 是否已经请求停止
+     */
+    private final AtomicBoolean stopRequested = new AtomicBoolean(false);
+
+    /**
+     * 发送按钮当前是否处于“停止模式”
+     * false = 普通发送
+     * true  = 显示为 ■ ，点击发送 /stop
+     */
+    private final AtomicBoolean stopMode = new AtomicBoolean(false);
 
     private final String sessionId = "cli:direct";
     private final String cliChannel = "cli";
@@ -317,13 +341,23 @@ public class JavaClawBotGUI extends JFrame {
         am.put("sendMessage", new AbstractAction() {
             @Override
             public void actionPerformed(ActionEvent e) {
-                sendMessage();
+                if (stopMode.get()) {
+                    sendStopCommand();
+                } else {
+                    sendMessage();
+                }
             }
         });
 
         sendButton = new JButton("发送");
         stylePrimaryButton(sendButton, 72, 40);
-        sendButton.addActionListener(e -> sendMessage());
+        sendButton.addActionListener(e -> {
+            if (stopMode.get()) {
+                sendStopCommand();
+            } else {
+                sendMessage();
+            }
+        });
 
         JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
         right.setOpaque(false);
@@ -439,65 +473,99 @@ public class JavaClawBotGUI extends JFrame {
     /**
      * GUI版 Onboard
      */
+    /**
+     * GUI 版 Onboard（对齐 CLI OnboardWizard 流程）
+     */
     private void runOnboard() {
         try {
+            // 1) 风险确认
+            if (!showRiskAcknowledgementDialog()) {
+                appendSystem("Onboard 已取消");
+                return;
+            }
+
+            // 2) 选择模式
+            WizardFlow flow = selectWizardFlowDialog();
+            if (flow == null) {
+                appendSystem("Onboard 已取消");
+                return;
+            }
+
             Path configPath = ConfigIO.getConfigPath();
+            ConfigAction configAction = ConfigAction.KEEP;
 
+            // 3) 处理已有配置
             if (Files.exists(configPath)) {
-                Object[] options = {"覆盖默认配置", "保留现有值并刷新", "取消"};
-                int choice = JOptionPane.showOptionDialog(
-                        this,
-                        "配置已存在：\n" + configPath + "\n\n请选择操作：",
-                        "Onboard",
-                        JOptionPane.DEFAULT_OPTION,
-                        JOptionPane.QUESTION_MESSAGE,
-                        null,
-                        options,
-                        options[1]
-                );
-
-                if (choice == 0) {
-                    ConfigSchema.Config cfg = new ConfigSchema.Config();
-                    ConfigIO.saveConfig(cfg, null);
-                    appendSystem("✓ Config 已重置为默认值: " + configPath);
-                } else if (choice == 1) {
-                    ConfigSchema.Config cfg = ConfigIO.loadConfig(null);
-                    ConfigIO.saveConfig(cfg, null);
-                    appendSystem("✓ Config 已刷新并保留现有值: " + configPath);
-                } else {
+                configAction = handleExistingConfigDialog(configPath);
+                if (configAction == null) {
                     appendSystem("Onboard 已取消");
                     return;
                 }
+            }
+
+            // 4) 加载配置
+            ConfigSchema.Config cfg;
+            if (Files.exists(configPath) && configAction == ConfigAction.RESET) {
+                cfg = new ConfigSchema.Config();
             } else {
-                ConfigIO.saveConfig(new ConfigSchema.Config(), null);
-                appendSystem("✓ 已创建配置文件: " + configPath);
+                cfg = ConfigIO.loadConfig(null);
             }
 
+            // 5) workspace
             Path workspace = HelpersProxy.getWorkspacePathSafe();
-            if (Files.notExists(workspace)) {
-                Files.createDirectories(workspace);
-                appendSystem("✓ 已创建工作空间: " + workspace);
+            cfg.setWorkspacePath(workspace);
+
+            // 6) 基础目录
+            ensureWorkspaceStructure(workspace);
+
+            appendSystem("开始执行 Onboard...");
+            appendSystem("模式: " + flow);
+
+            // 7) 配置主 provider
+            configurePrimaryProviderDialog(cfg, flow, configAction);
+
+            // 8) 配置 channel
+            configureChannelsDialog(cfg, flow);
+
+            // 9) 高级模式：配置 fallback
+            if (flow == WizardFlow.ADVANCED) {
+                configureFallbackDialog(cfg);
             }
 
+            // 10) 配置技能
+            configureSkillsDialog(cfg, configAction == ConfigAction.RESET);
+
+            // 11) 模板
             createWorkspaceTemplates(workspace);
 
+            // 12) 保存
+            ConfigIO.saveConfig(cfg, null);
+
+            // 13) 刷新 GUI 内部 config/provider
             this.config = ConfigIO.loadConfig(null);
+            try {
+                this.provider = makeProvider(this.config);
+            } catch (Exception ignored) {
+                // provider 未配置完整时允许先保存配置，不强制失败
+            }
             refreshModelLabel();
 
             JOptionPane.showMessageDialog(
                     this,
                     "🐈 javaclawbot is ready!\n\n"
-                            + "Next steps:\n"
-                            + "1. Add your API key to ~/.javaclawbot/config.json\n"
-                            + "2. Start chatting in this GUI",
+                            + "配置文件: " + configPath + "\n"
+                            + "工作空间: " + workspace + "\n\n"
+                            + "下一步：\n"
+                            + "1. 检查 provider / model 配置\n"
+                            + "2. 如需，补充 API key\n"
+                            + "3. 开始聊天",
                     "Onboard 完成",
                     JOptionPane.INFORMATION_MESSAGE
             );
 
-            appendSystem("🐈 javaclawbot is ready!");
-            appendSystem("Next steps:");
-            appendSystem("1. Add your API key to ~/.javaclawbot/config.json");
-            appendSystem("2. Start chatting in this GUI");
+            appendSystem("✓ Onboard 完成");
+            appendSystem("配置文件: " + configPath);
+            appendSystem("工作空间: " + workspace);
 
         } catch (Exception e) {
             JOptionPane.showMessageDialog(
@@ -510,6 +578,520 @@ public class JavaClawBotGUI extends JFrame {
         }
     }
 
+    private boolean showRiskAcknowledgementDialog() {
+        String msg = ""
+                + "⚠️ 安全警告 — 请仔细阅读\n\n"
+                + "javaclawbot 是一个个人 AI 助手，默认为单一可信操作边界。\n\n"
+                + "重要提示：\n"
+                + "• 此助手可以读取文件并执行操作（如果启用了工具）\n"
+                + "• 恶意提示可能诱导其执行不安全操作\n"
+                + "• 默认不适合多用户共享环境\n\n"
+                + "建议的安全基线：\n"
+                + "• 保持密钥远离助手可访问的文件系统\n"
+                + "• 对启用工具的助手使用最强大的模型\n"
+                + "• 多用户环境请隔离信任边界\n\n"
+                + "是否继续？";
+
+        int result = JOptionPane.showConfirmDialog(
+                this,
+                msg,
+                "安全确认",
+                JOptionPane.YES_NO_OPTION,
+                JOptionPane.WARNING_MESSAGE
+        );
+        return result == JOptionPane.YES_OPTION;
+    }
+
+    private WizardFlow selectWizardFlowDialog() {
+        Object[] options = {"QuickStart", "Advanced", "取消"};
+        int choice = JOptionPane.showOptionDialog(
+                this,
+                "选择配置模式：\n\n"
+                        + "QuickStart - 快速开始，使用推荐默认值\n"
+                        + "Advanced - 高级模式，手动配置所有选项",
+                "选择配置模式",
+                JOptionPane.DEFAULT_OPTION,
+                JOptionPane.QUESTION_MESSAGE,
+                null,
+                options,
+                options[0]
+        );
+
+        if (choice == 0) return WizardFlow.QUICKSTART;
+        if (choice == 1) return WizardFlow.ADVANCED;
+        return null;
+    }
+
+    private ConfigAction handleExistingConfigDialog(Path configPath) {
+        Object[] options = {"保留现有值", "更新配置值", "重置配置", "取消"};
+        int choice = JOptionPane.showOptionDialog(
+                this,
+                "检测到现有配置：\n" + configPath + "\n\n请选择处理方式：",
+                "配置处理方式",
+                JOptionPane.DEFAULT_OPTION,
+                JOptionPane.QUESTION_MESSAGE,
+                null,
+                options,
+                options[0]
+        );
+
+        if (choice == 0) return ConfigAction.KEEP;
+        if (choice == 1) return ConfigAction.MODIFY;
+        if (choice == 2) return ConfigAction.RESET;
+        return null;
+    }
+
+    private void configurePrimaryProviderDialog(
+            ConfigSchema.Config cfg,
+            WizardFlow flow,
+            ConfigAction configAction
+    ) {
+        java.util.List<ProviderCatalog.ProviderMeta> providers = ProviderCatalog.supportedProviders();
+
+        if (providers == null || providers.isEmpty()) {
+            appendSystem("未找到可用 provider 列表，跳过 provider 配置");
+            return;
+        }
+
+        String currentProvider = cfg.getAgents().getDefaults().getProvider();
+        ProviderCatalog.ProviderMeta selectedMeta = null;
+
+        // QuickStart + KEEP：沿用现有
+        if (flow == WizardFlow.QUICKSTART
+                && configAction == ConfigAction.KEEP
+                && currentProvider != null
+                && !currentProvider.isBlank()) {
+            for (ProviderCatalog.ProviderMeta p : providers) {
+                if (p.getName().equalsIgnoreCase(currentProvider)) {
+                    selectedMeta = p;
+                    break;
+                }
+            }
+        }
+
+        if (selectedMeta == null) {
+            String[] names = providers.stream()
+                    .map(p -> p.getLabel() + " [" + p.getName() + "]")
+                    .toArray(String[]::new);
+
+            String selected = (String) JOptionPane.showInputDialog(
+                    this,
+                    "选择默认提供商：",
+                    "Provider 配置",
+                    JOptionPane.QUESTION_MESSAGE,
+                    null,
+                    names,
+                    names[0]
+            );
+
+            if (selected == null) {
+                appendSystem("已跳过 provider 配置");
+                return;
+            }
+
+            for (int i = 0; i < providers.size(); i++) {
+                String text = providers.get(i).getLabel() + " [" + providers.get(i).getName() + "]";
+                if (text.equals(selected)) {
+                    selectedMeta = providers.get(i);
+                    break;
+                }
+            }
+        }
+
+        if (selectedMeta == null) {
+            appendSystem("未选择 provider，跳过");
+            return;
+        }
+
+        String providerName = selectedMeta.getName();
+        ConfigSchema.ProviderConfig providerConfig = cfg.getProviders().getByName(providerName);
+        if (providerConfig == null) {
+            appendSystem("未找到 provider 配置: " + providerName);
+            return;
+        }
+
+        // API Base
+        if (selectedMeta.isSupportsApiBase()) {
+            String defaultBase = (providerConfig.getApiBase() != null && !providerConfig.getApiBase().isBlank())
+                    ? providerConfig.getApiBase()
+                    : selectedMeta.getDefaultApiBase();
+
+            if (flow == WizardFlow.ADVANCED
+                    || configAction == ConfigAction.MODIFY
+                    || configAction == ConfigAction.RESET) {
+                String input = JOptionPane.showInputDialog(this, "API Base：", defaultBase);
+                if (input != null) {
+                    providerConfig.setApiBase(input.trim());
+                }
+            } else if (defaultBase != null && !defaultBase.isBlank()) {
+                providerConfig.setApiBase(defaultBase);
+            }
+        }
+
+        // API Key
+        if (selectedMeta.isSupportsApiKey()) {
+            String existingKey = providerConfig.getApiKey();
+            if (!(flow == WizardFlow.QUICKSTART
+                    && configAction == ConfigAction.KEEP
+                    && existingKey != null
+                    && !existingKey.isBlank())) {
+                JPasswordField pf = new JPasswordField();
+                if (existingKey != null) {
+                    pf.setText(existingKey);
+                }
+                int result = JOptionPane.showConfirmDialog(
+                        this,
+                        pf,
+                        "输入 API Key",
+                        JOptionPane.OK_CANCEL_OPTION,
+                        JOptionPane.PLAIN_MESSAGE
+                );
+                if (result == JOptionPane.OK_OPTION) {
+                    providerConfig.setApiKey(new String(pf.getPassword()).trim());
+                }
+            }
+        }
+
+        // Model
+        String model = cfg.getAgents().getDefaults().getModel();
+        java.util.List<String> recommended = selectedMeta.getRecommendedModels();
+
+        if (selectedMeta.isManualModelOnly() || recommended == null || recommended.isEmpty()) {
+            String input = JOptionPane.showInputDialog(this, "默认模型：", model);
+            if (input != null && !input.isBlank()) {
+                model = input.trim();
+            }
+        } else {
+            java.util.List<String> modelOptions = new java.util.ArrayList<>(recommended);
+            modelOptions.add("手动输入模型名称");
+
+            String selectedModel = (String) JOptionPane.showInputDialog(
+                    this,
+                    "选择默认模型：",
+                    "模型配置",
+                    JOptionPane.QUESTION_MESSAGE,
+                    null,
+                    modelOptions.toArray(),
+                    modelOptions.contains(model) ? model : modelOptions.get(0)
+            );
+
+            if (selectedModel != null) {
+                if ("手动输入模型名称".equals(selectedModel)) {
+                    String manual = JOptionPane.showInputDialog(this, "输入模型名称：", model);
+                    if (manual != null && !manual.isBlank()) {
+                        model = manual.trim();
+                    }
+                } else {
+                    model = selectedModel;
+                }
+            }
+        }
+
+        cfg.getAgents().getDefaults().setProvider(providerName);
+        cfg.getAgents().getDefaults().setModel(model);
+
+        appendSystem("✓ Provider 已配置: " + providerName);
+        appendSystem("✓ 默认模型: " + model);
+    }
+
+    private void configureFallbackDialog(ConfigSchema.Config cfg) {
+        int result = JOptionPane.showConfirmDialog(
+                this,
+                "是否启用备用模型？\n\n当主模型不可用时，自动请求备用模型。",
+                "Fallback 配置",
+                JOptionPane.YES_NO_OPTION,
+                JOptionPane.QUESTION_MESSAGE
+        );
+
+        boolean enabled = result == JOptionPane.YES_OPTION;
+        cfg.getAgents().getDefaults().getFallback().setEnabled(enabled);
+
+        if (!enabled) {
+            cfg.getAgents().getDefaults().getFallback().getTargets().clear();
+            appendSystem("已关闭 fallback");
+            return;
+        }
+
+        cfg.getAgents().getDefaults().getFallback().setMode("on_error");
+
+        String provider = JOptionPane.showInputDialog(
+                this,
+                "输入备用 provider 名称：",
+                "custom"
+        );
+        if (provider == null || provider.isBlank()) {
+            appendSystem("未填写 fallback provider，跳过");
+            return;
+        }
+
+        String models = JOptionPane.showInputDialog(
+                this,
+                "输入备用模型（多个用逗号分隔）：",
+                ""
+        );
+        if (models == null || models.isBlank()) {
+            appendSystem("未填写 fallback model，跳过");
+            return;
+        }
+
+        ConfigSchema.FallbackTarget t = new ConfigSchema.FallbackTarget();
+        t.setEnabled(true);
+        t.setProvider(provider.trim());
+        t.setModels(
+                java.util.Arrays.stream(models.split(","))
+                        .map(String::trim)
+                        .filter(s -> !s.isBlank())
+                        .toList()
+        );
+
+        cfg.getAgents().getDefaults().getFallback().getTargets().clear();
+        cfg.getAgents().getDefaults().getFallback().getTargets().add(t);
+
+        String maxAttemptsRaw = JOptionPane.showInputDialog(
+                this,
+                "失败尝试次数：",
+                String.valueOf(cfg.getAgents().getDefaults().getFallback().getMaxAttempts())
+        );
+        try {
+            int n = Integer.parseInt(maxAttemptsRaw);
+            if (n > 0) {
+                cfg.getAgents().getDefaults().getFallback().setMaxAttempts(n);
+            }
+        } catch (Exception ignored) {
+        }
+
+        appendSystem("✓ Fallback 已配置");
+    }
+
+    private void configureChannelsDialog(ConfigSchema.Config cfg, WizardFlow flow) {
+        int result = JOptionPane.showConfirmDialog(
+                this,
+                "是否配置 Channel？\n\n"
+                        + "Channel 用于连接飞书 / Telegram / Discord 等外部平台。",
+                "Channel 配置",
+                JOptionPane.YES_NO_OPTION,
+                JOptionPane.QUESTION_MESSAGE
+        );
+
+        if (result != JOptionPane.YES_OPTION) {
+            appendSystem("跳过 Channel 配置");
+            return;
+        }
+
+        String[] channels = {"飞书(feishu)", "Telegram", "Discord", "WhatsApp", "完成"};
+        while (true) {
+            String selected = (String) JOptionPane.showInputDialog(
+                    this,
+                    "选择要配置的 Channel：",
+                    "Channel 配置",
+                    JOptionPane.QUESTION_MESSAGE,
+                    null,
+                    channels,
+                    "完成"
+            );
+
+            if (selected == null || "完成".equals(selected)) {
+                break;
+            }
+
+            if ("飞书(feishu)".equals(selected)) {
+                ConfigSchema.FeishuConfig feishu = cfg.getChannels().getFeishu();
+
+                String appId = JOptionPane.showInputDialog(this, "Feishu App ID：", feishu.getAppId());
+                if (appId != null) feishu.setAppId(appId.trim());
+
+                JPasswordField pf = new JPasswordField();
+                if (feishu.getAppSecret() != null) {
+                    pf.setText(feishu.getAppSecret());
+                }
+                int ok = JOptionPane.showConfirmDialog(
+                        this, pf, "Feishu App Secret", JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE
+                );
+                if (ok == JOptionPane.OK_OPTION) {
+                    feishu.setAppSecret(new String(pf.getPassword()).trim());
+                }
+
+                int enable = JOptionPane.showConfirmDialog(
+                        this,
+                        "是否启用飞书 Channel？",
+                        "启用确认",
+                        JOptionPane.YES_NO_OPTION
+                );
+                feishu.setEnabled(enable == JOptionPane.YES_OPTION);
+
+                appendSystem("✓ 飞书 Channel 已配置");
+            } else {
+                JOptionPane.showMessageDialog(
+                        this,
+                        selected + " 的 Swing 配置器你还没补全。\n"
+                                + "当前建议先在 config.json 中手动填写，后续我可以继续帮你补 GUI 配置页。",
+                        "提示",
+                        JOptionPane.INFORMATION_MESSAGE
+                );
+            }
+        }
+    }
+
+    private void configureSkillsDialog(ConfigSchema.Config cfg, boolean overwrite) {
+        int result = JOptionPane.showConfirmDialog(
+                this,
+                "是否安装预构建 skills？\n\n"
+                        + "QuickStart 下一般可跳过，后续再装也可以。",
+                "Skills 配置",
+                JOptionPane.YES_NO_OPTION,
+                JOptionPane.QUESTION_MESSAGE
+        );
+
+        if (result != JOptionPane.YES_OPTION) {
+            appendSystem("跳过 skills 安装");
+            return;
+        }
+
+        try {
+            java.util.List<BuiltinSkillsInstaller.SkillResource> builtinSkills =
+                    BuiltinSkillsInstaller.discoverBuiltinSkills();
+
+            if (builtinSkills == null || builtinSkills.isEmpty()) {
+                appendSystem("没有找到可安装的 builtin skills");
+                return;
+            }
+
+            // 简化版：先全部安装
+            BuiltinSkillsInstaller.InstallSummary summary =
+                    BuiltinSkillsInstaller.installSelectedSkills(
+                            cfg.getWorkspacePath(),
+                            builtinSkills,
+                            overwrite
+                    );
+
+            BuiltinSkillsInstaller.printSummary(summary);
+            appendSystem("✓ Skills 安装完成");
+
+        } catch (Exception e) {
+            appendSystem("Skills 安装失败: " + e.getMessage());
+        }
+    }
+
+    private static void ensureWorkspaceStructure(Path workspace) {
+        try {
+            Files.createDirectories(workspace);
+        } catch (IOException ignored) {
+        }
+
+        try {
+            Files.createDirectories(workspace.resolve("skills"));
+        } catch (IOException ignored) {
+        }
+
+        Path memoryDir = workspace.resolve("memory");
+        try {
+            Files.createDirectories(memoryDir);
+        } catch (IOException ignored) {
+        }
+
+        Path memoryFile = memoryDir.resolve("MEMORY.md");
+        if (Files.notExists(memoryFile)) {
+            try {
+                Files.writeString(memoryFile, "", StandardCharsets.UTF_8);
+            } catch (IOException ignored) {
+            }
+        }
+    }
+
+    /**
+     * 切换为“停止模式”
+     * 按钮显示为正方形 ■，可点击发送 /stop
+     */
+    private void enterStopMode() {
+        SwingUtilities.invokeLater(() -> {
+            stopMode.set(true);
+
+            sendButton.setText("■");
+            sendButton.setPreferredSize(new Dimension(40, 40));
+            sendButton.setMinimumSize(new Dimension(40, 40));
+            sendButton.setMaximumSize(new Dimension(40, 40));
+            sendButton.setEnabled(true);
+            sendButton.revalidate();
+            sendButton.repaint();
+
+            // 发送中：输入框禁用，但停止按钮保留
+            inputArea.setEnabled(false);
+            inputArea.setEditable(false);
+
+            if (clearButton != null) clearButton.setEnabled(false);
+            if (onboardButton != null) onboardButton.setEnabled(false);
+            if (statusButton != null) statusButton.setEnabled(false);
+            if (gatewayButton != null) gatewayButton.setEnabled(false);
+        });
+    }
+
+    /**
+     * 退出“停止模式”
+     * 按钮恢复发送状态
+     */
+    private void exitStopMode() {
+        SwingUtilities.invokeLater(() -> {
+            stopMode.set(false);
+
+            sendButton.setText("发送");
+            sendButton.setPreferredSize(new Dimension(72, 40));
+            sendButton.setMinimumSize(new Dimension(72, 40));
+            sendButton.setMaximumSize(new Dimension(72, 40));
+            sendButton.setEnabled(true);
+            sendButton.revalidate();
+            sendButton.repaint();
+
+            inputArea.setEnabled(true);
+            inputArea.setEditable(true);
+
+            if (clearButton != null) clearButton.setEnabled(true);
+            if (onboardButton != null) onboardButton.setEnabled(true);
+            if (statusButton != null) statusButton.setEnabled(true);
+            if (gatewayButton != null) gatewayButton.setEnabled(true);
+
+            inputArea.requestFocusInWindow();
+        });
+    }
+
+    /**
+     * 点击停止按钮后，发送一条 /stop
+     */
+    private void sendStopCommand() {
+        if (!processing.get()) {
+            return;
+        }
+
+        // 防止重复点
+        if (!stopRequested.compareAndSet(false, true)) {
+            return;
+        }
+
+        appendSystem("正在发送 /stop ...");
+        updateStatus("停止中...");
+
+        CompletableFuture.runAsync(() -> {
+            try {
+                String resp = agentLoop.processDirect(
+                        "/stop",
+                        sessionId,
+                        cliChannel,
+                        cliChatId,
+                        (content, toolHint) -> CompletableFuture.completedFuture(null)
+                ).toCompletableFuture().join();
+
+                SwingUtilities.invokeLater(() -> {
+                    if (resp != null && !resp.isBlank()) {
+                        appendSystem(resp);
+                    } else {
+                        appendSystem("已发送 /stop");
+                    }
+                });
+            } catch (Exception e) {
+                SwingUtilities.invokeLater(() -> appendSystem("发送 /stop 失败: " + e.getMessage()));
+            }
+        });
+    }
+
     /**
      * 发送消息
      */
@@ -518,15 +1100,18 @@ public class JavaClawBotGUI extends JFrame {
         if (message.isEmpty()) {
             return;
         }
+
+        // 正在处理时，不允许继续发普通消息
         if (processing.get()) {
             return;
         }
 
         processing.set(true);
+        stopRequested.set(false);
 
         appendUser(message);
         inputArea.setText("");
-        setInputEnabled(false);
+        enterStopMode();
         updateStatus("思考中...");
 
         CompletableFuture.runAsync(() -> {
@@ -543,18 +1128,19 @@ public class JavaClawBotGUI extends JFrame {
                     if (resp != null && !resp.isBlank()) {
                         appendBot(resp);
                     }
-                    updateStatus("就绪");
-                    setInputEnabled(true);
-                    inputArea.requestFocusInWindow();
+
+                    updateStatus(stopRequested.get() ? "已停止" : "就绪");
                     processing.set(false);
+                    stopRequested.set(false);
+                    exitStopMode();
                 });
             } catch (Exception e) {
                 SwingUtilities.invokeLater(() -> {
                     appendSystem("错误: " + e.getMessage());
                     updateStatus("错误");
-                    setInputEnabled(true);
-                    inputArea.requestFocusInWindow();
                     processing.set(false);
+                    stopRequested.set(false);
+                    exitStopMode();
                 });
             }
         });
@@ -579,10 +1165,18 @@ public class JavaClawBotGUI extends JFrame {
     private void setInputEnabled(boolean enabled) {
         inputArea.setEnabled(enabled);
         inputArea.setEditable(enabled);
-        sendButton.setEnabled(enabled);
+
+        // 如果当前处于 stopMode，发送按钮必须保持可点击
+        if (stopMode.get()) {
+            sendButton.setEnabled(true);
+        } else {
+            sendButton.setEnabled(enabled);
+        }
+
         if (clearButton != null) clearButton.setEnabled(enabled);
         if (onboardButton != null) onboardButton.setEnabled(enabled);
         if (statusButton != null) statusButton.setEnabled(enabled);
+        if (gatewayButton != null) gatewayButton.setEnabled(enabled);
     }
 
     private void appendUser(String message) {
@@ -1047,38 +1641,7 @@ public class JavaClawBotGUI extends JFrame {
     }
 
     static void createWorkspaceTemplates(Path workspace) {
-        try {
-            Files.createDirectories(workspace);
-        } catch (IOException ignored) {
-        }
-
-        try {
-            Path skills = workspace.resolve("skills");
-            Files.createDirectories(skills);
-        } catch (IOException ignored) {
-        }
-
-        Path memoryDir = workspace.resolve("memory");
-        try {
-            Files.createDirectories(memoryDir);
-        } catch (IOException ignored) {
-        }
-
-        Path memoryFile = memoryDir.resolve("MEMORY.md");
-        if (Files.notExists(memoryFile)) {
-            try {
-                Files.writeString(memoryFile, "", StandardCharsets.UTF_8, StandardOpenOption.CREATE_NEW);
-            } catch (IOException ignored) {
-            }
-        }
-
-        /*Path historyFile = memoryDir.resolve("HISTORY.md");
-        if (Files.notExists(historyFile)) {
-            try {
-                Files.writeString(historyFile, "", StandardCharsets.UTF_8, StandardOpenOption.CREATE_NEW);
-            } catch (IOException ignored) {
-            }
-        }*/
+        OnboardWizard.createWorkspaceTemplates(workspace);
     }
 
     private void stylePrimaryButton(JButton btn, int width, int height) {
