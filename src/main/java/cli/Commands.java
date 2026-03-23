@@ -165,144 +165,35 @@ public class Commands implements Runnable {
         public void run() {
             System.out.println("🐈 Starting javaclawbot gateway on port " + port + "...");
 
-            // 支持自定义配置路径和 workspace 路径（对齐 Python 的 --config/--workspace）
             Path configPath = (config != null) ? Paths.get(config).toAbsolutePath() : null;
             Path workspacePath = (workspace != null) ? Paths.get(workspace).toAbsolutePath() : null;
-            RuntimeComponents rt = createRuntimeComponents(configPath, workspacePath);
-            ConfigSchema.Config config = rt.config;
-            MessageBus bus = new MessageBus();
-            LLMProvider provider = makeHotProvider();
-            SessionManager sessionManager = new SessionManager(config.getWorkspacePath());
 
-            Path cronStorePath = ConfigIO.getDataDir().resolve("cron").resolve("jobs.json");
-            CronService cron = new CronService(cronStorePath, null);
-
-            AgentLoop agent = new AgentLoop(
-                    bus,
-                    provider,
-                    config.getWorkspacePath(),
-                    config.getAgents().getDefaults().getModel(),
-                    config.getAgents().getDefaults().getMaxToolIterations(),
-                    config.getAgents().getDefaults().getTemperature(),
-                    config.getAgents().getDefaults().getMaxTokens(),
-                    config.getAgents().getDefaults().getMemoryWindow(),
-                    config.getAgents().getDefaults().getReasoningEffort(),
-                    config.getTools().getWeb().getSearch().getApiKey(),
-                    config.getTools().getExec(),
-                    cron,
-                    config.getTools().isRestrictToWorkspace(),
-                    sessionManager,
-                    config.getTools().getMcpServers(),
-                    config.getChannels(),
-                    rt.runtimeSettings
-            );
-
-            cron.setOnJob(job -> {
-                // 防止 cron 作业内部递归调度新作业
-                var cronTool = agent.getCronTool();
-                if (cronTool != null) cronTool.setCronContext(true);
-                try {
-                    return agent.processDirect(
-                    job.getPayload().getMessage(),
-                    "cron:" + job.getId(),
-                    job.getPayload().getChannel() != null ? job.getPayload().getChannel() : "cli",
-                    job.getPayload().getTo() != null ? job.getPayload().getTo() : "direct",
-                    (c, toolHint) -> CompletableFuture.completedFuture(null)
-            ).thenCompose(resp -> {
-                if (job.getPayload().isDeliver() && job.getPayload().getTo() != null) {
-                    return bus.publishOutbound(new OutboundMessage(
-                            job.getPayload().getChannel() != null ? job.getPayload().getChannel() : "cli",
-                            job.getPayload().getTo(),
-                            resp != null ? resp : "",
-                            null,
-                            null
-                    )).thenApply(x -> resp);
-                }
-                return CompletableFuture.completedFuture(resp);
-            });
-                } finally {
-                    if (cronTool != null) cronTool.setCronContext(false);
-                }
-            });
-
-            ChannelManager channels = new ChannelManager(config, bus);
-
-            // 选 heartbeat 投递目标：优先非 cli/system 且在 enabled_channels 的 session
-            final AtomicReference<String> hbChannel = new AtomicReference<>("cli");
-            final AtomicReference<String> hbChatId = new AtomicReference<>("direct");
-            try {
-                Set<String> enabled = new HashSet<>(channels.getEnabledChannels());
-                for (Map<String, Object> s : sessionManager.listSessions()) {
-                    Object keyObj = s.get("key");
-                    if (!(keyObj instanceof String key)) continue;
-                    if (!key.contains(":")) continue;
-                    String[] parts = key.split(":", 2);
-                    String ch = parts[0];
-                    String cid = parts[1];
-                    if ("cli".equals(ch) || "system".equals(ch)) continue;
-                    if (enabled.contains(ch) && cid != null && !cid.isBlank()) {
-                        hbChannel.set(ch);
-                        hbChatId.set(cid);
-                        break;
-                    }
-                }
-            } catch (Exception ignored) {}
-
-            HeartbeatService heartbeat = new HeartbeatService(
-                    config.getWorkspacePath(),
-                    provider,
-                    agent.getModel(),
-                    tasks -> agent.processDirect(
-                            tasks,
-                            "heartbeat",
-                            hbChannel.get(),
-                            hbChatId.get(),
-                            (c, toolHint) -> CompletableFuture.completedFuture(null)
-                    ).toCompletableFuture(),
-                    response -> {
-                        // 没有外部 channel 则不投递（对齐 Python：cli 不投递）
-                        if ("cli".equals(hbChannel.get())) return CompletableFuture.completedFuture(null);
-                        return bus.publishOutbound(new OutboundMessage(
-                                hbChannel.get(),
-                                hbChatId.get(),
-                                response != null ? response : "",
-                                null,
-                                null
-                        )).toCompletableFuture();
-                    },
-                    HeartbeatService.parseConfig(config)
-            );
-
-            AtomicBoolean stopping = new AtomicBoolean(false);
+            GatewayRuntime gateway = new GatewayRuntime(configPath, workspacePath);
+            AtomicBoolean shutdownOnce = new AtomicBoolean(false);
 
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-                if (stopping.compareAndSet(false, true)) {
-                    heartbeat.stop();
-                    cron.stop();
-                    agent.stop();
-                    try { channels.stopAll().toCompletableFuture().join(); } catch (Exception ignored) {}
-                    try { agent.closeMcp().toCompletableFuture().join(); } catch (Exception ignored) {}
+                if (shutdownOnce.compareAndSet(false, true)) {
+                    try {
+                        gateway.stop().toCompletableFuture().join();
+                    } catch (Exception ignored) {
+                    }
                 }
-            }));
+            }, "javaclawbot-gateway-shutdown"));
 
-            CompletableFuture<Void> f = CompletableFuture.runAsync(() -> {
-                try {
-                    cron.start().toCompletableFuture().join();
-                    heartbeat.start().toCompletableFuture().join();
-                    channels.startAll().toCompletableFuture().join();
-                    agent.run().toCompletableFuture().join();
-                } catch (Exception ignored) {
-                    log.error("启动失败!", ignored);
-                } finally {
-                    heartbeat.stop();
-                    cron.stop();
-                    agent.stop();
-                    try { channels.stopAll().toCompletableFuture().join(); } catch (Exception ignored) {}
-                    try { agent.closeMcp().toCompletableFuture().join(); } catch (Exception ignored) {}
+            try {
+                gateway.start().toCompletableFuture().join();
+                gateway.awaitStopped().toCompletableFuture().join();
+            } catch (Exception e) {
+                log.error("启动失败!", e);
+                throw e;
+            } finally {
+                if (shutdownOnce.compareAndSet(false, true)) {
+                    try {
+                        gateway.stop().toCompletableFuture().join();
+                    } catch (Exception ignored) {
+                    }
                 }
-            });
-
-            f.join();
+            }
         }
     }
 

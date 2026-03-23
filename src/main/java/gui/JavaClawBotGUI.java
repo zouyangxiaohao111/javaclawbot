@@ -8,6 +8,7 @@ import channels.ChannelManager;
 import cli.BuiltinSkillsInstaller;
 import cli.OnboardWizard;
 import cli.RuntimeComponents;
+import cli.GatewayRuntime;
 import heartbeat.HeartbeatService;
 import com.formdev.flatlaf.FlatClientProperties;
 import com.formdev.flatlaf.FlatLaf;
@@ -44,6 +45,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
@@ -115,6 +117,12 @@ public class JavaClawBotGUI extends JFrame {
     private JLabel statusLabel;
     private JLabel modelLabel;
     private JLabel gatewayStatusLabel;
+    private JPanel bottomModePanel;
+    private CardLayout bottomModeLayout;
+    private JButton gatewayStopInlineButton;
+
+    private static final String BOTTOM_CARD_INPUT = "input";
+    private static final String BOTTOM_CARD_GATEWAY = "gateway";
 
     // =========================
     // 核心组件
@@ -130,10 +138,68 @@ public class JavaClawBotGUI extends JFrame {
     private CompletableFuture<Void> busTask;
     private CompletableFuture<Void> outboundTask;
     private final AtomicBoolean busLoopRunning = new AtomicBoolean(false);
-    private final AtomicReference<CountDownLatch> turnLatchRef =
-            new AtomicReference<>(new CountDownLatch(0));
-    private final AtomicReference<String> turnResponseRef =
-            new AtomicReference<>(null);
+
+    /**
+     * GUI 当前会话阶段：
+     * IDLE     - 空闲，可发送新消息
+     * RUNNING  - 当前轮次正在执行，按钮显示为停止
+     * STOPPING - 用户已点击停止，等待本轮收尾，按钮仍显示为停止
+     *
+     * 说明：
+     * 旧实现把 processing / stopRequested / stopMode / latch 分散控制，
+     * 在“点击停止 -> 旧轮次收尾 -> 新轮次开始”的交界处存在竞态，
+     * 会出现下一次点击仍被当成停止按钮的问题。
+     *
+     * 这里改为显式状态机（State Pattern 的轻量实现）：
+     * - UI 是否显示停止按钮，只由 turnPhase 决定
+     * - 是否已有活动轮次，只由 activeTurnRef 决定
+     * - 一轮消息的等待对象、响应缓存，全部收口到 TurnContext
+     */
+    private enum TurnPhase {
+        IDLE,
+        RUNNING,
+        STOPPING
+    }
+
+    private enum GatewayPhase {
+        IDLE,
+        STARTING,
+        RUNNING,
+        STOPPING
+    }
+
+    private static final class TurnContext {
+        final long turnId;
+        final String userMessage;
+        final CountDownLatch doneLatch = new CountDownLatch(1);
+        final AtomicReference<String> responseRef = new AtomicReference<>(null);
+        final AtomicBoolean outboundArrived = new AtomicBoolean(false);
+        final AtomicBoolean stopSent = new AtomicBoolean(false);
+
+        TurnContext(long turnId, String userMessage) {
+            this.turnId = turnId;
+            this.userMessage = userMessage;
+        }
+
+        void acceptOutbound(String content) {
+            if (content != null && !content.isBlank()) {
+                responseRef.compareAndSet(null, content);
+            }
+            if (outboundArrived.compareAndSet(false, true)) {
+                doneLatch.countDown();
+            }
+        }
+
+        String response() {
+            return responseRef.get();
+        }
+    }
+
+    private final AtomicReference<TurnContext> activeTurnRef = new AtomicReference<>(null);
+    private final java.util.concurrent.atomic.AtomicLong turnSeq =
+            new java.util.concurrent.atomic.AtomicLong(0);
+    private final AtomicReference<TurnPhase> turnPhase =
+            new AtomicReference<>(TurnPhase.IDLE);
 
     private final java.util.concurrent.ExecutorService guiAgentExecutor =
             java.util.concurrent.Executors.newFixedThreadPool(4, r -> {
@@ -145,8 +211,11 @@ public class JavaClawBotGUI extends JFrame {
     // =========================
     // Gateway 模式
     // =========================
-    private boolean gatewayMode = false;
+    private final boolean autoGatewayOnLaunch;
     private final AtomicBoolean gatewayRunning = new AtomicBoolean(false);
+    private final AtomicReference<GatewayPhase> gatewayPhase = new AtomicReference<>(GatewayPhase.IDLE);
+    private final AtomicBoolean guiChatAvailable = new AtomicBoolean(true);
+    private GatewayRuntime gatewayRuntime;
 
     // =========================
     // 状态
@@ -156,6 +225,9 @@ public class JavaClawBotGUI extends JFrame {
 
     /**
      * 是否已经请求停止
+     *
+     * 兼容旧逻辑保留此字段，但它现在只是 turnPhase 的派生缓存，
+     * 不再作为发送按钮行为的唯一判定来源。
      */
     private final AtomicBoolean stopRequested = new AtomicBoolean(false);
 
@@ -163,6 +235,8 @@ public class JavaClawBotGUI extends JFrame {
      * 发送按钮当前是否处于“停止模式”
      * false = 普通发送
      * true  = 显示为 ■ ，点击发送 /stop
+     *
+     * 兼容旧 UI 判断保留此字段，但真实来源统一由 applyTurnUiState() 写入。
      */
     private final AtomicBoolean stopMode = new AtomicBoolean(false);
 
@@ -176,7 +250,7 @@ public class JavaClawBotGUI extends JFrame {
 
     public JavaClawBotGUI(boolean gatewayMode) {
         super("javaclawbot");
-        this.gatewayMode = gatewayMode;
+        this.autoGatewayOnLaunch = gatewayMode;
         initializeWindow();
         initializeUI();
         initializeCore();
@@ -320,8 +394,17 @@ public class JavaClawBotGUI extends JFrame {
      *
      * Enter 发送
      * Shift+Enter 换行
+     *
+     * 说明：
+     * - 普通模式显示可输入卡片
+     * - Gateway 运行时切换到占位卡片，隐藏/灰掉输入区
+     * - 占位卡片中保留“停止 Gateway”按钮，可恢复到 agent 直连模式
      */
     private JComponent buildBottomPanel() {
+        bottomModeLayout = new CardLayout();
+        bottomModePanel = new JPanel(bottomModeLayout);
+        bottomModePanel.setOpaque(false);
+
         RoundedPanel inputCard = new RoundedPanel(24, CARD_BG);
         inputCard.setLayout(new BorderLayout(10, 0));
         inputCard.setBorder(new EmptyBorder(12, 12, 12, 12));
@@ -383,7 +466,42 @@ public class JavaClawBotGUI extends JFrame {
         inputCard.add(inputWrapper, BorderLayout.CENTER);
         inputCard.add(right, BorderLayout.EAST);
 
-        return inputCard;
+        RoundedPanel gatewayCard = new RoundedPanel(24, new Color(246, 246, 248));
+        gatewayCard.setLayout(new BorderLayout(12, 0));
+        gatewayCard.setBorder(new EmptyBorder(12, 14, 12, 14));
+
+        JPanel gatewayTextPanel = new JPanel();
+        gatewayTextPanel.setOpaque(false);
+        gatewayTextPanel.setLayout(new BoxLayout(gatewayTextPanel, BoxLayout.Y_AXIS));
+
+        JLabel gatewayTitleLabel = new JLabel("Gateway 后台运行中");
+        gatewayTitleLabel.setFont(UiFonts.bold(14));
+        gatewayTitleLabel.setForeground(TEXT_PRIMARY);
+
+        gatewayStatusLabel = new JLabel("当前输入区已禁用，消息将由 Gateway 在后台与飞书 / Telegram / Discord 等渠道通信");
+        gatewayStatusLabel.setFont(UiFonts.normal(12));
+        gatewayStatusLabel.setForeground(TEXT_SECONDARY);
+
+        gatewayTextPanel.add(gatewayTitleLabel);
+        gatewayTextPanel.add(Box.createVerticalStrut(4));
+        gatewayTextPanel.add(gatewayStatusLabel);
+
+        gatewayStopInlineButton = new JButton("停止 Gateway 并恢复直连");
+        styleSecondaryButton(gatewayStopInlineButton, 170, 40);
+        gatewayStopInlineButton.addActionListener(e -> stopGateway());
+
+        JPanel gatewayRight = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
+        gatewayRight.setOpaque(false);
+        gatewayRight.add(gatewayStopInlineButton);
+
+        gatewayCard.add(gatewayTextPanel, BorderLayout.CENTER);
+        gatewayCard.add(gatewayRight, BorderLayout.EAST);
+
+        bottomModePanel.add(inputCard, BOTTOM_CARD_INPUT);
+        bottomModePanel.add(gatewayCard, BOTTOM_CARD_GATEWAY);
+        bottomModeLayout.show(bottomModePanel, BOTTOM_CARD_INPUT);
+
+        return bottomModePanel;
     }
 
     /**
@@ -438,45 +556,80 @@ public class JavaClawBotGUI extends JFrame {
     }
 
     /**
+     * 切换底部输入区域的展示模式。
+     * Gateway 采用显式生命周期状态：IDLE / STARTING / RUNNING / STOPPING。
+     */
+    private void applyGatewayUiMode(GatewayPhase phase) {
+        ui(() -> {
+            boolean gatewayActive = phase != GatewayPhase.IDLE;
+            boolean canCancelOrStop = phase == GatewayPhase.STARTING || phase == GatewayPhase.RUNNING;
+
+            if (bottomModePanel != null && bottomModeLayout != null) {
+                bottomModeLayout.show(bottomModePanel, gatewayActive ? BOTTOM_CARD_GATEWAY : BOTTOM_CARD_INPUT);
+            }
+            if (inputArea != null) {
+                inputArea.setEditable(!gatewayActive);
+                inputArea.setEnabled(!gatewayActive);
+            }
+            if (inputScrollPane != null) {
+                inputScrollPane.setEnabled(!gatewayActive);
+            }
+            if (sendButton != null && !gatewayActive) {
+                sendButton.setEnabled(true);
+            }
+            if (gatewayStopInlineButton != null) {
+                gatewayStopInlineButton.setVisible(gatewayActive);
+                gatewayStopInlineButton.setEnabled(canCancelOrStop);
+                if (phase == GatewayPhase.STARTING) {
+                    gatewayStopInlineButton.setText("取消 Gateway 启动并恢复直连");
+                } else if (phase == GatewayPhase.RUNNING) {
+                    gatewayStopInlineButton.setText("停止 Gateway 并恢复直连");
+                } else if (phase == GatewayPhase.STOPPING) {
+                    gatewayStopInlineButton.setText("正在停止 Gateway...");
+                } else {
+                    gatewayStopInlineButton.setText("停止 Gateway 并恢复直连");
+                }
+            }
+            if (gatewayStatusLabel != null) {
+                if (phase == GatewayPhase.STARTING) {
+                    gatewayStatusLabel.setText("Gateway 正在后台启动，你现在可以点击右侧按钮取消启动并恢复 GUI 直连模式");
+                } else if (phase == GatewayPhase.RUNNING) {
+                    gatewayStatusLabel.setText("当前输入区已禁用，消息将由 Gateway 在后台与飞书 / Telegram / Discord 等渠道通信");
+                } else if (phase == GatewayPhase.STOPPING) {
+                    gatewayStatusLabel.setText("Gateway 正在停止并恢复 GUI 直连模式，请稍候");
+                } else {
+                    gatewayStatusLabel.setText("Gateway 已停止，当前输入区将恢复可用");
+                }
+            }
+        });
+    }
+
+    /**
      * 初始化核心组件
+     *
+     * 重构目标：
+     * 1) Core 与 GUI Direct Adapter 解耦
+     * 2) 启动 Gateway 时，不再让 GUI 默认直连模式继续占用 bus / agent
+     * 3) GUI 只在非 gatewayMode 下启动本地直连聊天
      */
     private void initializeCore() {
         try {
             RuntimeComponents rt = createRuntimeComponents();
             this.config = rt.getConfig();
+            this.sessionManager = new SessionManager(this.config.getWorkspacePath());
 
-            provider = makeProvider(this.config);
-
-            Path cronStorePath = ConfigIO.getDataDir().resolve("cron").resolve("jobs.json");
-            cron = new CronService(cronStorePath, null);
-
-            sessionManager = new SessionManager(this.config.getWorkspacePath());
-            this.bus = new MessageBus();
-
-            agentLoop = new AgentLoop(
-                    this.bus,
-                    provider,
-                    this.config.getWorkspacePath(),
-                    this.config.getAgents().getDefaults().getModel(),
-                    this.config.getAgents().getDefaults().getMaxToolIterations(),
-                    this.config.getAgents().getDefaults().getTemperature(),
-                    this.config.getAgents().getDefaults().getMaxTokens(),
-                    this.config.getAgents().getDefaults().getMemoryWindow(),
-                    this.config.getAgents().getDefaults().getReasoningEffort(),
-                    this.config.getTools().getWeb().getSearch().getApiKey(),
-                    this.config.getTools().getExec(),
-                    cron,
-                    this.config.getTools().isRestrictToWorkspace(),
-                    sessionManager,
-                    this.config.getTools().getMcpServers(),
-                    this.config.getChannels(),
-                    rt.getRuntimeSettings()
-            );
-
-            running.set(true);
-            startBusInteractiveMode();
             refreshModelLabel();
-            updateStatus("就绪");
+
+            if (autoGatewayOnLaunch) {
+                guiChatAvailable.set(false);
+                applyTurnUiState(TurnPhase.IDLE);
+                applyGatewayUiMode(GatewayPhase.STARTING);
+                appendSystem("检测到 gatewayMode=true：GUI 将自动后台启动 Gateway，输入区已切换为 Gateway 占位模式");
+                updateStatus("启动 Gateway...");
+                SwingUtilities.invokeLater(() -> startGateway(true, false));
+            } else {
+                startGuiDirectMode();
+            }
         } catch (Exception e) {
             JOptionPane.showMessageDialog(
                     this,
@@ -486,6 +639,117 @@ public class JavaClawBotGUI extends JFrame {
             );
             e.printStackTrace();
         }
+    }
+
+    /**
+     * 构建 GUI 直连模式所需的 core 组件，但不自动启动 bus adapter。
+     */
+    private void buildGuiDirectCoreIfNeeded() {
+        if (bus != null && agentLoop != null && cron != null && provider != null) {
+            return;
+        }
+
+        RuntimeComponents rt = createRuntimeComponents();
+        this.config = rt.getConfig();
+
+        if (this.sessionManager == null) {
+            this.sessionManager = new SessionManager(this.config.getWorkspacePath());
+        }
+
+        provider = makeProvider(this.config);
+
+        Path cronStorePath = ConfigIO.getDataDir().resolve("cron").resolve("jobs.json");
+        cron = new CronService(cronStorePath, null);
+        bus = new MessageBus();
+
+        agentLoop = new AgentLoop(
+                this.bus,
+                provider,
+                this.config.getWorkspacePath(),
+                this.config.getAgents().getDefaults().getModel(),
+                this.config.getAgents().getDefaults().getMaxToolIterations(),
+                this.config.getAgents().getDefaults().getTemperature(),
+                this.config.getAgents().getDefaults().getMaxTokens(),
+                this.config.getAgents().getDefaults().getMemoryWindow(),
+                this.config.getAgents().getDefaults().getReasoningEffort(),
+                this.config.getTools().getWeb().getSearch().getApiKey(),
+                this.config.getTools().getExec(),
+                cron,
+                this.config.getTools().isRestrictToWorkspace(),
+                sessionManager,
+                this.config.getTools().getMcpServers(),
+                this.config.getChannels(),
+                rt.getRuntimeSettings()
+        );
+
+        refreshModelLabel();
+    }
+
+    /**
+     * 启动 GUI 本地直连模式（cli:direct）。
+     */
+    private void startGuiDirectMode() {
+        try {
+            buildGuiDirectCoreIfNeeded();
+            running.set(true);
+            guiChatAvailable.set(true);
+            gatewayPhase.set(GatewayPhase.IDLE);
+            startBusInteractiveMode();
+            applyGatewayUiMode(GatewayPhase.IDLE);
+            applyTurnUiState(TurnPhase.IDLE);
+            if (gatewayButton != null) {
+                gatewayButton.setText("启动 Gateway");
+                gatewayButton.setEnabled(true);
+            }
+            updateStatus("就绪");
+        } catch (Exception e) {
+            guiChatAvailable.set(false);
+            applyTurnUiState(TurnPhase.IDLE);
+            appendSystem("GUI 直连模式启动失败: " + e.getMessage());
+            updateStatus("初始化失败");
+        }
+    }
+
+    /**
+     * 停止 GUI 本地直连模式。
+     *
+     * @param shutdownCore true 时同时停止并释放 bus/agent/cron/provider
+     */
+    private void stopGuiDirectMode(boolean shutdownCore) {
+        stopBusInteractiveMode();
+
+        processing.set(false);
+        stopRequested.set(false);
+        turnPhase.set(TurnPhase.IDLE);
+        guiChatAvailable.set(false);
+        applyTurnUiState(TurnPhase.IDLE);
+
+        if (!shutdownCore) {
+            return;
+        }
+
+        if (agentLoop != null) {
+            try {
+                agentLoop.stop();
+            } catch (Exception ignored) {
+            }
+            try {
+                agentLoop.closeMcp().toCompletableFuture().join();
+            } catch (Exception ignored) {
+            }
+            agentLoop = null;
+        }
+
+        if (cron != null) {
+            try {
+                cron.stop();
+            } catch (Exception ignored) {
+            }
+            cron = null;
+        }
+
+        bus = null;
+        provider = null;
     }
 
     /**
@@ -1023,6 +1287,7 @@ public class JavaClawBotGUI extends JFrame {
      * 2) GUI 通过 bus.publishInbound() 发消息
      * 3) GUI 后台消费 bus outbound，并把 progress / 最终回复分流
      */
+
     private void startBusInteractiveMode() {
         if (busLoopRunning.get()) {
             return;
@@ -1038,8 +1303,7 @@ public class JavaClawBotGUI extends JFrame {
             try {
                 agentLoop.run();
             } catch (Exception e) {
-                SwingUtilities.invokeLater(() ->
-                        appendSystem("AgentLoop 运行失败: " + e.getMessage()));
+                ui(() -> appendSystem("AgentLoop 运行失败: " + e.getMessage()));
             }
         }, guiAgentExecutor);
 
@@ -1047,7 +1311,15 @@ public class JavaClawBotGUI extends JFrame {
             while (busLoopRunning.get()) {
                 try {
                     OutboundMessage out = bus.consumeOutbound(1, java.util.concurrent.TimeUnit.SECONDS);
-                    if (out == null) continue;
+                    if (out == null) {
+                        continue;
+                    }
+
+                    // Gateway 模式与 GUI 直连模式共用同一 bus 时，必须尽量只消费当前 GUI 会话的消息。
+                    // 这里使用反射读取 channel/chatId，避免强依赖消息类的具体 getter 形状。
+                    if (!isTargetCliOutbound(out)) {
+                        continue;
+                    }
 
                     Map<String, Object> meta = out.getMetadata() != null ? out.getMetadata() : Map.of();
                     boolean isProgress = Boolean.TRUE.equals(meta.get("_progress"));
@@ -1055,26 +1327,28 @@ public class JavaClawBotGUI extends JFrame {
 
                     if (isProgress) {
                         var ch = agentLoop.getChannelsConfig();
-                        if (ch != null && isToolHint && !ch.isSendToolHints()) continue;
-                        if (ch != null && !isToolHint && !ch.isSendProgress()) continue;
+                        if (ch != null && isToolHint && !ch.isSendToolHints()) {
+                            continue;
+                        }
+                        if (ch != null && !isToolHint && !ch.isSendProgress()) {
+                            continue;
+                        }
 
                         String content = out.getContent() == null ? "" : out.getContent();
-                        SwingUtilities.invokeLater(() -> appendProgress(content));
+                        ui(() -> appendProgress(content));
                         continue;
                     }
 
-                    java.util.concurrent.CountDownLatch latch = turnLatchRef.get();
-                    if (latch != null && latch.getCount() > 0) {
-                        if (out.getContent() != null && !out.getContent().isBlank()) {
-                            turnResponseRef.compareAndSet(null, out.getContent());
-                        }
-                        latch.countDown();
-                    } else {
-                        if (out.getContent() != null && !out.getContent().isBlank()) {
-                            String content = out.getContent();
-                            SwingUtilities.invokeLater(() -> appendBot(content));
-                        }
+                    TurnContext turn = activeTurnRef.get();
+                    if (turn != null) {
+                        turn.acceptOutbound(out.getContent());
+                    } else if (out.getContent() != null && !out.getContent().isBlank()) {
+                        String content = out.getContent();
+                        ui(() -> appendBot(content));
                     }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
                 } catch (Exception ignored) {
                 }
             }
@@ -1087,10 +1361,10 @@ public class JavaClawBotGUI extends JFrame {
     private void stopBusInteractiveMode() {
         busLoopRunning.set(false);
 
-        CountDownLatch latch = turnLatchRef.get();
-        if (latch != null) {
-            while (latch.getCount() > 0) {
-                latch.countDown();
+        TurnContext turn = activeTurnRef.getAndSet(null);
+        if (turn != null) {
+            while (turn.doneLatch.getCount() > 0) {
+                turn.doneLatch.countDown();
             }
         }
 
@@ -1107,26 +1381,7 @@ public class JavaClawBotGUI extends JFrame {
      * 按钮显示为正方形 ■，可点击发送 /stop
      */
     private void enterStopMode() {
-        SwingUtilities.invokeLater(() -> {
-            stopMode.set(true);
-
-            sendButton.setText("■");
-            sendButton.setPreferredSize(new Dimension(40, 40));
-            sendButton.setMinimumSize(new Dimension(40, 40));
-            sendButton.setMaximumSize(new Dimension(40, 40));
-            sendButton.setEnabled(true);
-            sendButton.revalidate();
-            sendButton.repaint();
-
-            // 发送中：输入框禁用，但停止按钮保留
-            inputArea.setEnabled(false);
-            inputArea.setEditable(false);
-
-            if (clearButton != null) clearButton.setEnabled(false);
-            if (onboardButton != null) onboardButton.setEnabled(false);
-            if (statusButton != null) statusButton.setEnabled(false);
-            if (gatewayButton != null) gatewayButton.setEnabled(false);
-        });
+        applyTurnUiState(turnPhase.get() == TurnPhase.IDLE ? TurnPhase.RUNNING : turnPhase.get());
     }
 
     /**
@@ -1134,27 +1389,7 @@ public class JavaClawBotGUI extends JFrame {
      * 按钮恢复发送状态
      */
     private void exitStopMode() {
-        SwingUtilities.invokeLater(() -> {
-            stopMode.set(false);
-
-            sendButton.setText("发送");
-            sendButton.setPreferredSize(new Dimension(72, 40));
-            sendButton.setMinimumSize(new Dimension(72, 40));
-            sendButton.setMaximumSize(new Dimension(72, 40));
-            sendButton.setEnabled(true);
-            sendButton.revalidate();
-            sendButton.repaint();
-
-            inputArea.setEnabled(true);
-            inputArea.setEditable(true);
-
-            if (clearButton != null) clearButton.setEnabled(true);
-            if (onboardButton != null) onboardButton.setEnabled(true);
-            if (statusButton != null) statusButton.setEnabled(true);
-            if (gatewayButton != null) gatewayButton.setEnabled(true);
-
-            inputArea.requestFocusInWindow();
-        });
+        applyTurnUiState(TurnPhase.IDLE);
     }
 
     /**
@@ -1162,13 +1397,18 @@ public class JavaClawBotGUI extends JFrame {
      * 注意：这里也必须走 bus，不能再走 processDirect，避免两套通道并存。
      */
     private void sendStopCommand() {
-        if (!processing.get()) {
+        TurnContext turn = activeTurnRef.get();
+        if (turn == null || !processing.get()) {
             return;
         }
 
-        if (!stopRequested.compareAndSet(false, true)) {
+        if (!turn.stopSent.compareAndSet(false, true)) {
             return;
         }
+
+        stopRequested.set(true);
+        turnPhase.set(TurnPhase.STOPPING);
+        enterStopMode();
 
         appendSystem("正在发送 /stop ...");
         updateStatus("停止中...");
@@ -1186,8 +1426,7 @@ public class JavaClawBotGUI extends JFrame {
 
                 bus.publishInbound(stopMsg).toCompletableFuture().join();
             } catch (Exception e) {
-                SwingUtilities.invokeLater(() ->
-                        appendSystem("发送 /stop 失败: " + e.getMessage()));
+                ui(() -> appendSystem("发送 /stop 失败: " + e.getMessage()));
             }
         }, guiAgentExecutor);
     }
@@ -1200,12 +1439,13 @@ public class JavaClawBotGUI extends JFrame {
      * 3) 最终回复由 outbound 消费线程回填
      */
     private void sendMessage() {
-        String message = inputArea.getText() == null ? "" : inputArea.getText().trim();
-        if (message.isEmpty()) {
+        if (gatewayRunning.get() || !guiChatAvailable.get()) {
+            appendSystem("Gateway 运行中，GUI 直连聊天已停用");
             return;
         }
 
-        if (processing.get()) {
+        String message = inputArea.getText() == null ? "" : inputArea.getText().trim();
+        if (message.isEmpty()) {
             return;
         }
 
@@ -1214,8 +1454,15 @@ public class JavaClawBotGUI extends JFrame {
             return;
         }
 
-        processing.set(true);
+        // 显式状态机：只有 IDLE 才允许开启新轮次
+        if (!processing.compareAndSet(false, true)) {
+            return;
+        }
+
+        TurnContext turn = new TurnContext(turnSeq.incrementAndGet(), message);
+        activeTurnRef.set(turn);
         stopRequested.set(false);
+        turnPhase.set(TurnPhase.RUNNING);
 
         appendUser(message);
         inputArea.setText("");
@@ -1224,10 +1471,6 @@ public class JavaClawBotGUI extends JFrame {
 
         CompletableFuture.runAsync(() -> {
             try {
-                turnResponseRef.set(null);
-                java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
-                turnLatchRef.set(latch);
-
                 InboundMessage in = new InboundMessage(
                         cliChannel,
                         "user",
@@ -1239,36 +1482,146 @@ public class JavaClawBotGUI extends JFrame {
 
                 bus.publishInbound(in).toCompletableFuture().join();
 
-                boolean ok = latch.await(5, java.util.concurrent.TimeUnit.MINUTES);
-                String resp = turnResponseRef.get();
-                turnLatchRef.set(new java.util.concurrent.CountDownLatch(0));
+                boolean ok = turn.doneLatch.await(5, java.util.concurrent.TimeUnit.MINUTES);
+                String resp = turn.response();
 
-                SwingUtilities.invokeLater(() -> {
-                    if (!ok) {
-                        appendSystem("等待回复超时");
-                        updateStatus("超时");
-                    } else if (resp != null && !resp.isBlank()) {
-                        appendBot(resp);
-                        updateStatus(stopRequested.get() ? "已停止" : "就绪");
-                    } else {
-                        updateStatus(stopRequested.get() ? "已停止" : "就绪");
-                    }
-
-                    processing.set(false);
-                    stopRequested.set(false);
-                    exitStopMode();
-                });
+                finishTurn(turn, ok, resp, null);
             } catch (Exception e) {
-                SwingUtilities.invokeLater(() -> {
-                    appendSystem("错误: " + e.getMessage());
-                    updateStatus("错误");
-                    processing.set(false);
-                    stopRequested.set(false);
-                    turnLatchRef.set(new java.util.concurrent.CountDownLatch(0));
-                    exitStopMode();
-                });
+                finishTurn(turn, false, null, e);
             }
         }, guiAgentExecutor);
+    }
+
+    /**
+     * 统一收尾当前轮次。
+     *
+     * 这是这次修复的核心：
+     * - processing / stopRequested / stopMode / activeTurn 一次性在同一处归位
+     * - 不再把“外层 invokeLater -> 内层 exitStopMode 再 invokeLater”拆成两拍
+     * - 避免出现 processing 已 false，但 stopMode 还没恢复，导致下一次点击仍被识别成停止
+     */
+    private void finishTurn(TurnContext turn, boolean ok, String resp, Exception error) {
+        if (turn == null) {
+            return;
+        }
+
+        // 只允许当前活动轮次收尾，旧轮次/重复回调直接丢弃
+        if (!activeTurnRef.compareAndSet(turn, null)) {
+            return;
+        }
+
+        processing.set(false);
+        stopRequested.set(false);
+        turnPhase.set(TurnPhase.IDLE);
+
+        ui(() -> {
+            try {
+                if (error != null) {
+                    appendSystem("错误: " + error.getMessage());
+                    updateStatus("错误");
+                } else if (!ok) {
+                    appendSystem("等待回复超时");
+                    updateStatus("超时");
+                } else {
+                    if (resp != null && !resp.isBlank()) {
+                        appendBot(resp);
+                    }
+                    updateStatus(turn.stopSent.get() ? "已停止" : "就绪");
+                }
+            } finally {
+                exitStopMode();
+            }
+        });
+    }
+
+    private void ui(Runnable action) {
+        if (SwingUtilities.isEventDispatchThread()) {
+            action.run();
+        } else {
+            SwingUtilities.invokeLater(action);
+        }
+    }
+
+    /**
+     * 用单一入口刷新输入区状态，避免 stopMode / processing / 按钮文本分散改动。
+     */
+    private void applyTurnUiState(TurnPhase phase) {
+        ui(() -> {
+            boolean stop = phase == TurnPhase.RUNNING || phase == TurnPhase.STOPPING;
+
+            stopMode.set(stop);
+
+            if (stop) {
+                sendButton.setText("■");
+                sendButton.setPreferredSize(new Dimension(40, 40));
+                sendButton.setMinimumSize(new Dimension(40, 40));
+                sendButton.setMaximumSize(new Dimension(40, 40));
+                sendButton.setEnabled(true);
+
+                inputArea.setEnabled(false);
+                inputArea.setEditable(false);
+
+                if (clearButton != null) clearButton.setEnabled(false);
+                if (onboardButton != null) onboardButton.setEnabled(false);
+                if (statusButton != null) statusButton.setEnabled(false);
+                if (gatewayButton != null) gatewayButton.setEnabled(false);
+            } else {
+                boolean chatEnabled = guiChatAvailable.get();
+
+                sendButton.setText("发送");
+                sendButton.setPreferredSize(new Dimension(72, 40));
+                sendButton.setMinimumSize(new Dimension(72, 40));
+                sendButton.setMaximumSize(new Dimension(72, 40));
+                sendButton.setEnabled(chatEnabled);
+
+                inputArea.setEnabled(chatEnabled);
+                inputArea.setEditable(chatEnabled);
+
+                if (clearButton != null) clearButton.setEnabled(true);
+                if (onboardButton != null) onboardButton.setEnabled(true);
+                if (statusButton != null) statusButton.setEnabled(true);
+                if (gatewayButton != null) gatewayButton.setEnabled(true);
+
+                if (chatEnabled) {
+                    inputArea.requestFocusInWindow();
+                }
+            }
+
+            sendButton.revalidate();
+            sendButton.repaint();
+        });
+    }
+
+    /**
+     * 兼容不同版本 OutboundMessage：
+     * - 若能读到 channel/chatId，则只消费 cli:direct
+     * - 若读不到 getter，则保守放行，避免和旧类签名不兼容
+     */
+    private boolean isTargetCliOutbound(OutboundMessage out) {
+        String channel = reflectString(out, "getChannel");
+        String chatId = reflectString(out, "getChatId");
+
+        if (channel == null && chatId == null) {
+            return true;
+        }
+
+        boolean channelOk = channel == null || cliChannel.equals(channel);
+        boolean chatOk = chatId == null || cliChatId.equals(chatId);
+        return channelOk && chatOk;
+    }
+
+    private String reflectString(Object target, String methodName) {
+        if (target == null || methodName == null || methodName.isBlank()) {
+            return null;
+        }
+
+        try {
+            java.lang.reflect.Method m = target.getClass().getMethod(methodName);
+            Object value = m.invoke(target);
+            return value instanceof String ? (String) value : null;
+        } catch (Exception ignored) {
+            return null;
+        }
     }
 
     /**
@@ -1288,20 +1641,12 @@ public class JavaClawBotGUI extends JFrame {
     }
 
     private void setInputEnabled(boolean enabled) {
-        inputArea.setEnabled(enabled);
-        inputArea.setEditable(enabled);
-
-        // 如果当前处于 stopMode，发送按钮必须保持可点击
-        if (stopMode.get()) {
-            sendButton.setEnabled(true);
+        if (enabled) {
+            applyTurnUiState(TurnPhase.IDLE);
         } else {
-            sendButton.setEnabled(enabled);
+            // 外部调用禁用输入时，不改变当前 turnPhase，仅按当前阶段刷新 UI。
+            applyTurnUiState(turnPhase.get() == TurnPhase.IDLE ? TurnPhase.RUNNING : turnPhase.get());
         }
-
-        if (clearButton != null) clearButton.setEnabled(enabled);
-        if (onboardButton != null) onboardButton.setEnabled(enabled);
-        if (statusButton != null) statusButton.setEnabled(enabled);
-        if (gatewayButton != null) gatewayButton.setEnabled(enabled);
     }
 
     private void appendUser(String message) {
@@ -1498,35 +1843,22 @@ public class JavaClawBotGUI extends JFrame {
 
     private void shutdown() {
         running.set(false);
-        stopBusInteractiveMode();
 
-        // Stop gateway components if running
-        if (gatewayRunning.get()) {
-            stopGateway();
-        }
-
-        if (agentLoop != null) {
+        if (gatewayRunning.get() && gatewayRuntime != null) {
             try {
-                agentLoop.stop();
+                gatewayRuntime.stop().toCompletableFuture().join();
             } catch (Exception ignored) {
             }
-            try {
-                agentLoop.closeMcp().toCompletableFuture().join();
-            } catch (Exception ignored) {
-            }
+            gatewayRunning.set(false);
+            gatewayRuntime = null;
         }
 
-        if (cron != null) {
-            try {
-                cron.stop();
-            } catch (Exception ignored) {
-            }
-        }
+        stopGuiDirectMode(true);
+
         try {
             guiAgentExecutor.shutdownNow();
         } catch (Exception ignored) {
         }
-
     }
 
     // =========================
@@ -1534,200 +1866,244 @@ public class JavaClawBotGUI extends JFrame {
     // =========================
 
     /**
-     * Start gateway mode (HeartbeatService + ChannelManager)
+     * 手动启动 Gateway。
      */
     private void startGateway() {
-        if (gatewayRunning.get()) {
-            appendSystem("Gateway 已在运行中");
+        startGateway(false, true);
+    }
+
+    /**
+     * 启动 Gateway。
+     *
+     * @param autoStart   是否为 GUI 启动时自动拉起
+     * @param needConfirm 是否弹出确认框
+     */
+    private void startGateway(boolean autoStart, boolean needConfirm) {
+        GatewayPhase currentPhase = gatewayPhase.get();
+        if (currentPhase != GatewayPhase.IDLE) {
+            appendSystem(currentPhase == GatewayPhase.STARTING ? "Gateway 正在启动中" : "Gateway 已在运行或停止流程中");
+            return;
+        }
+
+        try {
+            RuntimeComponents rt = createRuntimeComponents();
+            this.config = rt.getConfig();
+            refreshModelLabel();
+        } catch (Exception e) {
+            appendSystem("读取配置失败: " + e.getMessage());
+            startGuiDirectMode();
             return;
         }
 
         if (config == null) {
             appendSystem("错误: 配置未初始化");
+            startGuiDirectMode();
             return;
         }
 
-        // Check if channels are configured and show confirmation dialog
         StringBuilder channelInfo = new StringBuilder();
         boolean hasEnabledChannels = false;
 
         var channelsConfig = config.getChannels();
         if (channelsConfig != null) {
-            // Check Discord
             if (channelsConfig.getDiscord() != null && channelsConfig.getDiscord().isEnabled()) {
                 hasEnabledChannels = true;
-                channelInfo.append("• Discord: 已启用\n");
+                channelInfo.append("• Discord: 已启用");
             }
-            // Check Telegram
             if (channelsConfig.getTelegram() != null && channelsConfig.getTelegram().isEnabled()) {
                 hasEnabledChannels = true;
-                channelInfo.append("• Telegram: 已启用\n");
+                channelInfo.append("• Telegram: 已启用");
             }
-            // Check WhatsApp
             if (channelsConfig.getWhatsapp() != null && channelsConfig.getWhatsapp().isEnabled()) {
                 hasEnabledChannels = true;
-                channelInfo.append("• WhatsApp: 已启用\n");
+                channelInfo.append("• WhatsApp: 已启用");
             }
-            // Check feishu
             if (channelsConfig.getFeishu() != null && channelsConfig.getFeishu().isEnabled()) {
                 hasEnabledChannels = true;
-                channelInfo.append("• 飞书: 已启用\n");
+                channelInfo.append("• 飞书: 已启用");
             }
         }
 
-        // Show confirmation dialog
-        String message;
-        String title;
-        if (hasEnabledChannels) {
-            message = "检测到以下频道已配置并启用:\n\n" + channelInfo.toString() + "启动 Gateway 后将连接这些频道。\n\n是否确认启动 Gateway?";
-            title = "确认启动 Gateway";
-        } else {
-            message = "未检测到已启用的频道配置。\n\n请确认 channel 配置是否正确。\n\n是否仍要启动 Gateway?";
-            title = "频道配置确认";
+        if (needConfirm) {
+            String message;
+            String title;
+            if (hasEnabledChannels) {
+                message = "检测到以下频道已配置并启用:"
+                        + channelInfo
+                        + "启动 Gateway 后将连接这些频道，并暂停 GUI 直连聊天。是否确认启动 Gateway?";
+                title = "确认启动 Gateway";
+            } else {
+                message = "未检测到已启用的频道配置。请确认 channel 配置是否正确。是否仍要启动 Gateway?";
+                title = "频道配置确认";
+            }
+
+            int result = JOptionPane.showConfirmDialog(
+                    this,
+                    message,
+                    title,
+                    JOptionPane.YES_NO_OPTION,
+                    JOptionPane.QUESTION_MESSAGE
+            );
+            if (result != JOptionPane.YES_OPTION) {
+                appendSystem("Gateway 启动已取消");
+                return;
+            }
         }
 
-        int result = JOptionPane.showConfirmDialog(
-                this,
-                message,
-                title,
-                JOptionPane.YES_NO_OPTION,
-                JOptionPane.QUESTION_MESSAGE
-        );
-        if (result != JOptionPane.YES_OPTION) {
-            appendSystem("Gateway 启动已取消");
-            return;
-        }
-
-        // User confirmed, set hasEnabledChannels to true to proceed
-        hasEnabledChannels = true;
-
-        appendSystem("正在启动 Gateway...");
+        appendSystem(autoStart ? "检测到 gatewayMode=true，正在自动后台启动 Gateway..." : "正在切换到 Gateway 后台模式...");
         updateStatus("启动 Gateway...");
+        gatewayPhase.set(GatewayPhase.STARTING);
+        gatewayRunning.set(false);
+        guiChatAvailable.set(false);
+        applyGatewayUiMode(GatewayPhase.STARTING);
+        applyTurnUiState(TurnPhase.IDLE);
+        if (gatewayButton != null) {
+            gatewayButton.setText("取消启动");
+            gatewayButton.setEnabled(true);
+        }
 
         CompletableFuture.runAsync(() -> {
             try {
-                // Initialize MessageBus if not exists
-                if (bus == null) {
-                    bus = new MessageBus();
-                }
+                stopGuiDirectMode(true);
 
-                // Initialize ChannelManager
-                channels = new ChannelManager(config, bus);
+                GatewayRuntime runtime = new GatewayRuntime();
+                gatewayRuntime = runtime;
 
-                // Select heartbeat target: prefer non-cli/system session
-                final AtomicReference<String> hbChannel = new AtomicReference<>("cli");
-                final AtomicReference<String> hbChatId = new AtomicReference<>("direct");
-                try {
-                    Set<String> enabled = new HashSet<>(channels.getEnabledChannels());
-                    for (Map<String, Object> s : sessionManager.listSessions()) {
-                        Object keyObj = s.get("key");
-                        if (!(keyObj instanceof String key)) continue;
-                        if (!key.contains(":")) continue;
-                        String[] parts = key.split(":", 2);
-                        String ch = parts[0];
-                        String cid = parts[1];
-                        if ("cli".equals(ch) || "system".equals(ch)) continue;
-                        if (enabled.contains(ch) && cid != null && !cid.isBlank()) {
-                            hbChannel.set(ch);
-                            hbChatId.set(cid);
-                            break;
-                        }
-                    }
-                } catch (Exception ignored) {}
-
-                // Initialize HeartbeatService
-                heartbeat = new HeartbeatService(
-                        config.getWorkspacePath(),
-                        provider,
-                        agentLoop.getModel(),
-                        tasks -> agentLoop.processDirect(
-                                tasks,
-                                "heartbeat",
-                                hbChannel.get(),
-                                hbChatId.get(),
-                                (c, toolHint) -> CompletableFuture.completedFuture(null)
-                        ).toCompletableFuture(),
-                        response -> {
-                            if ("cli".equals(hbChannel.get())) return CompletableFuture.completedFuture(null);
-                            return bus.publishOutbound(new OutboundMessage(
-                                    hbChannel.get(),
-                                    hbChatId.get(),
-                                    response != null ? response : "",
-                                    null,
-                                    null
-                            )).toCompletableFuture();
-                        },
-                        HeartbeatService.parseConfig(config)
-                );
-
-                // Start services
-                channels.startAll().toCompletableFuture().join();
-                heartbeat.start().toCompletableFuture().join();
-
-                gatewayRunning.set(true);
-
-                SwingUtilities.invokeLater(() -> {
-                    appendSystem("✓ Gateway 已启动");
-                    appendSystem("  - HeartbeatService: 运行中");
-                    appendSystem("  - ChannelManager: 运行中");
-                    updateStatus("Gateway 运行中");
-                    if (gatewayButton != null) {
-                        gatewayButton.setText("停止 Gateway");
+                runtime.start().whenComplete((v, ex) -> {
+                    if (ex == null) {
+                        gatewayRunning.set(true);
+                        gatewayPhase.set(GatewayPhase.RUNNING);
+                        ui(() -> {
+                            applyGatewayUiMode(GatewayPhase.RUNNING);
+                            applyTurnUiState(TurnPhase.IDLE);
+                            appendSystem("✓ Gateway 已启动");
+                            appendSystem("GUI 输入区已隐藏/禁用；后续消息将由 Gateway 在后台与渠道通信");
+                            updateStatus("Gateway 运行中");
+                            if (gatewayButton != null) {
+                                gatewayButton.setText("停止 Gateway");
+                                gatewayButton.setEnabled(true);
+                            }
+                        });
+                    } else {
+                        gatewayRunning.set(false);
+                        gatewayRuntime = null;
+                        gatewayPhase.set(GatewayPhase.IDLE);
+                        ui(() -> {
+                            appendSystem("Gateway 启动失败: " + rootMessage(ex));
+                            updateStatus("Gateway 启动失败");
+                            applyGatewayUiMode(GatewayPhase.IDLE);
+                            if (gatewayButton != null) {
+                                gatewayButton.setText("启动 Gateway");
+                                gatewayButton.setEnabled(true);
+                            }
+                        });
+                        startGuiDirectMode();
                     }
                 });
-
             } catch (Exception e) {
-                SwingUtilities.invokeLater(() -> {
+                gatewayRunning.set(false);
+                gatewayRuntime = null;
+                gatewayPhase.set(GatewayPhase.IDLE);
+
+                ui(() -> {
                     appendSystem("Gateway 启动失败: " + e.getMessage());
                     updateStatus("Gateway 启动失败");
+                    applyGatewayUiMode(GatewayPhase.IDLE);
+                    if (gatewayButton != null) {
+                        gatewayButton.setText("启动 Gateway");
+                        gatewayButton.setEnabled(true);
+                    }
                 });
+
+                startGuiDirectMode();
             }
-        });
+        }, guiAgentExecutor);
     }
 
     /**
-     * Stop gateway mode
+     * 停止 Gateway，并恢复到 GUI 直连 Agent 模式。
      */
     private void stopGateway() {
-        if (!gatewayRunning.get()) {
+        GatewayPhase phase = gatewayPhase.get();
+        if (phase == GatewayPhase.IDLE) {
             appendSystem("Gateway 未在运行");
+            startGuiDirectMode();
             return;
         }
 
-        appendSystem("正在停止 Gateway...");
-
-        try {
-            if (heartbeat != null) {
-                heartbeat.stop();
-                heartbeat = null;
-            }
-
-            if (channels != null) {
-                channels.stopAll().toCompletableFuture().join();
-                channels = null;
-            }
-
-            gatewayRunning.set(false);
-
-            appendSystem("✓ Gateway 已停止");
-            updateStatus("就绪");
-            if (gatewayButton != null) {
-                gatewayButton.setText("启动 Gateway");
-            }
-
-        } catch (Exception e) {
-            appendSystem("Gateway 停止失败: " + e.getMessage());
+        boolean cancellingStartup = phase == GatewayPhase.STARTING;
+        appendSystem(cancellingStartup ? "正在取消 Gateway 启动，并恢复到 Agent 直连模式..." : "正在停止 Gateway，并恢复到 Agent 直连模式...");
+        updateStatus(cancellingStartup ? "取消 Gateway 启动..." : "停止 Gateway...");
+        gatewayPhase.set(GatewayPhase.STOPPING);
+        applyGatewayUiMode(GatewayPhase.STOPPING);
+        if (gatewayButton != null) {
+            gatewayButton.setText("停止中...");
+            gatewayButton.setEnabled(false);
         }
+
+        CompletableFuture.runAsync(() -> {
+            try {
+                GatewayRuntime localRuntime = gatewayRuntime;
+                if (localRuntime != null) {
+                    try {
+                        localRuntime.stop().toCompletableFuture().get(18, TimeUnit.SECONDS);
+                    } catch (TimeoutException te) {
+                        appendSystem("Gateway 停止超时，先恢复 GUI 直连；后台清理继续进行");
+                    }
+                    gatewayRuntime = null;
+                }
+
+                gatewayRunning.set(false);
+                gatewayPhase.set(GatewayPhase.IDLE);
+                startGuiDirectMode();
+
+                ui(() -> {
+                    appendSystem(cancellingStartup ? "✓ Gateway 启动已取消" : "✓ Gateway 已停止");
+                    appendSystem("已恢复到 Agent 直连模式");
+                    applyGatewayUiMode(GatewayPhase.IDLE);
+                    updateStatus("就绪");
+                    if (gatewayButton != null) {
+                        gatewayButton.setText("启动 Gateway");
+                        gatewayButton.setEnabled(true);
+                    }
+                });
+            } catch (Exception e) {
+                gatewayRunning.set(false);
+                gatewayPhase.set(GatewayPhase.IDLE);
+                gatewayRuntime = null;
+                startGuiDirectMode();
+                ui(() -> {
+                    appendSystem("Gateway 停止阶段出现异常，已强制恢复 GUI 直连: " + rootMessage(e));
+                    updateStatus("就绪");
+                    applyGatewayUiMode(GatewayPhase.IDLE);
+                    if (gatewayButton != null) {
+                        gatewayButton.setText("启动 Gateway");
+                        gatewayButton.setEnabled(true);
+                    }
+                });
+            }
+        }, guiAgentExecutor);
+    }
+
+    private String rootMessage(Throwable ex) {
+        if (ex == null) return "";
+        Throwable t = ex;
+        while (t.getCause() != null && t.getCause() != t) {
+            t = t.getCause();
+        }
+        String msg = t.getMessage();
+        return (msg == null || msg.isBlank()) ? t.getClass().getSimpleName() : msg;
     }
 
     /**
      * Toggle gateway mode
      */
     private void toggleGateway() {
-        if (gatewayRunning.get()) {
-            stopGateway();
-        } else {
+        GatewayPhase phase = gatewayPhase.get();
+        if (phase == GatewayPhase.IDLE) {
             startGateway();
+        } else {
+            stopGateway();
         }
     }
 
@@ -2018,7 +2394,7 @@ public class JavaClawBotGUI extends JFrame {
     static final class MarkdownRenderer {
 
         private static final Pattern CODE_BLOCK_PATTERN =
-                Pattern.compile("(?s)```([a-zA-Z0-9_+-]*)\\n(.*?)\\n```");
+                Pattern.compile("(?s)```([a-zA-Z0-9_+-]*)\n(.*?)\n```");
 
         private MarkdownRenderer() {
         }

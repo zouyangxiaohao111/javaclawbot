@@ -14,7 +14,7 @@ REM =========================================================
 REM Configuration
 REM =========================================================
 
-set "JAVA_HOME=C:\Program Files\Java\jdk-17"
+set "JAVA_HOME=C:\Program Files\Java17\jdk-17"
 set "JAVA_BIN=%JAVA_HOME%\bin"
 
 set "JAVA_CMD=%JAVA_BIN%\java.exe"
@@ -29,11 +29,20 @@ set "DESCRIPTION=JavaClawBot - AI Assistant"
 set "MAIN_JAR_NAME=javaclawbot.jar"
 set "MAIN_CLASS=gui.JavaClawBotGUI"
 
-set "BASE_URL=D:\opencode_code\pkg_exe1"
+set "BASE_URL=D:\open_code\pkg_exe"
 set "JAR_FILE=%BASE_URL%\javaclawbot.jar"
 set "OUTPUT_DIR=%BASE_URL%\dist"
 set "RUNTIME_DIR=%BASE_URL%\jre"
 set "TEMP_INPUT_DIR=%BASE_URL%\temp_package"
+
+REM =========================================================
+REM Runtime Java options for packaged application
+REM =========================================================
+
+set "JAVA_OPT_1=-Dfile.encoding=UTF-8"
+set "JAVA_OPT_2=-Dsun.jnu.encoding=UTF-8"
+set "JAVA_OPT_3=-Duser.language=en"
+set "JAVA_OPT_4=-Duser.country=US"
 
 REM =========================================================
 REM Ultra-stable module set
@@ -57,6 +66,10 @@ echo [DEBUG] JAR_FILE          : %JAR_FILE%
 echo [DEBUG] OUTPUT_DIR        : %OUTPUT_DIR%
 echo [DEBUG] RUNTIME_DIR       : %RUNTIME_DIR%
 echo [DEBUG] TEMP_INPUT_DIR    : %TEMP_INPUT_DIR%
+echo [DEBUG] JAVA_OPT_1        : %JAVA_OPT_1%
+echo [DEBUG] JAVA_OPT_2        : %JAVA_OPT_2%
+echo [DEBUG] JAVA_OPT_3        : %JAVA_OPT_3%
+echo [DEBUG] JAVA_OPT_4        : %JAVA_OPT_4%
 echo [DEBUG] MODULES           : %MODULES%
 echo.
 
@@ -286,7 +299,7 @@ REM =========================================================
 echo [STEP] Running jpackage...
 echo.
 echo [COMMAND]
-echo "%JPACKAGE_CMD%" --type exe --name "%APP_NAME%" --app-version "%APP_VERSION%" --vendor "%VENDOR%" --description "%DESCRIPTION%" --input "%TEMP_INPUT_DIR%" --main-jar "%MAIN_JAR_NAME%" --main-class "%MAIN_CLASS%" --runtime-image "%RUNTIME_DIR%" --dest "%OUTPUT_DIR%" --win-console --win-dir-chooser --win-menu --win-shortcut --verbose
+echo "%JPACKAGE_CMD%" --type exe --name "%APP_NAME%" --app-version "%APP_VERSION%" --vendor "%VENDOR%" --description "%DESCRIPTION%" --input "%TEMP_INPUT_DIR%" --main-jar "%MAIN_JAR_NAME%" --main-class "%MAIN_CLASS%" --runtime-image "%RUNTIME_DIR%" --dest "%OUTPUT_DIR%" --java-options "%JAVA_OPT_1%" --java-options "%JAVA_OPT_2%" --java-options "%JAVA_OPT_3%" --java-options "%JAVA_OPT_4%" --win-console --win-dir-chooser --win-menu --win-shortcut --verbose
 echo.
 
 "%JPACKAGE_CMD%" ^
@@ -300,6 +313,10 @@ echo.
   --main-class "%MAIN_CLASS%" ^
   --runtime-image "%RUNTIME_DIR%" ^
   --dest "%OUTPUT_DIR%" ^
+  --java-options "%JAVA_OPT_1%" ^
+  --java-options "%JAVA_OPT_2%" ^
+  --java-options "%JAVA_OPT_3%" ^
+  --java-options "%JAVA_OPT_4%" ^
   --win-console ^
   --win-dir-chooser ^
   --win-menu ^
