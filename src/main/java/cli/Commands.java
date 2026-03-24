@@ -81,14 +81,14 @@ public class Commands implements Runnable {
     static class VersionProviderImpl implements IVersionProvider {
         @Override
         public String[] getVersion() {
-            return new String[]{"🐈 javaclawbot v" + 1};
+            return new String[]{"🐱 javaclawbot v" + 1};
         }
     }
 
     static void printAgentResponse(String response, boolean renderMarkdown) {
         String content = response == null ? "" : response;
         System.out.println();
-        System.out.println("🐈 javaclawbot");
+        System.out.println("🐱 javaclawbot");
         System.out.println(content);
         System.out.println();
     }
@@ -163,7 +163,7 @@ public class Commands implements Runnable {
 
         @Override
         public void run() {
-            System.out.println("🐈 Starting javaclawbot gateway on port " + port + "...");
+            System.out.println("🐱 Starting javaclawbot gateway on port " + port + "...");
 
             Path configPath = (config != null) ? Paths.get(config).toAbsolutePath() : null;
             Path workspacePath = (workspace != null) ? Paths.get(workspace).toAbsolutePath() : null;
@@ -340,7 +340,7 @@ public class Commands implements Runnable {
                 impl.setVariable(LineReader.HISTORY_SIZE, 10000);
             }
 
-            System.out.println("🐈 Interactive mode (type exit or Ctrl+C to quit)\n");
+            System.out.println("🐱 Interactive mode (type exit or Ctrl+C to quit)\n");
 
             CompletableFuture<Void> busTask = CompletableFuture.runAsync(agentLoop::run);
 
@@ -424,7 +424,7 @@ public class Commands implements Runnable {
 
                     // 等待回复（可改更小/更大超时）
                     System.out.println("[dim]javaclawbot is thinking...[/dim]");
-                    boolean ok = latch.await(5, TimeUnit.MINUTES);
+                    boolean ok = latch.await(10, TimeUnit.MINUTES);
                     String resp = turnResponseRef.get();
                     turnLatchRef.set(new CountDownLatch(0));
 
@@ -468,7 +468,7 @@ public class Commands implements Runnable {
             ConfigSchema.Config config = ConfigIO.loadConfig(null);
             Path workspace = config.getWorkspacePath();
 
-            System.out.println("🐈 javaclawbot Status\n");
+            System.out.println("🐱 javaclawbot Status\n");
             System.out.println("Config: " + configPath + (Files.exists(configPath) ? " ✓" : " ✗"));
             System.out.println("Workspace: " + workspace + (Files.exists(workspace) ? " ✓" : " ✗"));
 
@@ -818,7 +818,7 @@ public class Commands implements Runnable {
                     return;
                 }
 
-                System.out.println("\n🐈 Session Cost Summary: " + sessionId + "\n");
+                System.out.println("\n🐱 Session Cost Summary: " + sessionId + "\n");
                 System.out.println("Messages: " + summary.messageCounts().total() +
                         " (user: " + summary.messageCounts().user() +
                         ", assistant: " + summary.messageCounts().assistant() + ")");
@@ -857,7 +857,7 @@ public class Commands implements Runnable {
 
             SessionCostUsage.CostUsageSummary summary = SessionCostUsage.loadCostUsageSummary(sessionsDir, startMs, endMs);
 
-            System.out.println("\n🐈 Cost & Usage Summary (Last " + days + " days)\n");
+            System.out.println("\n🐱 Cost & Usage Summary (Last " + days + " days)\n");
 
             if (summary.totals() != null) {
                 System.out.println("Total Tokens: " + formatNumber(summary.totals().totalTokens()));
@@ -1038,7 +1038,7 @@ public class Commands implements Runnable {
                     daemon.DaemonService.ServiceStatus status = service.status();
 
                     System.out.println();
-                    System.out.println("🐈 javaclawbot 服务状态");
+                    System.out.println("🐱 javaclawbot 服务状态");
                     System.out.println();
                     System.out.println("平台: " + daemon.DaemonServiceFactory.getCurrentPlatform() + " (" + service.getLabel() + ")");
                     System.out.println("安装: " + (status.installed() ? "✓ 已安装" : "✗ 未安装"));

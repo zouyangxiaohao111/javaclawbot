@@ -1,5 +1,7 @@
 package agent.subagent;
 
+import lombok.Data;
+
 import java.time.LocalDateTime;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -17,6 +19,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * - 清理策略（cleanup）
  * - 深度控制（depth）
  */
+@Data
 public class SubagentRunRecord {
 
     /** 运行ID（唯一标识） */
@@ -150,33 +153,7 @@ public class SubagentRunRecord {
     // Getters & Setters
     // ==========================
 
-    public String getRunId() { return runId; }
-    public String getChildSessionKey() { return childSessionKey; }
-    public String getRequesterSessionKey() { return requesterSessionKey; }
-    public String getLabel() { return label; }
-    public String getTask() { return task; }
-    public CleanupPolicy getCleanup() { return cleanup; }
-    public SpawnMode getSpawnMode() { return spawnMode; }
-    public int getDepth() { return depth; }
-    public LocalDateTime getCreatedAt() { return createdAt; }
-    public LocalDateTime getStartedAt() { return startedAt; }
-    public void setStartedAt(LocalDateTime startedAt) { this.startedAt = startedAt; }
-    public LocalDateTime getEndedAt() { return endedAt; }
-    public void setEndedAt(LocalDateTime endedAt) { this.endedAt = endedAt; }
-    public SubagentOutcome getOutcome() { return outcome; }
-    public void setOutcome(SubagentOutcome outcome) { this.outcome = outcome; }
-    public String getFrozenResultText() { return frozenResultText; }
-    public void setFrozenResultText(String frozenResultText) { this.frozenResultText = frozenResultText; }
-    public boolean isExpectsCompletionMessage() { return expectsCompletionMessage; }
-    public void setExpectsCompletionMessage(boolean expectsCompletionMessage) { this.expectsCompletionMessage = expectsCompletionMessage; }
-    public String getWorkspaceDir() { return workspaceDir; }
-    public void setWorkspaceDir(String workspaceDir) { this.workspaceDir = workspaceDir; }
-    public String getModel() { return model; }
-    public void setModel(String model) { this.model = model; }
-    public Integer getRunTimeoutSeconds() { return runTimeoutSeconds; }
-    public void setRunTimeoutSeconds(Integer runTimeoutSeconds) { this.runTimeoutSeconds = runTimeoutSeconds; }
-    public Map<String, Object> getMetadata() { return metadata; }
-    public void setMetadata(Map<String, Object> metadata) { this.metadata = metadata; }
+
 
     /**
      * 转换为摘要Map（用于工具输出）

@@ -509,7 +509,7 @@ public final class OnboardWizard {
         System.out.println("  配置文件: " + configPath);
         System.out.println("  工作空间: " + workspace);
         System.out.println();
-        System.out.println("  🐈 javaclawbot is ready!");
+        System.out.println("  🐱 javaclawbot is ready!");
         System.out.println();
         System.out.println("───────────────────────────────────────────────────────────────");
         System.out.println("  下一步：");

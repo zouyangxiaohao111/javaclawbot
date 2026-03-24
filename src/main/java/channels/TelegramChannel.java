@@ -349,7 +349,7 @@ public class TelegramChannel extends BaseChannel {
         // /help：不经过 ACL（与 Python 一致）
         if (cmd.startsWith("/help")) {
             safeSendText(Long.parseLong(chatId),
-                    "🐈 javaclawbot commands:\n"
+                    "🐱 javaclawbot commands:\n"
                             + "/new — Start a new conversation\n"
                             + "/stop — Stop the current task\n"
                             + "/help — Show available commands",

@@ -526,7 +526,18 @@ public class AgentLoop {
             return CompletableFuture.completedFuture(new OutboundMessage(
                     msg.getChannel(),
                     msg.getChatId(),
-                    "🐈 javaclawbot 命令:\n/new — 开始新对话\n/stop — 停止当前任务\n/help — 显示可用命令",
+                    "🐱 javaclawbot 命令:\n/new — 开始新对话\n/stop — 停止当前任务\n/help — 显示可用命令",
+                    List.of(),
+                    Map.of()
+            ));
+        }
+
+        if ("/mcp-reload".equals(cmd)) {
+            connectMcp().toCompletableFuture().join();
+            return CompletableFuture.completedFuture(new OutboundMessage(
+                    msg.getChannel(),
+                    msg.getChatId(),
+                    "🐱 MCP 插件已重新加载。",
                     List.of(),
                     Map.of()
             ));

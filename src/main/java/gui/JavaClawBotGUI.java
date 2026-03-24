@@ -311,7 +311,7 @@ public class JavaClawBotGUI extends JFrame {
         left.setOpaque(false);
         left.setLayout(new BoxLayout(left, BoxLayout.Y_AXIS));
 
-        JLabel titleLabel = new JLabel("🐈 javaclawbot");
+        JLabel titleLabel = new JLabel("🐱 javaclawbot");
         titleLabel.setFont(UiFonts.bold(20));
         titleLabel.setForeground(TEXT_PRIMARY);
 
@@ -834,7 +834,7 @@ public class JavaClawBotGUI extends JFrame {
 
             JOptionPane.showMessageDialog(
                     this,
-                    "🐈 javaclawbot is ready!\n\n"
+                    "🐱 javaclawbot is ready!\n\n"
                             + "配置文件: " + configPath + "\n"
                             + "工作空间: " + workspace + "\n\n"
                             + "下一步：\n"
@@ -1654,7 +1654,7 @@ public class JavaClawBotGUI extends JFrame {
     }
 
     private void appendBot(String message) {
-        addBubble(BubbleType.BOT, "🐈 javaclawbot", message);
+        addBubble(BubbleType.BOT, "🐱 javaclawbot", message);
     }
 
     private void appendSystem(String message) {
@@ -1742,7 +1742,7 @@ public class JavaClawBotGUI extends JFrame {
         Path workspace = config.getWorkspacePath();
 
         StringBuilder sb = new StringBuilder();
-        sb.append("🐈 javaclawbot 状态\n\n");
+        sb.append("🐱 javaclawbot 状态\n\n");
         sb.append("配置文件: ").append(configPath).append(Files.exists(configPath) ? " ＜（＾－＾）＞" : "┭┮﹏┭┮").append("\n");
         sb.append("工作空间: ").append(workspace).append(Files.exists(workspace) ? " ＜（＾－＾）＞" : "┭┮﹏┭┮").append("\n");
         sb.append("模型: ").append(safeModel()).append("\n\n");
@@ -1831,7 +1831,7 @@ public class JavaClawBotGUI extends JFrame {
 
     private void showAbout() {
         String about = ""
-                + "🐈 javaclawbot - AI Assistant\n\n"
+                + "🐱 javaclawbot - AI Assistant\n\n"
                 + "版本: 1.0\n"
                 + "UI: FlatLaf / FlatMacLightLaf\n"
                 + "聊天布局: 左右气泡 + Markdown 展示\n"

@@ -1,6 +1,8 @@
 package agent.subagent;
 
 import agent.tool.Tool;
+import lombok.extern.slf4j.Slf4j;
+import utils.GsonFactory;
 
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
@@ -17,6 +19,7 @@ import java.util.stream.Collectors;
  * - kill: 终止子Agent运行
  * - steer: 向运行中的子Agent发送指导消息
  */
+@Slf4j
 public class SubagentsControlTool extends Tool {
 
     private static final int DEFAULT_RECENT_MINUTES = 30;
@@ -183,6 +186,7 @@ public class SubagentsControlTool extends Tool {
                         result.put("text", count > 0
                                 ? "已终止 " + count + " 个子代理"
                                 : "没有运行中的子代理可终止");
+                        log.info("结束子代理 {} result: {}", target, GsonFactory.getGson().toJson(result));
                         return toJson(result);
                     });
         }
@@ -202,6 +206,7 @@ public class SubagentsControlTool extends Tool {
                         result.put("target", target);
                         result.put("error", "子代理未找到或已完成");
                     }
+                    log.info("结束子代理 {} result: {}", target, GsonFactory.getGson().toJson(result));
                     return toJson(result);
                 });
     }
