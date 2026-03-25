@@ -414,7 +414,7 @@ public class SubagentManager {
 
         return bus.publishInbound(msg)
                 .thenApply(v -> {
-                    log.info("Steered subagent: {} with message: {}", runId, truncate(message, 50));
+                    log.info("Steered subagent: {} with message: {}", runId, SubagentUtils.truncate(message, 50));
                     return true;
                 })
                 .exceptionally(ex -> {
@@ -449,10 +449,6 @@ public class SubagentManager {
         return t.substring(0, max) + "...";
     }
 
-    private static String truncate(String s, int max) {
-        if (s == null) return "";
-        return s.length() > max ? s.substring(0, max) + "..." : s;
-    }
 
     private static String toJson(Object o) {
         try {

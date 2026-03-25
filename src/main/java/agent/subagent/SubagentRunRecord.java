@@ -154,8 +154,8 @@ public class SubagentRunRecord {
         Map<String, Object> map = new java.util.LinkedHashMap<>();
         map.put("runId", runId);
         map.put("sessionKey", childSessionKey);
-        map.put("label", label != null ? label : truncate(task, 30));
-        map.put("task", truncate(task, 100));
+        map.put("label", label != null ? label : SubagentUtils.truncate(task, 30));
+        map.put("task", SubagentUtils.truncate(task, 100));
         map.put("status", getStatusText());
         map.put("depth", depth);
         map.put("runtime", formatRuntime(getRuntimeMs()));
@@ -169,10 +169,6 @@ public class SubagentRunRecord {
         return outcome.getStatus().name().toLowerCase();
     }
 
-    private String truncate(String s, int max) {
-        if (s == null) return "";
-        return s.length() > max ? s.substring(0, max) + "..." : s;
-    }
 
     private String formatRuntime(long ms) {
         if (ms <= 0) return "n/a";

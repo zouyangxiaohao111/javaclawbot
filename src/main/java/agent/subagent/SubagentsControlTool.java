@@ -133,7 +133,7 @@ public class SubagentsControlTool extends Tool {
             for (int i = 0; i < active.size(); i++) {
                 SubagentRunRecord r = active.get(i);
                 text.append(String.format("%d. [%s] %s - %s (running)\n",
-                        i + 1, r.getRunId(), r.getLabel() != null ? r.getLabel() : truncate(r.getTask(), 30), r.getRuntimeMs() / 1000 + "s"));
+                        i + 1, r.getRunId(), r.getLabel() != null ? r.getLabel() : SubagentUtils.truncate(r.getTask(), 30), r.getRuntimeMs() / 1000 + "s"));
             }
             text.append("\n");
         }
@@ -143,7 +143,7 @@ public class SubagentsControlTool extends Tool {
             for (int i = 0; i < recent.size(); i++) {
                 SubagentRunRecord r = recent.get(i);
                 text.append(String.format("%d. [%s] %s - %s\n",
-                        i + 1, r.getRunId(), r.getLabel() != null ? r.getLabel() : truncate(r.getTask(), 30),
+                        i + 1, r.getRunId(), r.getLabel() != null ? r.getLabel() : SubagentUtils.truncate(r.getTask(), 30),
                         r.getOutcome() != null ? r.getOutcome().getStatusText() : "unknown"));
             }
         }
@@ -270,10 +270,6 @@ public class SubagentsControlTool extends Tool {
         return defaultValue;
     }
 
-    private String truncate(String s, int max) {
-        if (s == null) return "";
-        return s.length() > max ? s.substring(0, max) + "..." : s;
-    }
 
     private String toJson(Object obj) {
         try {

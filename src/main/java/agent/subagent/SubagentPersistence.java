@@ -65,7 +65,7 @@ public class SubagentPersistence {
             this.createdAt = formatDateTime(record.getCreatedAt());
             this.startedAt = formatDateTime(record.getStartedAt());
             this.endedAt = formatDateTime(record.getEndedAt());
-            this.frozenResultText = truncateText(record.getFrozenResultText(), 10000);
+            this.frozenResultText = SubagentUtils.truncateText(record.getFrozenResultText(), 10000);
             this.depth = record.getDepth();
             if (record.getOutcome() != null) {
                 this.outcomeStatus = record.getOutcome().getStatus().name().toLowerCase();
@@ -338,9 +338,4 @@ public class SubagentPersistence {
         dirty = true;
     }
 
-    private static String truncateText(String text, int maxLength) {
-        if (text == null) return null;
-        if (text.length() <= maxLength) return text;
-        return text.substring(0, maxLength) + "... [truncated]";
-    }
 }
