@@ -198,7 +198,7 @@ public class SubagentSystemPromptBuilder {
 
         String title = (record.getLabel() != null && !record.getLabel().isBlank())
                 ? record.getLabel()
-                : truncate(record.getTask(), 50);
+                : SubagentUtils.truncate(record.getTask(), 50);
 
         lines.add(String.format("1. %s", title));
         lines.add(String.format("status: %s", record.getOutcome() != null ? record.getOutcome().getStatusText() : "unknown"));
@@ -216,8 +216,4 @@ public class SubagentSystemPromptBuilder {
         return String.join("\n", lines);
     }
 
-    private String truncate(String s, int max) {
-        if (s == null) return "";
-        return s.length() > max ? s.substring(0, max) + "..." : s;
-    }
 }

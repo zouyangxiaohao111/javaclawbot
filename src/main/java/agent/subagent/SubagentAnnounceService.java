@@ -159,14 +159,10 @@ public class SubagentAnnounceService {
     public String buildSpawnNotification(SubagentRunRecord record) {
         String label = (record.getLabel() != null && !record.getLabel().isBlank())
                 ? record.getLabel()
-                : truncate(record.getTask(), 30);
+                : SubagentUtils.truncate(record.getTask(), 30);
 
         return String.format("子代理 [%s] 已启动 (id: %s)。完成时会通知您。",
                 label, record.getRunId());
     }
 
-    private String truncate(String s, int max) {
-        if (s == null) return "";
-        return s.length() > max ? s.substring(0, max) + "..." : s;
-    }
 }
