@@ -46,9 +46,10 @@ public class LocalSubagentExecutor implements SubagentExecutor {
     // ========== 新增：多Agent控制依赖 ==========
     private final SubagentRegistry registry;
     private final MessageBus messageBus;
+    private SubagentManager subagentManager;
 
     /** 最大迭代次数 */
-    private static final int MAX_ITERATIONS = 15;
+    private static final int MAX_ITERATIONS = 30;
 
     /** 运行中的任务 */
     private final ConcurrentHashMap<String, CompletableFuture<SubagentExecutionResult>> runningTasks = new ConcurrentHashMap<>();
@@ -94,6 +95,13 @@ public class LocalSubagentExecutor implements SubagentExecutor {
             boolean restrictToWorkspace
     ) {
         this(provider, workspace, execConfig, braveApiKey, restrictToWorkspace, null, null);
+    }
+
+    /**
+     * 设置 SubagentManager 引用（由 SubagentManager 构造时调用）
+     */
+    public void setSubagentManager(SubagentManager manager) {
+        this.subagentManager = manager;
     }
 
     @Override
@@ -145,7 +153,7 @@ public class LocalSubagentExecutor implements SubagentExecutor {
                     LLMResponse response = chatWithRetry(
                             provider, messages, tools.getDefinitions(),
                             record.getModel() != null ? record.getModel() : provider.getDefaultModel(),
-                            4096, 0.7, null
+                            8192, 0.5, null
                     ).toCompletableFuture().join();
 
                     if (response.hasToolCalls()) {
@@ -178,8 +186,7 @@ public class LocalSubagentExecutor implements SubagentExecutor {
                     outcome = SubagentOutcome.error("max iterations reached");
                 }
 
-                long runtimeMs = System.currentTimeMillis() - startTime;
-                return new SubagentExecutionResult(outcome, finalResult, runtimeMs, toolCallsCount);
+                return new SubagentExecutionResult(outcome, finalResult);
 
             } catch (CancellationException e) {
                 return new SubagentExecutionResult(SubagentOutcome.error("cancelled"), null);
@@ -267,43 +274,18 @@ public class LocalSubagentExecutor implements SubagentExecutor {
         int maxDepth = registry.getMaxSpawnDepth();
         boolean canSpawn = currentDepth < maxDepth;
 
-        if (canSpawn && messageBus != null) {
+        if (canSpawn && messageBus != null && subagentManager != null) {
             log.info("Subagent [{}] at depth {} can spawn children (max: {})", 
                     record.getRunId(), currentDepth, maxDepth);
 
-            // 创建子Agent专用的提示词构建器
-            SubagentSystemPromptBuilder childPromptBuilder = new SubagentSystemPromptBuilder(workspace);
-
-            // 创建子Agent专用的公告服务
-            SubagentAnnounceService childAnnounceService = new SubagentAnnounceService(messageBus, childPromptBuilder);
-
-            // 创建子Agent专用的控制器
-            SubagentController childController = new SubagentController(registry, messageBus);
-
-            // 创建嵌套的执行器（用于子子Agent）
-            // 注意：这里传入this会让子子Agent复用同一个执行器实例
-            LocalSubagentExecutor childExecutor = new LocalSubagentExecutor(
-                    provider, workspace, execConfig, braveApiKey, restrictToWorkspace,
-                    registry, messageBus
-            );
-
-            // 注册 sessions_spawn 工具
-            SessionsSpawnTool spawnTool = new SessionsSpawnTool(
-                    registry,
-                    childAnnounceService,
-                    childPromptBuilder,
-                    childExecutor,
-                    workspace,
-                    messageBus
-            );
-            // 设置上下文：子会话Key作为新的请求者
+            // 通过 SubagentManager 统一入口注册 spawn/control 工具
+            SessionsSpawnTool spawnTool = new SessionsSpawnTool(subagentManager);
             spawnTool.setContext(record.getChildSessionKey(), 
                     extractChannel(record.getChildSessionKey()), 
                     extractChatId(record.getChildSessionKey()));
             tools.register(spawnTool);
 
-            // 注册 subagents 控制工具
-            SubagentsControlTool subagentsControlTool = new SubagentsControlTool(registry, childController);
+            SubagentsControlTool subagentsControlTool = new SubagentsControlTool(subagentManager);
             subagentsControlTool.setAgentSessionKey(record.getChildSessionKey());
             tools.register(subagentsControlTool);
 

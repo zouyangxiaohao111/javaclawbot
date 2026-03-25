@@ -89,11 +89,15 @@ public class SubagentPersistence {
                     spawnMode != null ? SubagentRunRecord.SpawnMode.valueOf(spawnMode.toUpperCase()) : SubagentRunRecord.SpawnMode.RUN,
                     depth
             );
-            if (startedAt != null) {
-                record.setStartedAt(LocalDateTime.now()); // 简化处理
+            // 恢复原始时间戳（而非使用 now()）
+            if (createdAt != null) {
+                try { record.setCreatedAt(LocalDateTime.parse(createdAt, FORMATTER)); } catch (Exception ignored) {}
             }
-            if ("completed".equals(status) || "failed".equals(status) || "killed".equals(status)) {
-                record.setEndedAt(LocalDateTime.now()); // 简化处理
+            if (startedAt != null) {
+                try { record.setStartedAt(LocalDateTime.parse(startedAt, FORMATTER)); } catch (Exception ignored) {}
+            }
+            if (endedAt != null) {
+                try { record.setEndedAt(LocalDateTime.parse(endedAt, FORMATTER)); } catch (Exception ignored) {}
             }
             if (frozenResultText != null) {
                 record.setFrozenResultText(frozenResultText);
@@ -324,6 +328,14 @@ public class SubagentPersistence {
     private static String formatDateTime(LocalDateTime dateTime) {
         if (dateTime == null) return null;
         return dateTime.format(FORMATTER);
+    }
+
+    /**
+     * 清空所有缓存记录
+     */
+    public void clearAll() {
+        memoryCache.clear();
+        dirty = true;
     }
 
     private static String truncateText(String text, int maxLength) {

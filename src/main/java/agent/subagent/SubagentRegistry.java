@@ -3,6 +3,7 @@ package agent.subagent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -16,7 +17,7 @@ import java.util.stream.Collectors;
  * 核心职责：
  * 1. 管理所有子Agent运行记录（全局单例）
  * 2. 支持按会话查询、按深度查询
- * 3. 支持持久化到磁盘（可选）
+ * 3. 支持持久化到磁盘（可选，通过 SubagentPersistence）
  * 4. 支持清理过期记录
  *
  * 线程安全：使用 ConcurrentHashMap 保证并发安全
@@ -43,6 +44,9 @@ public class SubagentRegistry {
     /** 最大spawn深度 */
     private int maxSpawnDepth = DEFAULT_MAX_SPAWN_DEPTH;
 
+    /** 持久化层（可选） */
+    private volatile SubagentPersistence persistence;
+
     private SubagentRegistry() {}
 
     /**
@@ -57,6 +61,49 @@ public class SubagentRegistry {
             }
         }
         return instance;
+    }
+
+    /**
+     * 初始化持久化层并恢复历史记录
+     *
+     * @param workspace 工作目录（持久化文件存储在 workspace/.javaclawbot/ 下）
+     */
+    public synchronized void initPersistence(Path workspace) {
+        if (persistence != null) {
+            log.warn("Persistence already initialized, skipping");
+            return;
+        }
+
+        this.persistence = new SubagentPersistence(workspace);
+
+        // 从持久化恢复历史记录（仅恢复已完成的，运行中的视为已中断）
+        Collection<SubagentRunRecord> persisted = persistence.getAllRecords();
+        int restored = 0;
+        int interrupted = 0;
+
+        for (SubagentRunRecord record : persisted) {
+            if (record.isRunning()) {
+                // 进程重启后，之前 running 的记录视为已中断
+                record.setOutcome(SubagentOutcome.error("interrupted: process restart"));
+                record.setEndedAt(LocalDateTime.now());
+                interrupted++;
+            }
+
+            // 恢复到内存
+            runs.put(record.getRunId(), record);
+
+            String requesterKey = record.getRequesterSessionKey();
+            if (requesterKey != null) {
+                sessionIndex.computeIfAbsent(requesterKey, k -> ConcurrentHashMap.newKeySet()).add(record.getRunId());
+            }
+            childSessionIndex.put(record.getChildSessionKey(), record.getRunId());
+
+            restored++;
+        }
+
+        if (restored > 0) {
+            log.info("Restored {} run records from persistence ({} interrupted)", restored, interrupted);
+        }
     }
 
     /**
@@ -89,6 +136,11 @@ public class SubagentRegistry {
         // 更新子会话索引
         childSessionIndex.put(childKey, runId);
 
+        // 同步持久化
+        if (persistence != null) {
+            persistence.addRecord(record);
+        }
+
         log.info("Registered subagent run: {} (session: {}, depth: {})",
                 runId, childKey, record.getDepth());
 
@@ -119,6 +171,11 @@ public class SubagentRegistry {
         // 清理子会话索引
         childSessionIndex.remove(record.getChildSessionKey());
 
+        // 同步持久化
+        if (persistence != null) {
+            persistence.removeRecord(runId);
+        }
+
         log.info("Unregistered subagent run: {}", runId);
         return record;
     }
@@ -127,15 +184,6 @@ public class SubagentRegistry {
      * 获取运行记录
      */
     public SubagentRunRecord get(String runId) {
-        return runId != null ? runs.get(runId) : null;
-    }
-
-    /**
-     * 通过子会话Key获取运行记录
-     */
-    public SubagentRunRecord getByChildSessionKey(String childSessionKey) {
-        if (childSessionKey == null) return null;
-        String runId = childSessionIndex.get(childSessionKey);
         return runId != null ? runs.get(runId) : null;
     }
 
@@ -159,16 +207,6 @@ public class SubagentRegistry {
     }
 
     /**
-     * 列出所有活跃的子Agent运行
-     */
-    public List<SubagentRunRecord> listActive() {
-        return runs.values().stream()
-                .filter(SubagentRunRecord::isRunning)
-                .sorted(Comparator.comparing(SubagentRunRecord::getCreatedAt))
-                .collect(Collectors.toList());
-    }
-
-    /**
      * 列出指定会话的活跃子Agent运行
      */
     public List<SubagentRunRecord> listActiveByRequester(String requesterSessionKey) {
@@ -178,60 +216,23 @@ public class SubagentRegistry {
     }
 
     /**
-     * 统计指定会话的活跃子Agent数量
-     */
-    public int countActive(String requesterSessionKey) {
-        return (int) listByRequester(requesterSessionKey).stream()
-                .filter(SubagentRunRecord::isRunning)
-                .count();
-    }
-
-    /**
-     * 统计所有活跃子Agent数量
-     */
-    public int countAllActive() {
-        return (int) runs.values().stream()
-                .filter(SubagentRunRecord::isRunning)
-                .count();
-    }
-
-    /**
-     * 获取子Agent的当前深度
-     *
-     * @param sessionKey 会话Key
-     * @return 深度（0=主Agent, 1+=子Agent）
-     */
-    public int getDepth(String sessionKey) {
-        if (sessionKey == null) return 0;
-
-        // 检查是否是子会话
-        SubagentRunRecord record = getByChildSessionKey(sessionKey);
-        if (record != null) {
-            return record.getDepth();
-        }
-
-        return 0;
-    }
-
-    /**
-     * 检查是否可以spawn新的子Agent
-     *
-     * @param requesterSessionKey 请求者会话Key
-     * @return 是否可以spawn
-     */
-    public boolean canSpawn(String requesterSessionKey) {
-        int depth = getDepth(requesterSessionKey);
-        return depth < maxSpawnDepth;
-    }
-
-    /**
      * 计算新子Agent的深度
      *
      * @param requesterSessionKey 请求者会话Key
      * @return 新子Agent的深度
      */
     public int computeChildDepth(String requesterSessionKey) {
-        return getDepth(requesterSessionKey) + 1;
+        if (requesterSessionKey == null) return 1;
+
+        String runId = childSessionIndex.get(requesterSessionKey);
+        if (runId != null) {
+            SubagentRunRecord record = runs.get(runId);
+            if (record != null) {
+                return record.getDepth() + 1;
+            }
+        }
+
+        return 1;
     }
 
     /**
@@ -241,6 +242,9 @@ public class SubagentRegistry {
         SubagentRunRecord record = get(runId);
         if (record != null) {
             record.setStartedAt(LocalDateTime.now());
+            if (persistence != null) {
+                persistence.updateRecord(record);
+            }
             log.debug("Subagent started: {}", runId);
         }
     }
@@ -253,6 +257,9 @@ public class SubagentRegistry {
         if (record != null) {
             record.setEndedAt(LocalDateTime.now());
             record.setOutcome(outcome);
+            if (persistence != null) {
+                persistence.updateRecord(record);
+            }
             log.info("Subagent ended: {} (status: {})", runId,
                     outcome != null ? outcome.getStatus() : "unknown");
         }
@@ -265,6 +272,9 @@ public class SubagentRegistry {
         SubagentRunRecord record = get(runId);
         if (record != null) {
             record.setFrozenResultText(resultText);
+            if (persistence != null) {
+                persistence.updateRecord(record);
+            }
         }
     }
 
@@ -293,6 +303,10 @@ public class SubagentRegistry {
 
         if (!toRemove.isEmpty()) {
             log.info("已清理 {} 条完成的子代理记录", toRemove.size());
+            // 清理后立即持久化
+            if (persistence != null) {
+                persistence.save();
+            }
         }
 
         return toRemove.size();
@@ -305,26 +319,25 @@ public class SubagentRegistry {
         runs.clear();
         sessionIndex.clear();
         childSessionIndex.clear();
+        if (persistence != null) {
+            persistence.clearAll();
+            persistence.save();
+        }
         log.info("已清除所有子代理记录");
     }
 
     /**
-     * 获取统计信息
+     * 触发持久化保存（立即写入磁盘）
      */
-    public Map<String, Object> getStats() {
-        Map<String, Object> stats = new LinkedHashMap<>();
-        stats.put("total", runs.size());
-        stats.put("active", countAllActive());
-        stats.put("maxDepth", maxSpawnDepth);
-        return stats;
+    public void flushPersistence() {
+        if (persistence != null) {
+            persistence.save();
+        }
     }
 
     // ==========================
-    // Getter & Setter
+    // Getter
     // ==========================
 
     public int getMaxSpawnDepth() { return maxSpawnDepth; }
-    public void setMaxSpawnDepth(int maxSpawnDepth) {
-        this.maxSpawnDepth = Math.max(1, maxSpawnDepth);
-    }
 }

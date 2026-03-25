@@ -47,7 +47,7 @@ public class SubagentRunRecord {
     private final int depth;
 
     /** 创建时间 */
-    private final LocalDateTime createdAt;
+    private LocalDateTime createdAt;
 
     /** 启动时间 */
     private LocalDateTime startedAt;
@@ -108,6 +108,8 @@ public class SubagentRunRecord {
         this.metadata = new ConcurrentHashMap<>();
     }
 
+
+
     // ==========================
     // 状态判断方法
     // ==========================
@@ -127,19 +129,9 @@ public class SubagentRunRecord {
         return outcome != null && outcome.getStatus() == SubagentOutcome.Status.OK;
     }
 
-    /** 是否超时 */
-    public boolean isTimeout() {
-        return outcome != null && outcome.getStatus() == SubagentOutcome.Status.TIMEOUT;
-    }
-
     /** 是否出错 */
     public boolean isError() {
         return outcome != null && outcome.getStatus() == SubagentOutcome.Status.ERROR;
-    }
-
-    /** 是否可以继续spawn子Agent */
-    public boolean canSpawn(int maxDepth) {
-        return depth < maxDepth;
     }
 
     /** 运行时长（毫秒） */

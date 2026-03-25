@@ -187,6 +187,16 @@ public final class FileSystemTools {
                 Path parent = filePath.getParent();
                 if (parent != null) Files.createDirectories(parent);
 
+                // Detect target line ending: match existing file, or use system default for new files
+                String targetLineEnding;
+                if (Files.exists(filePath)) {
+                    targetLineEnding = detectLineEnding(Files.readString(filePath, StandardCharsets.UTF_8));
+                } else {
+                    targetLineEnding = System.lineSeparator();
+                }
+                // Normalize incoming content to match target line ending
+                content = normalizeLineEndings(content, targetLineEnding);
+
                 if ("append".equalsIgnoreCase(mode)) {
                     byte[] bytes = content.getBytes(StandardCharsets.UTF_8);
                     Files.write(filePath, bytes, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
@@ -1414,6 +1424,34 @@ public final class FileSystemTools {
     }
 
 
+
+    /**
+     * Detect the dominant line ending in the given text.
+     * Returns "\r\n" if CRLF is found, "\n" otherwise.
+     */
+    public static String detectLineEnding(String text) {
+        if (text == null || text.isEmpty()) return System.lineSeparator();
+        boolean hasCRLF = text.contains("\r\n");
+        if (hasCRLF) return "\r\n";
+        if (text.indexOf('\n') >= 0) return "\n";
+        // No newlines at all - use system default
+        return System.lineSeparator();
+    }
+
+    /**
+     * Normalize all line endings in text to the specified target.
+     * Handles \r\n -> target, bare \n -> target, bare \r -> \n -> target.
+     */
+    public static String normalizeLineEndings(String text, String targetLineEnding) {
+        if (text == null || text.isEmpty()) return text;
+        if (targetLineEnding == null) targetLineEnding = System.lineSeparator();
+        // First normalize everything to bare LF, then convert to target
+        String normalized = text.replace("\r\n", "\n").replace("\r", "\n");
+        if ("\r\n".equals(targetLineEnding)) {
+            return normalized.replace("\n", "\r\n");
+        }
+        return normalized; // target is \n, already normalized
+    }
     /** 按行切分，但保留每行末尾的 \n（最后一行可能没有） */
     public static List<String> splitLinesPreserveNewline(String s) {
         List<String> out = new ArrayList<>();

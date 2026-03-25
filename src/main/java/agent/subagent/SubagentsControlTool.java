@@ -10,14 +10,12 @@ import java.util.concurrent.CompletionStage;
 import java.util.stream.Collectors;
 
 /**
- * 子Agent控制工具
+ * 子Agent控制工具（LLM Tool 层）
  *
- * 对应 OpenClaw: src/agents/tools/subagents-tool.ts
+ * 职责：解析 LLM 传入的参数，委托给 SubagentManager。
+ * 不直接操作 LocalSubagentExecutor。
  *
- * 功能：
- * - list: 列出子Agent运行
- * - kill: 终止子Agent运行
- * - steer: 向运行中的子Agent发送指导消息
+ * @author zcw
  */
 @Slf4j
 public class SubagentsControlTool extends Tool {
@@ -26,13 +24,11 @@ public class SubagentsControlTool extends Tool {
     private static final int MAX_RECENT_MINUTES = 24 * 60;
     private static final int MAX_STEER_MESSAGE_CHARS = 4_000;
 
-    private final SubagentRegistry registry;
-    private final SubagentController controller;
+    private final SubagentManager manager;
     private String agentSessionKey;
 
-    public SubagentsControlTool(SubagentRegistry registry, SubagentController controller) {
-        this.registry = registry;
-        this.controller = controller;
+    public SubagentsControlTool(SubagentManager manager) {
+        this.manager = manager;
     }
 
     public void setAgentSessionKey(String sessionKey) {
@@ -107,7 +103,7 @@ public class SubagentsControlTool extends Tool {
      * 列出子Agent
      */
     private CompletionStage<String> executeList(String requesterKey, int recentMinutes) {
-        List<SubagentRunRecord> runs = registry.listByRequester(requesterKey);
+        List<SubagentRunRecord> runs = manager.listSubagents(requesterKey);
 
         // 分离活跃和最近的
         List<SubagentRunRecord> active = runs.stream()
@@ -165,7 +161,7 @@ public class SubagentsControlTool extends Tool {
     }
 
     /**
-     * 终止子Agent
+     * 终止子Agent（委托给 Manager）
      */
     private CompletionStage<String> executeKill(String requesterKey, String target) {
         if (target == null || target.isBlank()) {
@@ -176,7 +172,7 @@ public class SubagentsControlTool extends Tool {
 
         // kill all
         if ("all".equalsIgnoreCase(target) || "*".equals(target)) {
-            return controller.killAll(requesterKey)
+            return manager.killAllBySession(requesterKey)
                     .thenApply(count -> {
                         Map<String, Object> result = new LinkedHashMap<>();
                         result.put("status", "ok");
@@ -192,7 +188,7 @@ public class SubagentsControlTool extends Tool {
         }
 
         // kill specific
-        return controller.kill(target)
+        return manager.killSubagent(target)
                 .thenApply(success -> {
                     Map<String, Object> result = new LinkedHashMap<>();
                     if (success) {
@@ -212,7 +208,7 @@ public class SubagentsControlTool extends Tool {
     }
 
     /**
-     * 向子Agent发送指导消息
+     * 向子Agent发送指导消息（委托给 Manager）
      */
     private CompletionStage<String> executeSteer(String requesterKey, String target, String message) {
         if (target == null || target.isBlank()) {
@@ -234,7 +230,7 @@ public class SubagentsControlTool extends Tool {
             );
         }
 
-        return controller.steer(target, message)
+        return manager.steerSubagent(target, message)
                 .thenApply(success -> {
                     Map<String, Object> result = new LinkedHashMap<>();
                     if (success) {

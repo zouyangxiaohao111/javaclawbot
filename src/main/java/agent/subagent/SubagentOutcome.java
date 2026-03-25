@@ -16,28 +16,14 @@ public class SubagentOutcome {
 
     private final Status status;
     private final String error;
-    private final String summary;
-
-    public SubagentOutcome(Status status) {
-        this(status, null, null);
-    }
 
     public SubagentOutcome(Status status, String error) {
-        this(status, error, null);
-    }
-
-    public SubagentOutcome(Status status, String error, String summary) {
         this.status = status != null ? status : Status.UNKNOWN;
         this.error = error;
-        this.summary = summary;
     }
 
     public static SubagentOutcome ok() {
-        return new SubagentOutcome(Status.OK);
-    }
-
-    public static SubagentOutcome ok(String summary) {
-        return new SubagentOutcome(Status.OK, null, summary);
+        return new SubagentOutcome(Status.OK, null);
     }
 
     public static SubagentOutcome error(String error) {
@@ -45,20 +31,11 @@ public class SubagentOutcome {
     }
 
     public static SubagentOutcome timeout() {
-        return new SubagentOutcome(Status.TIMEOUT);
-    }
-
-    public static SubagentOutcome unknown() {
-        return new SubagentOutcome(Status.UNKNOWN);
+        return new SubagentOutcome(Status.TIMEOUT, null);
     }
 
     public Status getStatus() { return status; }
     public String getError() { return error; }
-    public String getSummary() { return summary; }
-
-    public boolean isOk() { return status == Status.OK; }
-    public boolean isError() { return status == Status.ERROR; }
-    public boolean isTimeout() { return status == Status.TIMEOUT; }
 
     /**
      * 获取状态描述文本
@@ -77,7 +54,6 @@ public class SubagentOutcome {
         return "SubagentOutcome{" +
                 "status=" + status +
                 ", error='" + error + '\'' +
-                ", summary='" + summary + '\'' +
                 '}';
     }
 }

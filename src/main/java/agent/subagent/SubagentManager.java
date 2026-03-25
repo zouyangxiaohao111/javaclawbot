@@ -1,5 +1,6 @@
 package agent.subagent;
 
+import bus.InboundMessage;
 import bus.MessageBus;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -9,22 +10,25 @@ import org.slf4j.LoggerFactory;
 import providers.LLMProvider;
 
 import java.nio.file.Path;
+import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.stream.Collectors;
 
 /**
- * 子代理管理器（重构版）
+ * 子代理管理器（统一门面）
  *
  * 职责：
- * 1) spawn：启动后台子任务（集成SubagentRegistry）
- * 2) _run_subagent：构建工具集 + 运行有限轮次的 agent loop
- * 3) _announce_result：把结果通过 MessageBus 注入为 system 入站消息，触发主代理总结
+ * 1) spawn：启动后台子任务（唯一入口）
+ * 2) kill：终止子Agent（真正取消线程）
+ * 3) steer：向子Agent发送指导消息
+ * 4) list：列出子Agent
+ * 5) cancelBySession：按会话批量取消
  *
- * 新增功能：
- * - 多层级Agent嵌套支持
- * - 深度控制
- * - 完成公告机制
- * - 子Agent控制（kill/steer）
+ * 所有 Tool（SessionsSpawnTool、SubagentsControlTool）必须通过此类操作子Agent，
+ * 不得直接操作 LocalSubagentExecutor 或 SubagentRegistry。
+ *
+ * @author zcw
  */
 public class SubagentManager {
 
@@ -43,17 +47,20 @@ public class SubagentManager {
     private final ConfigSchema.ExecToolConfig execConfig;
     private final boolean restrictToWorkspace;
 
-    // ========== 新增：多Agent控制组件 ==========
+    // ========== 核心组件 ==========
     private final SubagentRegistry registry;
     private final SubagentSystemPromptBuilder promptBuilder;
     private final SubagentAnnounceService announceService;
-    private final SubagentController controller;
     private final LocalSubagentExecutor localExecutor;
 
-    /** taskId -> Future（后台任务） */
+    /** runId -> Future（后台任务，用于 cancel） */
     private final ConcurrentHashMap<String, CompletableFuture<Void>> runningTasks = new ConcurrentHashMap<>();
-    /** sessionKey -> {taskId...} */
+    /** sessionKey -> {runId...}（用于按会话批量取消） */
     private final ConcurrentHashMap<String, Set<String>> sessionTasks = new ConcurrentHashMap<>();
+
+    /** steer操作限流：每个runId的上次操作时间 */
+    private final ConcurrentHashMap<String, Long> steerRateLimit = new ConcurrentHashMap<>();
+    private static final long STEER_RATE_LIMIT_MS = 2_000;
 
     private final Executor executor;
 
@@ -82,36 +89,47 @@ public class SubagentManager {
         this.execConfig = (execConfig == null) ? new ConfigSchema.ExecToolConfig() : execConfig;
         this.restrictToWorkspace = restrictToWorkspace;
 
-        // 默认使用通用线程池
         this.executor = (executor != null) ? executor : ForkJoinPool.commonPool();
 
-        // ========== 初始化多Agent控制组件 ==========
+        // 初始化核心组件
         this.registry = SubagentRegistry.getInstance();
+        this.registry.initPersistence(workspace);
         this.promptBuilder = new SubagentSystemPromptBuilder(workspace);
         this.announceService = new SubagentAnnounceService(bus, promptBuilder);
-        this.controller = new SubagentController(registry, bus);
-        // 关键：传入registry和bus，支持子Agent继续spawn子子Agent
         this.localExecutor = new LocalSubagentExecutor(
                 provider, workspace, execConfig, braveApiKey, restrictToWorkspace,
                 registry, bus
         );
+        // 设置回引用，让嵌套 spawn 也走 Manager 统一入口
+        this.localExecutor.setSubagentManager(this);
     }
 
+    // ==========================
+    // Spawn（唯一入口）
+    // ==========================
+
     /**
-     * 启动一个子代理后台任务（增强版）
+     * 启动一个子代理后台任务
      *
      * @param task          要执行的任务（自然语言）
      * @param label         可选：展示用标签
      * @param originChannel 任务来源渠道
      * @param originChatId  任务来源 chat_id
      * @param sessionKey    会话键
+     * @param mode          运行模式（run/session）
+     * @param cleanup       清理策略（delete/keep）
+     * @param timeoutSeconds 超时秒数
+     * @return JSON 格式的启动结果
      */
     public CompletionStage<String> spawn(
             String task,
             String label,
             String originChannel,
             String originChatId,
-            String sessionKey
+            String sessionKey,
+            SubagentRunRecord.SpawnMode mode,
+            SubagentRunRecord.CleanupPolicy cleanup,
+            int timeoutSeconds
     ) {
         // 解析请求者会话Key
         String requesterKey = (sessionKey != null && !sessionKey.isBlank())
@@ -145,12 +163,14 @@ public class SubagentManager {
                 requesterKey,
                 displayLabel,
                 task,
-                SubagentRunRecord.CleanupPolicy.KEEP,
-                SubagentRunRecord.SpawnMode.RUN,
+                cleanup != null ? cleanup : SubagentRunRecord.CleanupPolicy.KEEP,
+                mode != null ? mode : SubagentRunRecord.SpawnMode.RUN,
                 childDepth
         );
         record.setModel(this.model);
         record.setWorkspaceDir(workspace.toString());
+        record.setRunTimeoutSeconds(timeoutSeconds > 0 ? timeoutSeconds : 300);
+        record.setExpectsCompletionMessage(true);
 
         // 注册到Registry
         registry.register(record);
@@ -158,7 +178,7 @@ public class SubagentManager {
         // 构建子Agent系统提示词
         SubagentSystemPromptBuilder.Params promptParams = new SubagentSystemPromptBuilder.Params()
                 .task(task)
-                .label(displayLabel)
+                .task(displayLabel)
                 .requesterSessionKey(requesterKey)
                 .requesterChannel(originChannel)
                 .childSessionKey(childSessionKey)
@@ -179,6 +199,8 @@ public class SubagentManager {
                         .join();
 
                 // 更新记录
+                record.setOutcome(result.getOutcome());
+                record.setFrozenResultText(result.getResultText());
                 registry.markEnded(runId, result.getOutcome());
                 registry.updateFrozenResult(runId, result.getResultText());
 
@@ -189,13 +211,16 @@ public class SubagentManager {
 
             } catch (CancellationException ce) {
                 log.info("Subagent [{}] cancelled", runId);
+                record.setOutcome(SubagentOutcome.error("cancelled"));
                 registry.markEnded(runId, SubagentOutcome.error("cancelled"));
             } catch (Throwable t) {
                 log.error("Subagent [{}] crashed", runId, t);
+                record.setOutcome(SubagentOutcome.error(t.getMessage()));
                 registry.markEnded(runId, SubagentOutcome.error(t.getMessage()));
             }
         }, executor);
 
+        // 维护 runningTasks 和 sessionTasks
         runningTasks.put(runId, bg);
 
         if (sessionKey != null && !sessionKey.isBlank()) {
@@ -216,22 +241,88 @@ public class SubagentManager {
             }
         });
 
-        log.info("Spawned subagent [{}]: {} (depth: {})", runId, displayLabel, childDepth);
+        log.info("Spawned subagent [{}]: {} (depth: {}, mode: {})", runId, displayLabel, childDepth, mode);
 
         // 返回JSON结果
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("status", "accepted");
         result.put("runId", runId);
         result.put("childSessionKey", childSessionKey);
+        result.put("mode", (mode != null ? mode : SubagentRunRecord.SpawnMode.RUN).name().toLowerCase());
         result.put("depth", childDepth);
-        result.put("note", "Auto-announce is push-based. Wait for completion events to arrive as user messages.");
-        result.put("text", String.format("Subagent [%s] started (id: %s). I'll notify you when it completes.", displayLabel, runId));
+        result.put("note", "自动公告是推送模式。启动子代理后，不要调用list、 sessions_list、sessions_history、exec sleep 或任何查询子代理状态工具。等待完成事件作为用户消息到达。");
+        result.put("text", String.format("子代理 [%s] 已启动 (id: %s)。完成时会通知您。", displayLabel, runId));
 
         return CompletableFuture.completedFuture(toJson(result));
     }
 
+    // ==========================
+    // Kill（真正终止线程）
+    // ==========================
+
     /**
-     * 取消某个 session 下的所有子代理
+     * 终止指定子Agent
+     *
+     * 通过 terminateSignal + cancel Future 真正停止子Agent线程，
+     * 而不是仅发送消息。
+     *
+     * @param runId 运行ID
+     * @return 是否成功
+     */
+    public CompletionStage<Boolean> killSubagent(String runId) {
+        SubagentRunRecord record = registry.get(runId);
+        if (record == null) {
+            log.warn("Cannot kill: run not found: {}", runId);
+            return CompletableFuture.completedFuture(false);
+        }
+
+        if (!record.isRunning()) {
+            log.warn("Cannot kill: run not active: {}", runId);
+            return CompletableFuture.completedFuture(false);
+        }
+
+        // 1. 设置终止信号（agent loop 检查此信号退出）
+        localExecutor.terminate(runId);
+
+        // 2. 取消 Future
+        CompletableFuture<Void> f = runningTasks.get(runId);
+        if (f != null && !f.isDone()) {
+            f.cancel(true);
+        }
+
+        // 3. 更新状态
+        record.setOutcome(SubagentOutcome.error("killed"));
+        record.setEndedAt(LocalDateTime.now());
+
+        log.info("Killed subagent: {}", runId);
+        return CompletableFuture.completedFuture(true);
+    }
+
+    /**
+     * 终止指定会话的所有子Agent
+     *
+     * @param requesterSessionKey 请求者会话Key
+     * @return 终止的数量
+     */
+    public CompletionStage<Integer> killAllBySession(String requesterSessionKey) {
+        List<SubagentRunRecord> activeRuns = registry.listActiveByRequester(requesterSessionKey);
+
+        if (activeRuns.isEmpty()) {
+            return CompletableFuture.completedFuture(0);
+        }
+
+        int[] count = {0};
+        for (SubagentRunRecord record : activeRuns) {
+            boolean killed = killSubagent(record.getRunId())
+                    .toCompletableFuture().join();
+            if (killed) count[0]++;
+        }
+
+        return CompletableFuture.completedFuture(count[0]);
+    }
+
+    /**
+     * 取消某个 session 下的所有子代理（内部使用，由 AgentLoop 调用）
      */
     public CompletionStage<Integer> cancelBySession(String sessionKey) {
         if (sessionKey == null || sessionKey.isBlank()) {
@@ -251,7 +342,6 @@ public class SubagentManager {
                 toCancel.add(f);
                 count[0]++;
             }
-            // 终止本地执行器
             localExecutor.terminate(tid);
         }
 
@@ -262,68 +352,86 @@ public class SubagentManager {
                 .handle((v, ex) -> count[0]);
     }
 
-    /**
-     * 当前运行中的子代理数量
-     */
-    public int getRunningCount() {
-        return runningTasks.size();
-    }
-
     // ==========================
-    // 新增：多Agent控制API
+    // Steer（向子Agent发送指导消息）
     // ==========================
 
     /**
-     * 获取子Agent注册表
+     * 向运行中的子Agent发送指导消息
+     *
+     * 通过 MessageBus 注入控制消息到子Agent的会话。
+     *
+     * @param runId   运行ID
+     * @param message 指导消息
+     * @return 是否成功
      */
-    public SubagentRegistry getRegistry() {
-        return registry;
+    public CompletionStage<Boolean> steerSubagent(String runId, String message) {
+        SubagentRunRecord record = registry.get(runId);
+        if (record == null) {
+            log.warn("Cannot steer: run not found: {}", runId);
+            return CompletableFuture.completedFuture(false);
+        }
+
+        if (!record.isRunning()) {
+            log.warn("Cannot steer: run not active: {}", runId);
+            return CompletableFuture.completedFuture(false);
+        }
+
+        // 限流检查
+        Long lastSteer = steerRateLimit.get(runId);
+        long now = System.currentTimeMillis();
+        if (lastSteer != null && (now - lastSteer) < STEER_RATE_LIMIT_MS) {
+            log.warn("Steer rate limited for run: {}", runId);
+            return CompletableFuture.completedFuture(false);
+        }
+        steerRateLimit.put(runId, now);
+
+        // 发送控制消息到子Agent会话
+        String childSessionKey = record.getChildSessionKey();
+        String channel = "cli";
+        String chatId = childSessionKey;
+
+        if (childSessionKey.contains(":")) {
+            String[] parts = childSessionKey.split(":", 2);
+            channel = parts[0];
+            chatId = parts.length > 1 ? parts[1] : childSessionKey;
+        }
+
+        String content = "[Steer] " + message;
+
+        InboundMessage msg = new InboundMessage(
+                "system",
+                "subagent_control",
+                channel + ":" + chatId,
+                content,
+                null,
+                Map.of(
+                        "_subagent_control", true,
+                        "_action", "steer",
+                        "_run_id", record.getRunId()
+                )
+        );
+
+        return bus.publishInbound(msg)
+                .thenApply(v -> {
+                    log.info("Steered subagent: {} with message: {}", runId, truncate(message, 50));
+                    return true;
+                })
+                .exceptionally(ex -> {
+                    log.error("Failed to steer subagent: {}", runId, ex);
+                    return false;
+                });
     }
 
-    /**
-     * 获取子Agent控制器
-     */
-    public SubagentController getController() {
-        return controller;
-    }
-
-    /**
-     * 获取子Agent公告服务
-     */
-    public SubagentAnnounceService getAnnounceService() {
-        return announceService;
-    }
-
-    /**
-     * 获取子Agent提示词构建器
-     */
-    public SubagentSystemPromptBuilder getPromptBuilder() {
-        return promptBuilder;
-    }
+    // ==========================
+    // List
+    // ==========================
 
     /**
      * 列出指定会话的子Agent
      */
     public List<SubagentRunRecord> listSubagents(String sessionKey) {
         return registry.listByRequester(sessionKey);
-    }
-
-    /**
-     * 终止指定子Agent
-     */
-    public CompletionStage<Boolean> killSubagent(String runId) {
-        CompletableFuture<Void> f = runningTasks.get(runId);
-        if (f != null && !f.isDone()) {
-            f.cancel(true);
-        }
-        return localExecutor.terminate(runId);
-    }
-
-    /**
-     * 向子Agent发送指导消息
-     */
-    public CompletionStage<Boolean> steerSubagent(String runId, String message) {
-        return controller.steer(runId, message);
     }
 
     // ==========================
@@ -341,6 +449,11 @@ public class SubagentManager {
         return t.substring(0, max) + "...";
     }
 
+    private static String truncate(String s, int max) {
+        if (s == null) return "";
+        return s.length() > max ? s.substring(0, max) + "..." : s;
+    }
+
     private static String toJson(Object o) {
         try {
             return MAPPER.writeValueAsString(o);
@@ -354,5 +467,6 @@ public class SubagentManager {
      */
     public void shutdown() {
         localExecutor.shutdown();
+        registry.flushPersistence();
     }
 }

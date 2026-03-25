@@ -91,11 +91,6 @@ public class AgentLoop {
     private final CronTool cronToolFacade;
 
     /**
-     * 子代理执行器
-     */
-    private final LocalSubagentExecutor localExec;
-
-    /**
      * 会话级停止标记
      * key = sessionKey
      * value = true 表示该会话当前被请求停止
@@ -161,10 +156,6 @@ public class AgentLoop {
         this.memoryStore = new MemoryStore(workspace);
         // 注册工具
         this.sharedTools = new ToolRegistry();
-        localExec = new agent.subagent.LocalSubagentExecutor(
-                provider, workspace, execConfig, braveApiKey, restrictToWorkspace,
-                subagents.getRegistry(), bus
-        );
 
         registerSharedTools();
 
@@ -256,22 +247,10 @@ public class AgentLoop {
         localTools.register(new MessageTool(bus::publishOutbound, channel, chatId, messageId));
 
         // ========== 多 Agent / subagent 相关 ==========
-        SessionsSpawnTool spawnTool = new agent.subagent.SessionsSpawnTool(
-                subagents.getRegistry(),
-                subagents.getAnnounceService(),
-                subagents.getPromptBuilder(),
-                localExec,
-                workspace,
-                bus
-        );
+        SessionsSpawnTool spawnTool = new agent.subagent.SessionsSpawnTool(subagents);
         spawnTool.setContext(sessionKy, channel, chatId);
-        localTools.register(spawnTool);
 
-        SubagentsControlTool subagentsControlTool = new SubagentsControlTool(
-                subagents.getRegistry(),
-                subagents.getController()
-        );
-        subagentsControlTool.setAgentSessionKey(sessionKy);
+        SubagentsControlTool subagentsControlTool = new SubagentsControlTool(subagents);
         localTools.register(subagentsControlTool);
 
         // CronTool 带 channel/chatId 上下文，也做成每请求独立
@@ -467,7 +446,7 @@ public class AgentLoop {
                     } catch (CancellationException ce) {
                         throw ce;
                     } catch (Exception e) {
-                        log.warn("处理会话 {} 的消息时出错: {}", msg.getSessionKey(), e.toString());
+                        log.warn("处理会话 {} 的消息时出错: {}", msg.getSessionKey(), e);
                         try {
                             bus.publishOutbound(new OutboundMessage(
                                     msg.getChannel(),
@@ -532,7 +511,7 @@ public class AgentLoop {
             ));
         }
 
-        if ("/mcp-reload".equals(cmd)) {
+        if ("/mcp-reload".equals(cmd) || "/mcp-init".equals(cmd)) {
             connectMcp().toCompletableFuture().join();
             return CompletableFuture.completedFuture(new OutboundMessage(
                     msg.getChannel(),
