@@ -528,6 +528,32 @@ public class McpManager {
             return fallback;
         }
 
+        // MCP SDK 1.0.0: inputSchema is McpSchema.JsonSchema record
+        if (schemaObj instanceof McpSchema.JsonSchema jsonSchema) {
+            Map<String, Object> out = new LinkedHashMap<>();
+            if (jsonSchema.type() != null) {
+                out.put("type", jsonSchema.type());
+            }
+            if (jsonSchema.properties() != null && !jsonSchema.properties().isEmpty()) {
+                out.put("properties", jsonSchema.properties());
+            } else {
+                out.put("properties", new LinkedHashMap<String, Object>());
+            }
+            if (jsonSchema.required() != null && !jsonSchema.required().isEmpty()) {
+                out.put("required", jsonSchema.required());
+            }
+            if (jsonSchema.additionalProperties() != null) {
+                out.put("additionalProperties", jsonSchema.additionalProperties());
+            }
+            if (jsonSchema.definitions() != null && !jsonSchema.definitions().isEmpty()) {
+                out.put("$defs", jsonSchema.definitions());
+            }
+            if (jsonSchema.defs() != null && !jsonSchema.defs().isEmpty()) {
+                out.put("defs", jsonSchema.defs());
+            }
+            return out;
+        }
+
         if (schemaObj instanceof Map<?, ?> map) {
             Map<String, Object> out = new LinkedHashMap<>();
             for (Map.Entry<?, ?> e : map.entrySet()) {
