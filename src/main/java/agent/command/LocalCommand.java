@@ -21,7 +21,7 @@ public class LocalCommand extends AbstractCommand {
         this.executor = executor;
     }
     public LocalCommand(String name, String output) {
-        super(name, name, "");
+        super(name, name, null);
         this.output = output;
         this.executor = null;
     }
