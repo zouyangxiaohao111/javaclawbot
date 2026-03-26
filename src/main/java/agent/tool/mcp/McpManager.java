@@ -58,7 +58,7 @@ public class McpManager {
     /**
      * 首次连接 / 手动刷新 / 定时刷新 共用
      */
-    private volatile CompletableFuture<Void> currentConnectFuture;
+    private volatile CompletableFuture<String> currentConnectFuture;
 
     private volatile boolean connected = false;
 
@@ -82,14 +82,28 @@ public class McpManager {
         });
     }
 
+    private static String safeErrorMessage(Throwable e) {
+        if (e == null) {
+            return "unknown error";
+        }
+        String msg = e.getMessage();
+        if (msg != null && !msg.isBlank()) {
+            return msg;
+        }
+        return e.getClass().getSimpleName();
+    }
     /**
      * 确保 MCP 已连接。
      *
      * 注意：
      * - 不会像旧版一样在“连接中”时返回假的 completedFuture
      * - 并发调用会复用同一个 future
+     *
+     * 返回：
+     * - 有错误：返回错误汇总字符串
+     * - 无错误：返回 null
      */
-    public CompletionStage<Void> ensureConnected() {
+    public CompletionStage<String> ensureConnected() {
         synchronized (connectLock) {
             if (connected || mcpServers.isEmpty()) {
                 return CompletableFuture.completedFuture(null);
@@ -99,19 +113,45 @@ public class McpManager {
                 return currentConnectFuture;
             }
 
-            currentConnectFuture = CompletableFuture.runAsync(() -> {
-                for (Map.Entry<String, ConfigSchema.MCPServerConfig> entry : mcpServers.entrySet()) {
-                    String serverName = entry.getKey();
-                    ConfigSchema.MCPServerConfig cfg = entry.getValue();
+            currentConnectFuture = CompletableFuture.supplyAsync(() -> {
+                StringBuilder sb = new StringBuilder();
 
-                    if (!cfg.isEnable()) {
-                        continue;
+                try {
+                    for (Map.Entry<String, ConfigSchema.MCPServerConfig> entry : mcpServers.entrySet()) {
+                        String serverName = entry.getKey();
+                        ConfigSchema.MCPServerConfig cfg = entry.getValue();
+
+                        if (cfg == null || !cfg.isEnable()) {
+                            continue;
+                        }
+
+                        try {
+                            connectOneServer(serverName, cfg);
+                        } catch (Exception e) {
+                            sb.append("[MCP] 服务连接失败: ")
+                                    .append(serverName)
+                                    .append("，原因：")
+                                    .append(safeErrorMessage(e))
+                                    .append("\n");
+                            log.error("[MCP] 服务连接失败: {}", serverName, e);
+                        }
                     }
 
-                    connectOneServer(serverName, cfg);
+                    // 只要还有已连接句柄，就认为已连接；或者根本没有启用项，也算已完成
+                    boolean hasEnabledServer = mcpServers.values().stream()
+                            .filter(Objects::nonNull)
+                            .anyMatch(ConfigSchema.MCPServerConfig::isEnable);
+
+                    connected = !handles.isEmpty() || !hasEnabledServer;
+
+                } catch (Exception e) {
+                    sb.append("[MCP] MCP 连接总流程失败，原因：")
+                            .append(safeErrorMessage(e))
+                            .append("\n");
+                    log.error("[MCP] MCP 连接总流程失败", e);
                 }
 
-                connected = true;
+                return sb.length() == 0 ? null : sb.toString();
             }, executor);
 
             return currentConnectFuture;
@@ -182,68 +222,97 @@ public class McpManager {
      * 2. 未连接的 server 尝试新建连接
      * 3. 已禁用的 server 卸载其工具并关闭连接
      * 4. 某个 server 刷新失败时，保留它原有工具，避免整体抖动
+     *
+     * 返回：
+     * - 有错误：返回错误汇总字符串
+     * - 无错误：返回 null
      */
-    public CompletionStage<Void> refreshTools() {
+    public CompletionStage<String> refreshTools() {
         synchronized (connectLock) {
             if (currentConnectFuture != null && !currentConnectFuture.isDone()) {
                 return currentConnectFuture;
             }
 
-            currentConnectFuture = CompletableFuture.runAsync(() -> {
-                // 1) 实时读取配置文件
-                ConfigSchema.Config config = ConfigIO.loadConfig(ConfigIO.getConfigPath(workspace));
+            currentConnectFuture = CompletableFuture.supplyAsync(() -> {
+                StringBuilder sb = new StringBuilder();
 
-                Map<String, ConfigSchema.MCPServerConfig> latestServers =
-                        config != null
-                                && config.getTools() != null
-                                && config.getTools().getMcpServers() != null
-                                ? config.getTools().getMcpServers()
-                                : Map.of();
+                try {
+                    // 1) 实时读取配置文件
+                    ConfigSchema.Config config = ConfigIO.loadConfig(ConfigIO.getConfigPath(workspace));
 
-                // 2) 先处理：配置中已删除 / 已禁用 的 server
-                List<String> existingNames = new ArrayList<>(handles.keySet());
-                for (String existing : existingNames) {
-                    ConfigSchema.MCPServerConfig latestCfg = latestServers.get(existing);
-                    if (latestCfg == null || !latestCfg.isEnable()) {
-                        removeServer(existing);
-                    }
-                }
+                    Map<String, ConfigSchema.MCPServerConfig> latestServers =
+                            config != null
+                                    && config.getTools() != null
+                                    && config.getTools().getMcpServers() != null
+                                    ? config.getTools().getMcpServers()
+                                    : Map.of();
 
-                // 3) 处理所有当前配置中的 server
-                for (Map.Entry<String, ConfigSchema.MCPServerConfig> entry : latestServers.entrySet()) {
-                    String serverName = entry.getKey();
-                    ConfigSchema.MCPServerConfig newCfg = entry.getValue();
-
-                    if (newCfg == null || !newCfg.isEnable()) {
-                        continue;
-                    }
-
-                    ServerHandle oldHandle = handles.get(serverName);
-
-                    try {
-                        if (oldHandle == null) {
-                            // 新增 server：直接新建连接
-                            connectOneServer(serverName, newCfg);
-                            log.info("[MCP] 新增并连接 server: {}", serverName);
-                        } else if (needsReconnect(oldHandle.config(), newCfg)) {
-                            // 连接参数发生变化：必须重连
-                            removeServer(serverName);
-                            connectOneServer(serverName, newCfg);
-                            log.info("[MCP] server 配置变更，已重连: {}", serverName);
-                        } else {
-                            // 连接参数没变：复用旧 client 刷新工具列表
-                            refreshOneServer(serverName, newCfg);
-                            log.info("[MCP] server 工具已刷新: {}", serverName);
+                    // 2) 先处理：配置中已删除 / 已禁用 的 server
+                    List<String> existingNames = new ArrayList<>(handles.keySet());
+                    for (String existing : existingNames) {
+                        ConfigSchema.MCPServerConfig latestCfg = latestServers.get(existing);
+                        if (latestCfg == null || !latestCfg.isEnable()) {
+                            try {
+                                removeServer(existing);
+                            } catch (Exception e) {
+                                sb.append("[MCP] 卸载服务失败: ")
+                                        .append(existing)
+                                        .append("，原因：")
+                                        .append(safeErrorMessage(e))
+                                        .append("\n");
+                                log.error("[MCP] 卸载服务失败: {}", existing, e);
+                            }
                         }
-                    } catch (Exception e) {
-                        // 单个 server 失败，保留旧状态或部分结果，不影响整体
-                        log.error("[MCP] 服务刷新失败: {}", serverName, e);
                     }
+
+                    // 3) 处理所有当前配置中的 server
+                    for (Map.Entry<String, ConfigSchema.MCPServerConfig> entry : latestServers.entrySet()) {
+                        String serverName = entry.getKey();
+                        ConfigSchema.MCPServerConfig newCfg = entry.getValue();
+
+                        if (newCfg == null || !newCfg.isEnable()) {
+                            continue;
+                        }
+
+                        ServerHandle oldHandle = handles.get(serverName);
+
+                        try {
+                            if (oldHandle == null) {
+                                // 新增 server：直接新建连接
+                                connectOneServer(serverName, newCfg);
+                                log.info("[MCP] 新增并连接 server: {}", serverName);
+                            } else if (needsReconnect(oldHandle.config(), newCfg)) {
+                                // 连接参数发生变化：必须重连
+                                removeServer(serverName);
+                                connectOneServer(serverName, newCfg);
+                                log.info("[MCP] server 配置变更，已重连: {}", serverName);
+                            } else {
+                                // 连接参数没变：复用旧 client 刷新工具列表
+                                refreshOneServer(serverName, newCfg);
+                                log.info("[MCP] server 工具已刷新: {}", serverName);
+                            }
+                        } catch (Exception e) {
+                            // 单个 server 失败，保留旧状态或部分结果，不影响整体
+                            sb.append("[MCP] 服务刷新失败: ")
+                                    .append(serverName)
+                                    .append("，原因：")
+                                    .append(safeErrorMessage(e))
+                                    .append("\n");
+                            log.error("[MCP] 服务刷新失败: {}", serverName, e);
+                        }
+                    }
+
+                    connected = !handles.isEmpty()
+                            || latestServers.values().stream().noneMatch(ConfigSchema.MCPServerConfig::isEnable);
+
+                } catch (Exception e) {
+                    sb.append("[MCP] 刷新工具总流程失败，原因：")
+                            .append(safeErrorMessage(e))
+                            .append("\n");
+                    log.error("[MCP] 刷新工具总流程失败", e);
                 }
 
-                connected = !handles.isEmpty()
-                        || latestServers.values().stream().noneMatch(ConfigSchema.MCPServerConfig::isEnable);
-
+                return sb.length() == 0 ? null : sb.toString();
             }, executor);
 
             return currentConnectFuture;

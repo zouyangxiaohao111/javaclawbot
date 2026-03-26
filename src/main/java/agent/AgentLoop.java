@@ -11,6 +11,7 @@ import agent.tool.mcp.McpManager;
 import bus.InboundMessage;
 import bus.MessageBus;
 import bus.OutboundMessage;
+import cn.hutool.core.util.StrUtil;
 import config.AgentRuntimeSettings;
 import config.ConfigSchema;
 import context.ContextBuilder;
@@ -535,8 +536,8 @@ public class AgentLoop {
         }
 
         if ("/mcp-reload".equals(cmd) || "/mcp-init".equals(cmd)) {
-            mcpManager.refreshTools().toCompletableFuture().join();
-            String output = "🐱 MCP 插件已重新加载。";
+            String cmdResp = mcpManager.refreshTools().toCompletableFuture().join();
+            String output = StrUtil.isBlank(cmdResp) ? "🐱 MCP 插件已重新加载。" : cmdResp;
             commandManager.addLocalCommand(new LocalCommand(cmd, output));
             return CompletableFuture.completedFuture(new OutboundMessage(
                     msg.getChannel(),
