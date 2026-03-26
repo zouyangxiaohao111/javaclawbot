@@ -6,7 +6,6 @@ import lombok.NoArgsConstructor;
 
 import java.util.List;
 
-@Builder
 public class LocalCommand extends AbstractCommand {
 
     @FunctionalInterface
