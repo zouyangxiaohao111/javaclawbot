@@ -41,10 +41,15 @@ public final class JacksonMcpJsonMapper implements McpJsonMapper {
         }
     }
 
+    String windowContent = "Active code page: 65001";
+
     @Override
     public <T> T readValue(String content, TypeRef<T> type) throws IOException {
         JavaType javaType = this.jsonMapper.getTypeFactory().constructType(type.getType());
         try {
+            if (content.equalsIgnoreCase(windowContent)) {
+                return null;
+            }
             return this.jsonMapper.readValue(content, javaType);
         } catch (JsonProcessingException ex) {
             throw new IOException("Failed to read value", ex);
