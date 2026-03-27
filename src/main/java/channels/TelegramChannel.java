@@ -4,6 +4,7 @@ import bus.MessageBus;
 import bus.OutboundMessage;
 import config.ConfigSchema;
 
+import config.channel.TelegramConfig;
 import org.telegram.telegrambots.bots.DefaultAbsSender;
 import org.telegram.telegrambots.bots.DefaultBotOptions;
 import org.telegram.telegrambots.bots.TelegramLongPollingBot;
@@ -66,7 +67,7 @@ public class TelegramChannel extends BaseChannel {
     );
 
     /** Telegram 配置 */
-    private final ConfigSchema.TelegramConfig tgConfig;
+    private final TelegramConfig tgConfig;
 
     /** 转写提供者（默认空实现） */
     private final TranscriptionProvider transcriber;
@@ -95,7 +96,7 @@ public class TelegramChannel extends BaseChannel {
     /** 后台执行器：避免阻塞调用线程 */
     private final ExecutorService worker;
 
-    public TelegramChannel(ConfigSchema.TelegramConfig config, MessageBus bus, String groqApiKey) {
+    public TelegramChannel(TelegramConfig config, MessageBus bus, String groqApiKey) {
         super(config, bus);
         this.name = CHANNEL_NAME;
         this.tgConfig = Objects.requireNonNull(config, "TelegramConfig 不能为空");
@@ -116,7 +117,7 @@ public class TelegramChannel extends BaseChannel {
         });
     }
 
-    public TelegramChannel(ConfigSchema.TelegramConfig config, MessageBus bus) {
+    public TelegramChannel(TelegramConfig config, MessageBus bus) {
         this(config, bus, "");
     }
 

@@ -1,7 +1,10 @@
 package context;
 
+import config.Config;
 import config.ConfigIO;
 import config.ConfigSchema;
+import config.provider.ProviderConfig;
+import config.provider.model.ModelConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -44,7 +47,7 @@ public class ContextWindowDiscovery {
     /**
      * 初始化上下文窗口缓存
      */
-    public static synchronized void initialize(ConfigSchema.Config currentConfig) {
+    public static synchronized void initialize(Config currentConfig) {
         if (initialized) {
             return;
         }
@@ -53,7 +56,7 @@ public class ContextWindowDiscovery {
             if (currentConfig != null) {
                 applyConfiguredContextWindows(currentConfig);
             }else {
-                ConfigSchema.Config config = ConfigIO.loadConfig(null);
+                Config config = ConfigIO.loadConfig(null);
                 applyConfiguredContextWindows(config);
             }
             initialized = true;
@@ -96,7 +99,7 @@ public class ContextWindowDiscovery {
             String provider,
             String model,
             Integer contextTokensOverride,
-            Integer fallback, ConfigSchema.Config currentConfig
+            Integer fallback, Config currentConfig
     ) {
         // 优先使用覆盖值
         if (contextTokensOverride != null && contextTokensOverride > 0) {
@@ -155,7 +158,7 @@ public class ContextWindowDiscovery {
     /**
      * 应用配置的上下文窗口
      */
-    private static void applyConfiguredContextWindows(ConfigSchema.Config config) {
+    private static void applyConfiguredContextWindows(Config config) {
         // 从配置中读取模型上下文窗口
         // 这里需要根据实际的配置结构来解析
         // 暂时使用硬编码的常见模型上下文窗口
@@ -207,10 +210,10 @@ public class ContextWindowDiscovery {
     /**
      * 从配置中解析提供商的模型上下文窗口
      */
-    private static Integer resolveConfiguredProviderContextWindow(String provider, String model, ConfigSchema.Config config) {
-        ConfigSchema.ProviderConfig providerConfig = config.getProviders().getByName(normalizeProviderId(provider));
+    private static Integer resolveConfiguredProviderContextWindow(String provider, String model, Config config) {
+        ProviderConfig providerConfig = config.getProviders().getByName(normalizeProviderId(provider));
         AtomicInteger contextWindow = new AtomicInteger(8192);
-        for (ConfigSchema.ModelConfig modelConfig : providerConfig.getModelConfigs()) {
+        for (ModelConfig modelConfig : providerConfig.getModelConfigs()) {
             if (modelConfig.getName().equals(model)) {
                 contextWindow.set(modelConfig.getMaxTokens());
                 return contextWindow.get();
@@ -222,7 +225,7 @@ public class ContextWindowDiscovery {
     /**
      * 解析提供商/模型引用
      */
-    private static ProviderModelRef resolveProviderModelRef(String provider, String model, ConfigSchema.Config currentConfig) {
+    private static ProviderModelRef resolveProviderModelRef(String provider, String model, Config currentConfig) {
         if (model == null || model.isBlank()) {
             return null;
         }

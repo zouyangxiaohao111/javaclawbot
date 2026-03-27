@@ -1,11 +1,11 @@
 package config;
 
 import cli.RuntimeComponents;
+import config.agent.AgentRuntimeSettings;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import providers.HotSwappableProvider;
 import providers.LLMProvider;
-import providers.ProviderFactory;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -27,7 +27,7 @@ public final class ConfigReloader {
     private static final Logger log = LoggerFactory.getLogger(ConfigReloader.class);
 
     private final Path configPath;
-    private volatile ConfigSchema.Config currentConfig;
+    private volatile Config currentConfig;
     private volatile long lastModifiedMillis = -1L;
     private final AtomicLong version = new AtomicLong(0);
     private final ReentrantLock reloadLock = new ReentrantLock();
@@ -39,9 +39,9 @@ public final class ConfigReloader {
         this.version.set(1L);
     }
 
-    public ConfigSchema.Config getCurrentConfig() {
-        ConfigSchema.Config cfg = currentConfig;
-        return cfg != null ? cfg : new ConfigSchema.Config();
+    public Config getCurrentConfig() {
+        Config cfg = currentConfig;
+        return cfg != null ? cfg : new Config();
     }
 
     public long getVersion() {
@@ -63,7 +63,7 @@ public final class ConfigReloader {
             }
 
             try {
-                ConfigSchema.Config newConfig = ConfigIO.loadConfig(configPath);
+                Config newConfig = ConfigIO.loadConfig(configPath);
                 if (newConfig == null) {
                     log.warn("配置重载返回空，保留之前的配置: {}", configPath);
                     return false;
@@ -124,7 +124,7 @@ public final class ConfigReloader {
         }
 
         ConfigReloader reloader = new ConfigReloader(effectiveConfigPath);
-        ConfigSchema.Config config = reloader.getCurrentConfig();
+        Config config = reloader.getCurrentConfig();
 
         // 覆盖 workspace 路径（对齐 Python 的 _load_runtime_config）
         if (workspacePath != null) {

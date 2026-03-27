@@ -1,6 +1,8 @@
 package cli;
 
+import config.Config;
 import config.ConfigSchema;
+import config.channel.*;
 import org.jline.reader.LineReader;
 import org.jline.terminal.Terminal;
 
@@ -50,8 +52,8 @@ public class ChannelConfigurator {
     /**
      * 配置 channels
      */
-    public static void configureChannels(Terminal terminal, LineReader reader, 
-                                         ConfigSchema.Config cfg, boolean advanced) {
+    public static void configureChannels(Terminal terminal, LineReader reader,
+                                         Config cfg, boolean advanced) {
         System.out.println();
         System.out.println("───────────────────────────────────────────────────────────────");
         System.out.println("  Channel 配置");
@@ -97,11 +99,11 @@ public class ChannelConfigurator {
     /**
      * 显示 channel 状态
      */
-    private static void showChannelStatus(ConfigSchema.Config cfg) {
+    private static void showChannelStatus(Config cfg) {
         System.out.println("  当前 Channel 状态：");
         System.out.println();
 
-        ConfigSchema.ChannelsConfig channels = cfg.getChannels();
+        ChannelsConfig channels = cfg.getChannels();
 
         for (ChannelMeta meta : CHANNELS) {
             boolean enabled = isChannelEnabled(channels, meta.id());
@@ -165,7 +167,7 @@ public class ChannelConfigurator {
      * 配置单个 channel
      */
     private static void configureChannel(Terminal terminal, LineReader reader,
-                                         ConfigSchema.Config cfg, ChannelMeta meta) {
+                                         Config cfg, ChannelMeta meta) {
         System.out.println();
         System.out.println("───────────────────────────────────────────────────────────────");
         System.out.println("  配置 " + meta.label());
@@ -205,8 +207,8 @@ public class ChannelConfigurator {
 
     // ========== 各 Channel 配置方法 ==========
 
-    private static void configureFeishu(LineReader reader, ConfigSchema.Config cfg) {
-        ConfigSchema.FeishuConfig feishu = cfg.getChannels().getFeishu();
+    private static void configureFeishu(LineReader reader, Config cfg) {
+        FeishuConfig feishu = cfg.getChannels().getFeishu();
 
         System.out.println("  飞书机器人配置说明：");
         System.out.println("  1. 访问 https://open.feishu.cn/app");
@@ -233,8 +235,8 @@ public class ChannelConfigurator {
         configureDmPolicy(reader, "飞书", feishu.getAllowFrom());
     }
 
-    private static void configureTelegram(LineReader reader, ConfigSchema.Config cfg) {
-        ConfigSchema.TelegramConfig telegram = cfg.getChannels().getTelegram();
+    private static void configureTelegram(LineReader reader, Config cfg) {
+        TelegramConfig telegram = cfg.getChannels().getTelegram();
 
         System.out.println("  Telegram 机器人配置说明：");
         System.out.println("  1. 在 Telegram 中搜索 @BotFather");
@@ -248,8 +250,8 @@ public class ChannelConfigurator {
         configureDmPolicy(reader, "Telegram", telegram.getAllowFrom());
     }
 
-    private static void configureDiscord(LineReader reader, ConfigSchema.Config cfg) {
-        ConfigSchema.DiscordConfig discord = cfg.getChannels().getDiscord();
+    private static void configureDiscord(LineReader reader, Config cfg) {
+        DiscordConfig discord = cfg.getChannels().getDiscord();
 
         System.out.println("  Discord 机器人配置说明：");
         System.out.println("  1. 访问 https://discord.com/developers/applications");
@@ -265,8 +267,8 @@ public class ChannelConfigurator {
         configureDmPolicy(reader, "Discord", discord.getAllowFrom());
     }
 
-    private static void configureWhatsApp(LineReader reader, ConfigSchema.Config cfg) {
-        ConfigSchema.WhatsAppConfig whatsapp = cfg.getChannels().getWhatsapp();
+    private static void configureWhatsApp(LineReader reader, Config cfg) {
+        WhatsAppConfig whatsapp = cfg.getChannels().getWhatsapp();
 
         System.out.println("  WhatsApp 配置说明：");
         System.out.println("  需要运行 WhatsApp Bridge 服务");
@@ -280,8 +282,8 @@ public class ChannelConfigurator {
         configureDmPolicy(reader, "WhatsApp", whatsapp.getAllowFrom());
     }
 
-    private static void configureSlack(LineReader reader, ConfigSchema.Config cfg) {
-        ConfigSchema.SlackConfig slack = cfg.getChannels().getSlack();
+    private static void configureSlack(LineReader reader, Config cfg) {
+        SlackConfig slack = cfg.getChannels().getSlack();
 
         System.out.println("  Slack 机器人配置说明：");
         System.out.println("  1. 创建 Slack App");
@@ -322,8 +324,8 @@ public class ChannelConfigurator {
         }
     }
 
-    private static void configureDingTalk(LineReader reader, ConfigSchema.Config cfg) {
-        ConfigSchema.DingTalkConfig dingtalk = cfg.getChannels().getDingtalk();
+    private static void configureDingTalk(LineReader reader, Config cfg) {
+        DingTalkConfig dingtalk = cfg.getChannels().getDingtalk();
 
         System.out.println("  钉钉机器人配置说明：");
         System.out.println("  1. 访问 https://open.dingtalk.com");
@@ -339,8 +341,8 @@ public class ChannelConfigurator {
         configureDmPolicy(reader, "钉钉", dingtalk.getAllowFrom());
     }
 
-    private static void configureQQ(LineReader reader, ConfigSchema.Config cfg) {
-        ConfigSchema.QQConfig qq = cfg.getChannels().getQq();
+    private static void configureQQ(LineReader reader, Config cfg) {
+        QQConfig qq = cfg.getChannels().getQq();
 
         System.out.println("  QQ 机器人配置说明：");
         System.out.println("  需要配置 QQ 开放平台应用");
@@ -353,8 +355,8 @@ public class ChannelConfigurator {
         configureDmPolicy(reader, "QQ", qq.getAllowFrom());
     }
 
-    private static void configureEmail(LineReader reader, ConfigSchema.Config cfg) {
-        ConfigSchema.EmailConfig email = cfg.getChannels().getEmail();
+    private static void configureEmail(LineReader reader, Config cfg) {
+        EmailConfig email = cfg.getChannels().getEmail();
 
         System.out.println("  Email 配置说明：");
         System.out.println("  配置 IMAP 和 SMTP 服务器信息");
@@ -383,8 +385,8 @@ public class ChannelConfigurator {
         email.setFromAddress(TerminalPrompts.promptText(reader, "发件人地址", email.getFromAddress()));
     }
 
-    private static void configureMochat(LineReader reader, ConfigSchema.Config cfg) {
-        ConfigSchema.MochatConfig mochat = cfg.getChannels().getMochat();
+    private static void configureMochat(LineReader reader, Config cfg) {
+        MochatConfig mochat = cfg.getChannels().getMochat();
 
         System.out.println("  MoChat 配置说明：");
         System.out.println("  配置 MoChat 企业微信服务地址");
@@ -397,8 +399,8 @@ public class ChannelConfigurator {
         configureDmPolicy(reader, "MoChat", mochat.getAllowFrom());
     }
 
-    private static void configureMatrix(LineReader reader, ConfigSchema.Config cfg) {
-        ConfigSchema.MatrixConfig matrix = cfg.getChannels().getMatrix();
+    private static void configureMatrix(LineReader reader, Config cfg) {
+        MatrixConfig matrix = cfg.getChannels().getMatrix();
 
         System.out.println("  Matrix 配置说明：");
         System.out.println("  配置 Matrix Homeserver 和访问令牌");
@@ -449,7 +451,7 @@ public class ChannelConfigurator {
     /**
      * 检查 channel 是否启用
      */
-    private static boolean isChannelEnabled(ConfigSchema.ChannelsConfig channels, String id) {
+    private static boolean isChannelEnabled(ChannelsConfig channels, String id) {
         return switch (id) {
             case "feishu" -> channels.getFeishu().isEnabled();
             case "telegram" -> channels.getTelegram().isEnabled();
@@ -468,7 +470,7 @@ public class ChannelConfigurator {
     /**
      * 检查 channel 是否已配置
      */
-    private static boolean isChannelConfigured(ConfigSchema.ChannelsConfig channels, String id) {
+    private static boolean isChannelConfigured(ChannelsConfig channels, String id) {
         return switch (id) {
             case "feishu" -> {
                 var c = channels.getFeishu();
@@ -517,7 +519,7 @@ public class ChannelConfigurator {
     /**
      * 设置 channel 启用状态
      */
-    private static void setChannelEnabled(ConfigSchema.ChannelsConfig channels, 
+    private static void setChannelEnabled(ChannelsConfig channels, 
                                           String id, boolean enabled) {
         switch (id) {
             case "feishu" -> channels.getFeishu().setEnabled(enabled);

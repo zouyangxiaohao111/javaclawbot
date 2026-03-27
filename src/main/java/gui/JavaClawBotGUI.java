@@ -9,6 +9,10 @@ import cli.BuiltinSkillsInstaller;
 import cli.OnboardWizard;
 import cli.RuntimeComponents;
 import cli.GatewayRuntime;
+import config.Config;
+import config.channel.FeishuConfig;
+import config.provider.FallbackTarget;
+import config.provider.ProviderConfig;
 import heartbeat.HeartbeatService;
 import com.formdev.flatlaf.FlatClientProperties;
 import com.formdev.flatlaf.FlatLaf;
@@ -127,7 +131,7 @@ public class JavaClawBotGUI extends JFrame {
     // =========================
     // 核心组件
     // =========================
-    private ConfigSchema.Config config;
+    private Config config;
     private LLMProvider provider;
     private AgentLoop agentLoop;
     private CronService cron;
@@ -786,9 +790,9 @@ public class JavaClawBotGUI extends JFrame {
             }
 
             // 4) 加载配置
-            ConfigSchema.Config cfg;
+            Config cfg;
             if (Files.exists(configPath) && configAction == ConfigAction.RESET) {
-                cfg = new ConfigSchema.Config();
+                cfg = new Config();
             } else {
                 cfg = ConfigIO.loadConfig(null);
             }
@@ -924,7 +928,7 @@ public class JavaClawBotGUI extends JFrame {
     }
 
     private void configurePrimaryProviderDialog(
-            ConfigSchema.Config cfg,
+            Config cfg,
             WizardFlow flow,
             ConfigAction configAction
     ) {
@@ -986,7 +990,7 @@ public class JavaClawBotGUI extends JFrame {
         }
 
         String providerName = selectedMeta.getName();
-        ConfigSchema.ProviderConfig providerConfig = cfg.getProviders().getByName(providerName);
+        ProviderConfig providerConfig = cfg.getProviders().getByName(providerName);
         if (providerConfig == null) {
             appendSystem("未找到 provider 配置: " + providerName);
             return;
@@ -1076,7 +1080,7 @@ public class JavaClawBotGUI extends JFrame {
         appendSystem("✓ 默认模型: " + model);
     }
 
-    private void configureFallbackDialog(ConfigSchema.Config cfg) {
+    private void configureFallbackDialog(Config cfg) {
         int result = JOptionPane.showConfirmDialog(
                 this,
                 "是否启用备用模型？\n\n当主模型不可用时，自动请求备用模型。",
@@ -1116,7 +1120,7 @@ public class JavaClawBotGUI extends JFrame {
             return;
         }
 
-        ConfigSchema.FallbackTarget t = new ConfigSchema.FallbackTarget();
+        FallbackTarget t = new FallbackTarget();
         t.setEnabled(true);
         t.setProvider(provider.trim());
         t.setModels(
@@ -1145,7 +1149,7 @@ public class JavaClawBotGUI extends JFrame {
         appendSystem("✓ Fallback 已配置");
     }
 
-    private void configureChannelsDialog(ConfigSchema.Config cfg, WizardFlow flow) {
+    private void configureChannelsDialog(Config cfg, WizardFlow flow) {
         int result = JOptionPane.showConfirmDialog(
                 this,
                 "是否配置 Channel？\n\n"
@@ -1177,7 +1181,7 @@ public class JavaClawBotGUI extends JFrame {
             }
 
             if ("飞书(feishu)".equals(selected)) {
-                ConfigSchema.FeishuConfig feishu = cfg.getChannels().getFeishu();
+                FeishuConfig feishu = cfg.getChannels().getFeishu();
 
                 String appId = JOptionPane.showInputDialog(this, "Feishu App ID：", feishu.getAppId());
                 if (appId != null) feishu.setAppId(appId.trim());
@@ -1214,7 +1218,7 @@ public class JavaClawBotGUI extends JFrame {
         }
     }
 
-    private void configureSkillsDialog(ConfigSchema.Config cfg, boolean overwrite) {
+    private void configureSkillsDialog(Config cfg, boolean overwrite) {
         int result = JOptionPane.showConfirmDialog(
                 this,
                 "是否安装预构建 skills？\n\n"
@@ -2107,7 +2111,7 @@ public class JavaClawBotGUI extends JFrame {
         }
     }
 
-    static LLMProvider makeProvider(ConfigSchema.Config config) {
+    static LLMProvider makeProvider(Config config) {
         String model = config.getAgents().getDefaults().getModel();
         String providerName = config.getProviderName(model);
         var p = config.getProvider(model);
@@ -2222,7 +2226,7 @@ public class JavaClawBotGUI extends JFrame {
     static final class HelpersProxy {
         static Path getWorkspacePathSafe() {
             try {
-                ConfigSchema.Config cfg = ConfigIO.loadConfig(null);
+                Config cfg = ConfigIO.loadConfig(null);
                 if (cfg != null && cfg.getWorkspacePath() != null) {
                     return cfg.getWorkspacePath();
                 }

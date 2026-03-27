@@ -5,6 +5,7 @@ import bus.MessageBus;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import config.ConfigSchema;
+import config.tool.ExecToolConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import providers.LLMProvider;
@@ -45,7 +46,7 @@ public class SubagentManager {
     private final int maxTokens;
     private final String reasoningEffort;
     private final String braveApiKey;
-    private final ConfigSchema.ExecToolConfig execConfig;
+    private final ExecToolConfig execConfig;
     private final boolean restrictToWorkspace;
 
     // ========== 核心组件 ==========
@@ -74,7 +75,7 @@ public class SubagentManager {
             Integer maxTokens,
             String reasoningEffort,
             String braveApiKey,
-            ConfigSchema.ExecToolConfig execConfig,
+            ExecToolConfig execConfig,
             boolean restrictToWorkspace,
             Executor executor
     ) {
@@ -87,7 +88,7 @@ public class SubagentManager {
         this.maxTokens = (maxTokens == null) ? 8192 : maxTokens;
         this.reasoningEffort = (reasoningEffort == null || reasoningEffort.isBlank()) ? null : reasoningEffort;
         this.braveApiKey = braveApiKey;
-        this.execConfig = (execConfig == null) ? new ConfigSchema.ExecToolConfig() : execConfig;
+        this.execConfig = (execConfig == null) ? new ExecToolConfig() : execConfig;
         this.restrictToWorkspace = restrictToWorkspace;
 
         if (executor instanceof ExecutorService es) {

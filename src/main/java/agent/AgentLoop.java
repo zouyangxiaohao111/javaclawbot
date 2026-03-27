@@ -2,7 +2,6 @@ package agent;
 
 import agent.command.CommandQueueManager;
 import agent.command.LocalCommand;
-import agent.subagent.LocalSubagentExecutor;
 import agent.subagent.SessionsSpawnTool;
 import agent.subagent.SubagentManager;
 import agent.subagent.SubagentsControlTool;
@@ -12,15 +11,17 @@ import bus.InboundMessage;
 import bus.MessageBus;
 import bus.OutboundMessage;
 import cn.hutool.core.util.StrUtil;
-import config.AgentRuntimeSettings;
+import config.agent.AgentRuntimeSettings;
 import config.ConfigSchema;
+import config.channel.ChannelsConfig;
+import config.mcp.MCPServerConfig;
+import config.tool.ExecToolConfig;
 import context.ContextBuilder;
 import context.ContextOverflowDetector;
 import context.ContextWindowDiscovery;
 import corn.CronService;
 import memory.MemoryCompaction;
 import memory.MemoryStore;
-import org.glassfish.grizzly.utils.StateHolder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import providers.LLMProvider;
@@ -38,7 +39,6 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantLock;
-import java.util.regex.Pattern;
 
 import static utils.Helpers.stripThink;
 import static utils.Helpers.toolHint;
@@ -49,7 +49,7 @@ public class AgentLoop {
     private static final int TOOL_RESULT_MAX_CHARS = 100_000;
 
     private final MessageBus bus;
-    private final ConfigSchema.ChannelsConfig channelsConfig;
+    private final ChannelsConfig channelsConfig;
     private final LLMProvider provider;
     private final java.nio.file.Path workspace;
     private final String model;
@@ -59,7 +59,7 @@ public class AgentLoop {
     private final int memoryWindow;
     private final String reasoningEffort;
     private final String braveApiKey;
-    private final ConfigSchema.ExecToolConfig execConfig;
+    private final ExecToolConfig execConfig;
     private final CronService cronService;
     private final boolean restrictToWorkspace;
     private final ContextBuilder context;
@@ -75,7 +75,7 @@ public class AgentLoop {
      */
     private final ToolRegistry sharedTools;
     private volatile boolean running = false;
-    private final Map<String, ConfigSchema.MCPServerConfig> mcpServers;
+    private final Map<String, MCPServerConfig> mcpServers;
     /**
      * MCP 动态工具管理器
      */
@@ -135,12 +135,12 @@ public class AgentLoop {
             Integer memoryWindow,
             String reasoningEffort,
             String braveApiKey,
-            ConfigSchema.ExecToolConfig execConfig,
+            ExecToolConfig execConfig,
             CronService cronService,
             boolean restrictToWorkspace,
             SessionManager sessionManager,
-            Map<String, ConfigSchema.MCPServerConfig> mcpServers,
-            ConfigSchema.ChannelsConfig channelsConfig,
+            Map<String, MCPServerConfig> mcpServers,
+            ChannelsConfig channelsConfig,
             AgentRuntimeSettings runtimeSettings
     ) {
         this.bus = bus;
@@ -154,7 +154,7 @@ public class AgentLoop {
         this.memoryWindow = (memoryWindow != null) ? memoryWindow : 100;
         this.reasoningEffort = reasoningEffort;
         this.braveApiKey = braveApiKey;
-        this.execConfig = (execConfig != null) ? execConfig : new ConfigSchema.ExecToolConfig();
+        this.execConfig = (execConfig != null) ? execConfig : new ExecToolConfig();
         this.cronService = cronService;
         this.restrictToWorkspace = restrictToWorkspace;
         this.runtimeSettings = runtimeSettings;
@@ -211,7 +211,7 @@ public class AgentLoop {
         return runtimeSnapshot().maxTokens();
     }
 
-    private ConfigSchema.ChannelsConfig currentChannelsConfig() {
+    private ChannelsConfig currentChannelsConfig() {
         return runtimeSettings.getCurrentConfig().getChannels();
     }
 
@@ -1411,7 +1411,7 @@ public class AgentLoop {
         );
     }
 
-    public ConfigSchema.ChannelsConfig getChannelsConfig() {
+    public ChannelsConfig getChannelsConfig() {
         return currentChannelsConfig();
     }
 

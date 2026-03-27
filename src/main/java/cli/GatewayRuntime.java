@@ -4,6 +4,7 @@ import agent.AgentLoop;
 import bus.MessageBus;
 import bus.OutboundMessage;
 import channels.ChannelManager;
+import config.Config;
 import config.ConfigIO;
 import config.ConfigReloader;
 import config.ConfigSchema;
@@ -60,7 +61,7 @@ public final class GatewayRuntime {
     private final AtomicBoolean running = new AtomicBoolean(false);
     private final AtomicBoolean stopping = new AtomicBoolean(false);
 
-    private volatile ConfigSchema.Config config;
+    private volatile Config config;
     private volatile MessageBus bus;
     private volatile LLMProvider provider;
     private volatile SessionManager sessionManager;
@@ -185,7 +186,7 @@ public final class GatewayRuntime {
         return stoppedFuture;
     }
 
-    public ConfigSchema.Config getConfig() {
+    public Config getConfig() {
         return config;
     }
 

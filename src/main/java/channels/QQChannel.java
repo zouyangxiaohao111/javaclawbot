@@ -3,6 +3,7 @@ package channels;
 import bus.MessageBus;
 import bus.OutboundMessage;
 import config.ConfigSchema;
+import config.channel.QQConfig;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
@@ -28,14 +29,14 @@ public class QQChannel extends BaseChannel {
     public static final String CHANNEL_NAME = "qq";
 
     /**
-     * QQ 配置（对应 ConfigSchema.QQConfig）
+     * QQ 配置（对应 QQConfig）
      *
-     * <p>你当前工程里已存在 ConfigSchema.QQConfig：</p>
+     * <p>你当前工程里已存在 QQConfig：</p>
      * <ul>
      *   <li>enabled/appId/secret/allowFrom</li>
      * </ul>
      */
-    private final ConfigSchema.QQConfig qqConfig;
+    private final QQConfig qqConfig;
 
     /**
      * QQ SDK 客户端占位对象
@@ -57,7 +58,7 @@ public class QQChannel extends BaseChannel {
      */
     private static final int MAX_PROCESSED_IDS = 1000;
 
-    public QQChannel(ConfigSchema.QQConfig config, MessageBus bus) {
+    public QQChannel(QQConfig config, MessageBus bus) {
         super(config, bus);
         this.qqConfig = Objects.requireNonNull(config, "QQConfig 不能为空");
         this.name = CHANNEL_NAME;

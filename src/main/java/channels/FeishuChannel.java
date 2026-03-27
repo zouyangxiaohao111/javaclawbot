@@ -15,8 +15,10 @@ import com.lark.oapi.event.EventDispatcher;
 
 
 import com.lark.oapi.service.im.v1.model.P2MessageReceiveV1;
+import config.Config;
 import config.ConfigIO;
 import config.ConfigSchema;
+import config.channel.FeishuConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import utils.Retryer;
@@ -139,7 +141,7 @@ public class FeishuChannel extends BaseChannel {
     // react emoji (optional)
     private volatile String reactEmoji = "THUMBSUP";
 
-    public FeishuChannel(ConfigSchema.FeishuConfig config, MessageBus bus) {
+    public FeishuChannel(FeishuConfig config, MessageBus bus) {
         super(config, bus);
         this.name = CHANNEL_NAME;
         // optional: read reactEmoji from config if present
@@ -150,8 +152,8 @@ public class FeishuChannel extends BaseChannel {
     }
 
     public static void main(String[] args) throws IOException {
-        ConfigSchema.Config config1 = ConfigIO.loadConfig(null);
-        ConfigSchema.FeishuConfig feishu = config1.getChannels().getFeishu();
+        Config config1 = ConfigIO.loadConfig(null);
+        FeishuConfig feishu = config1.getChannels().getFeishu();
         /*FeishuChannel channel = new FeishuChannel(feishu, bus);
         channel.start();*/
         MessageBus bus = new MessageBus();

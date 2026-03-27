@@ -1,6 +1,11 @@
 package providers;
 
+import config.Config;
 import config.ConfigSchema;
+import config.agent.AgentDefaults;
+import config.provider.FallbackConfig;
+import config.provider.FallbackTarget;
+import config.provider.ProviderConfig;
 import providers.startegy.FallbackStrategies;
 import providers.startegy.FallbackStrategy;
 
@@ -111,17 +116,17 @@ public final class ModelFallbackManager {
 
     private final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(ModelFallbackManager.class);
 
-    public FallbackChain buildFallbackChain(ConfigSchema.Config config) {
+    public FallbackChain buildFallbackChain(Config config) {
         Objects.requireNonNull(config, "config");
 
-        ConfigSchema.AgentDefaults defaults = config.getAgents().getDefaults();
+        AgentDefaults defaults = config.getAgents().getDefaults();
         String providerName = defaults.getProvider();
         String model = defaults.getModel();
 
         LLMProvider primaryProvider = ProviderFactory.createProvider(config, providerName, model);
         String primaryProviderName = ProviderFactory.resolveProviderName(config, providerName, model);
 
-        ConfigSchema.FallbackConfig fallbackConfig = defaults.getFallback();
+        FallbackConfig fallbackConfig = defaults.getFallback();
         FallbackStrategy strategy = FallbackStrategies.byMode(
                 fallbackConfig != null ? fallbackConfig.getMode() : "on_error"
         );
@@ -268,19 +273,19 @@ public final class ModelFallbackManager {
         });
     }
 
-    private List<NamedProvider> buildFallbackNodes(ConfigSchema.Config config, ConfigSchema.FallbackConfig fallbackConfig) {
+    private List<NamedProvider> buildFallbackNodes(Config config, FallbackConfig fallbackConfig) {
         List<NamedProvider> fallbacks = new ArrayList<>();
 
         if (fallbackConfig == null || !fallbackConfig.isEnabled()) {
             return fallbacks;
         }
 
-        List<ConfigSchema.FallbackTarget> targets = fallbackConfig.getTargets();
+        List<FallbackTarget> targets = fallbackConfig.getTargets();
         if (targets == null || targets.isEmpty()) {
             return fallbacks;
         }
 
-        for (ConfigSchema.FallbackTarget target : targets) {
+        for (FallbackTarget target : targets) {
             if (!target.isEnabled()) {
                 continue;
             }
@@ -305,7 +310,7 @@ public final class ModelFallbackManager {
                     String apiBase = target.getApiBase();
 
                     if ((apiKey == null || apiKey.isBlank()) && (apiBase == null || apiBase.isBlank())) {
-                        ConfigSchema.ProviderConfig pc = config.getProviders().getByName(targetProvider);
+                        ProviderConfig pc = config.getProviders().getByName(targetProvider);
                         if (pc != null) {
                             if (apiKey == null || apiKey.isBlank()) apiKey = pc.getApiKey();
                             if (apiBase == null || apiBase.isBlank()) apiBase = pc.getApiBase();

@@ -6,6 +6,7 @@ import config.ConfigSchema;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import config.channel.DingTalkConfig;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -55,8 +56,8 @@ public class DingTalkChannel extends BaseChannel {
     /** 允许的视频扩展名集合 */
     private static final Set<String> VIDEO_EXTS = Set.of(".mp4", ".mov", ".avi", ".mkv", ".webm");
 
-    /** 钉钉配置（来自 ConfigSchema.DingTalkConfig） */
-    private final ConfigSchema.DingTalkConfig cfg;
+    /** 钉钉配置（来自 DingTalkConfig） */
+    private final DingTalkConfig cfg;
 
     /** HTTP 客户端（JDK17 自带） */
     private final HttpClient http;
@@ -76,7 +77,7 @@ public class DingTalkChannel extends BaseChannel {
     /**
      * 构造器：ChannelManager 通过反射创建，参数应可匹配 (DingTalkConfig, MessageBus)。
      */
-    public DingTalkChannel(ConfigSchema.DingTalkConfig config, MessageBus bus) {
+    public DingTalkChannel(DingTalkConfig config, MessageBus bus) {
         super(config, bus);
         this.cfg = config;
         this.http = HttpClient.newBuilder()

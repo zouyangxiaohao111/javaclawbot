@@ -1,7 +1,10 @@
 package cli;
 
+import config.Config;
 import config.ConfigIO;
 import config.ConfigSchema;
+import config.provider.FallbackTarget;
+import config.provider.ProviderConfig;
 import org.jline.reader.LineReader;
 import org.jline.reader.LineReaderBuilder;
 import org.jline.terminal.Terminal;
@@ -81,9 +84,9 @@ public final class OnboardWizard {
         }
 
         // 4) 加载配置
-        ConfigSchema.Config cfg;
+        Config cfg;
         if (Files.exists(configPath) && configAction == ConfigAction.RESET) {
-            cfg = new ConfigSchema.Config();
+            cfg = new Config();
         } else {
             cfg = ConfigIO.loadConfig(null);
         }
@@ -268,7 +271,7 @@ public final class OnboardWizard {
     private void configurePrimaryProvider(
             Terminal terminal,
             LineReader reader,
-            ConfigSchema.Config cfg,
+            Config cfg,
             ConfigAction configAction
     ) {
         List<ProviderCatalog.ProviderMeta> providers = ProviderCatalog.supportedProviders();
@@ -295,7 +298,7 @@ public final class OnboardWizard {
         if (selected == null) return;
 
         String providerName = selected.getName();
-        ConfigSchema.ProviderConfig providerConfig = cfg.getProviders().getByName(providerName);
+        ProviderConfig providerConfig = cfg.getProviders().getByName(providerName);
         if (providerConfig == null) {
             System.err.println("未找到提供商配置: " + providerName);
             return;
@@ -373,7 +376,7 @@ public final class OnboardWizard {
     /**
      * 配置备用模型
      */
-    private void configureFallback(Terminal terminal, LineReader reader, ConfigSchema.Config cfg) {
+    private void configureFallback(Terminal terminal, LineReader reader, Config cfg) {
         boolean enabled = TerminalPrompts.promptConfirm(
                 reader,
                 "是否启用备用模型?",
@@ -412,7 +415,7 @@ public final class OnboardWizard {
             return;
         }
 
-        List<ConfigSchema.FallbackTarget> targets = new ArrayList<>();
+        List<FallbackTarget> targets = new ArrayList<>();
 
         for (ProviderCatalog.ProviderMeta meta : providerSelection.getItems()) {
             List<String> models;
@@ -439,7 +442,7 @@ public final class OnboardWizard {
 
             if (models.isEmpty()) continue;
 
-            ConfigSchema.FallbackTarget t = new ConfigSchema.FallbackTarget();
+            FallbackTarget t = new FallbackTarget();
             t.setEnabled(true);
             t.setProvider(meta.getName());
             t.setModels(models);
@@ -465,7 +468,7 @@ public final class OnboardWizard {
     /**
      * 配置技能
      */
-    private void configureSkills(Terminal terminal, ConfigSchema.Config cfg, boolean overwrite) {
+    private void configureSkills(Terminal terminal, Config cfg, boolean overwrite) {
         List<BuiltinSkillsInstaller.SkillResource> builtinSkills = BuiltinSkillsInstaller.discoverBuiltinSkills();
 
         if (builtinSkills.isEmpty()) {

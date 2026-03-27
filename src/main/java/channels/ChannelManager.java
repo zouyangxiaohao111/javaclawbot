@@ -5,7 +5,9 @@ import bus.OutboundMessage;
 import cn.hutool.json.JSON;
 import cn.hutool.json.JSONObject;
 import com.google.gson.Gson;
+import config.Config;
 import config.ConfigSchema;
+import config.channel.*;
 
 import java.lang.reflect.Constructor;
 import java.util.*;
@@ -28,7 +30,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class ChannelManager {
 
     /** 根配置 */
-    private final ConfigSchema.Config config;
+    private final Config config;
     /** 消息总线 */
     private final MessageBus bus;
 
@@ -45,7 +47,7 @@ public class ChannelManager {
     /** 出站派发器任务句柄 */
     private volatile Future<?> dispatchFuture;
 
-    public ChannelManager(ConfigSchema.Config config, MessageBus bus) {
+    public ChannelManager(Config config, MessageBus bus) {
         this.config = Objects.requireNonNull(config, "config 不能为空");
         this.bus = Objects.requireNonNull(bus, "bus 不能为空");
 
@@ -90,7 +92,7 @@ public class ChannelManager {
             tryLoadChannel(
                     "telegram",
                     "channels.TelegramChannel",
-                    new Class<?>[]{ConfigSchema.TelegramConfig.class, MessageBus.class, String.class},
+                    new Class<?>[]{TelegramConfig.class, MessageBus.class, String.class},
                     new Object[]{config.getChannels().getTelegram(), bus, (groqApiKey == null ? "" : groqApiKey)}
             );
         }
@@ -100,7 +102,7 @@ public class ChannelManager {
             tryLoadChannel(
                     "whatsapp",
                     "channels.WhatsAppChannel",
-                    new Class<?>[]{ConfigSchema.WhatsAppConfig.class, MessageBus.class},
+                    new Class<?>[]{WhatsAppConfig.class, MessageBus.class},
                     new Object[]{config.getChannels().getWhatsapp(), bus}
             );
         }
@@ -110,7 +112,7 @@ public class ChannelManager {
             tryLoadChannel(
                     "discord",
                     "channels.DiscordChannel",
-                    new Class<?>[]{ConfigSchema.DiscordConfig.class, MessageBus.class},
+                    new Class<?>[]{DiscordConfig.class, MessageBus.class},
                     new Object[]{config.getChannels().getDiscord(), bus}
             );
         }
@@ -120,7 +122,7 @@ public class ChannelManager {
             tryLoadChannel(
                     "feishu",
                     "channels.FeishuChannel",
-                    new Class<?>[]{ConfigSchema.FeishuConfig.class, MessageBus.class},
+                    new Class<?>[]{FeishuConfig.class, MessageBus.class},
                     new Object[]{config.getChannels().getFeishu(), bus}
             );
         }
@@ -130,7 +132,7 @@ public class ChannelManager {
             tryLoadChannel(
                     "mochat",
                     "channels.MochatChannel",
-                    new Class<?>[]{ConfigSchema.MochatConfig.class, MessageBus.class},
+                    new Class<?>[]{MochatConfig.class, MessageBus.class},
                     new Object[]{config.getChannels().getMochat(), bus}
             );
         }
@@ -140,7 +142,7 @@ public class ChannelManager {
             tryLoadChannel(
                     "dingtalk",
                     "channels.DingTalkChannel",
-                    new Class<?>[]{ConfigSchema.DingTalkConfig.class, MessageBus.class},
+                    new Class<?>[]{DingTalkConfig.class, MessageBus.class},
                     new Object[]{config.getChannels().getDingtalk(), bus}
             );
         }
@@ -150,7 +152,7 @@ public class ChannelManager {
             tryLoadChannel(
                     "email",
                     "channels.EmailChannel",
-                    new Class<?>[]{ConfigSchema.EmailConfig.class, MessageBus.class},
+                    new Class<?>[]{EmailConfig.class, MessageBus.class},
                     new Object[]{config.getChannels().getEmail(), bus}
             );
         }
@@ -160,7 +162,7 @@ public class ChannelManager {
             tryLoadChannel(
                     "slack",
                     "channels.SlackChannel",
-                    new Class<?>[]{ConfigSchema.SlackConfig.class, MessageBus.class},
+                    new Class<?>[]{SlackConfig.class, MessageBus.class},
                     new Object[]{config.getChannels().getSlack(), bus}
             );
         }
@@ -170,7 +172,7 @@ public class ChannelManager {
             tryLoadChannel(
                     "qq",
                     "channels.QQChannel",
-                    new Class<?>[]{ConfigSchema.QQConfig.class, MessageBus.class},
+                    new Class<?>[]{QQConfig.class, MessageBus.class},
                     new Object[]{config.getChannels().getQq(), bus}
             );
         }

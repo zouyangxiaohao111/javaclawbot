@@ -1,6 +1,6 @@
 package heartbeat;
 
-import config.ConfigSchema;
+import config.Config;
 import providers.LLMProvider;
 
 import java.nio.charset.StandardCharsets;
@@ -69,7 +69,7 @@ public final class HeartbeatService {
     ) {}
 
     /** 心跳配置 */
-    public record HeartbeatConfig(
+    public record HeartbeatInnerConfig(
         boolean enabled,
         int intervalMs,
         String prompt,
@@ -93,7 +93,7 @@ public final class HeartbeatService {
     private final String model;
     private final Function<String, CompletableFuture<String>> onExecute;
     private final Function<String, CompletableFuture<Void>> onNotify;
-    private final HeartbeatConfig config;
+    private final HeartbeatInnerConfig config;
 
     private volatile boolean running = false;
     private ScheduledExecutorService scheduler;
@@ -105,7 +105,7 @@ public final class HeartbeatService {
             String model,
             Function<String, CompletableFuture<String>> onExecute,
             Function<String, CompletableFuture<Void>> onNotify,
-            HeartbeatConfig config
+            HeartbeatInnerConfig config
     ) {
         this.workspace = workspace;
         this.provider = provider;
@@ -127,7 +127,7 @@ public final class HeartbeatService {
             Function<String, CompletableFuture<Void>> onNotify
     ) {
         this(workspace, provider, model, onExecute, onNotify, 
-            new HeartbeatConfig(true, 30 * 60 * 1000, DEFAULT_HEARTBEAT_PROMPT, 
+            new HeartbeatInnerConfig(true, 30 * 60 * 1000, DEFAULT_HEARTBEAT_PROMPT,
                 "none", null, DEFAULT_HEARTBEAT_ACK_MAX_CHARS, false, false, null, null));
     }
 
@@ -534,11 +534,11 @@ public final class HeartbeatService {
     /**
      * 从配置解析心跳配置
      */
-    public static HeartbeatConfig parseConfig(ConfigSchema.Config cfg) {
-        ConfigSchema.HeartbeatConfig hb = cfg.getAgents().getDefaults().getHeartbeat();
-        
+    public static HeartbeatInnerConfig parseConfig(Config cfg) {
+        config.hearbet.HeartbeatConfig hb = cfg.getAgents().getDefaults().getHeartbeat();
+
         if (hb == null) {
-            return new HeartbeatConfig(
+            return new HeartbeatInnerConfig(
                 true, 
                 30 * 60 * 1000, 
                 DEFAULT_HEARTBEAT_PROMPT,
@@ -554,7 +554,7 @@ public final class HeartbeatService {
 
         int intervalMs = parseInterval(hb.getEvery());
         
-        return new HeartbeatConfig(
+        return new HeartbeatInnerConfig(
             hb.isEnabled(),
             intervalMs,
             hb.getPrompt() != null && !hb.getPrompt().isBlank() 

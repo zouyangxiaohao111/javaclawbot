@@ -76,7 +76,7 @@ public final class ConfigIO {
      * @param configPath 可选；为空则使用默认路径
      * @return 配置对象；失败时返回默认配置
      */
-    public static ConfigSchema.Config loadConfig(Path configPath) {
+    public static Config loadConfig(Path configPath) {
         Path path = (configPath != null) ? configPath : getConfigPath();
 
         if (Files.exists(path)) {
@@ -90,7 +90,7 @@ public final class ConfigIO {
 
                 // 反序列化为配置对象
                 ObjectMapper mapper = objectMapper();
-                return mapper.convertValue(data, ConfigSchema.Config.class);
+                return mapper.convertValue(data, Config.class);
             } catch (Exception e) {
                 // 对齐 Python：打印警告并回退默认配置
                 System.out.println("警告: 从 " + path + " 加载配置失败: " + e.getMessage());
@@ -99,7 +99,7 @@ public final class ConfigIO {
         }
 
         // 对齐 Python：文件不存在或读取失败则返回默认配置
-        return new ConfigSchema.Config();
+        return new Config();
     }
 
     /**
@@ -161,7 +161,7 @@ public final class ConfigIO {
      * @param config     配置对象
      * @param configPath 可选；为空则使用默认路径
      */
-    public static void saveConfig(ConfigSchema.Config config, Path configPath) throws IOException {
+    public static void saveConfig(Config config, Path configPath) throws IOException {
         Path path = (configPath != null) ? configPath : getConfigPath();
         Files.createDirectories(path.getParent());
 

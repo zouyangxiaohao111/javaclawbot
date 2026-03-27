@@ -1,6 +1,8 @@
 package providers;
 
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -22,8 +24,9 @@ import java.util.concurrent.TimeUnit;
  * - chat_with_retry() - 重试逻辑
  * - get_default_model()
  */
-@Slf4j
 public abstract class LLMProvider {
+
+    public static Logger log = LoggerFactory.getLogger(LLMProvider.class);
 
     protected final String apiKey;
     protected final String apiBase;

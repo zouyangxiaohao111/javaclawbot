@@ -8,6 +8,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import config.channel.WhatsAppConfig;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -40,7 +41,7 @@ public class WhatsAppChannel extends BaseChannel {
     private static final int RECONNECT_DELAY_SECONDS = 5;
     private static final int DEDUP_MAX = 1000;
 
-    private final ConfigSchema.WhatsAppConfig waConfig;
+    private final WhatsAppConfig waConfig;
 
     private final ObjectMapper om = new ObjectMapper();
 
@@ -61,7 +62,7 @@ public class WhatsAppChannel extends BaseChannel {
     /** 连接循环任务（便于 stop 时取消） */
     private volatile Future<?> connectLoopFuture;
 
-    public WhatsAppChannel(ConfigSchema.WhatsAppConfig config, MessageBus bus) {
+    public WhatsAppChannel(WhatsAppConfig config, MessageBus bus) {
         super(config, bus);
         this.name = CHANNEL_NAME;
         this.waConfig = Objects.requireNonNull(config, "WhatsAppConfig 不能为空");

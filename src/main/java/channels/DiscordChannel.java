@@ -6,6 +6,7 @@ import config.ConfigSchema;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import config.channel.DiscordConfig;
 
 import java.io.IOException;
 import java.net.URI;
@@ -51,7 +52,7 @@ public class DiscordChannel extends BaseChannel {
     private static final int MAX_MESSAGE_LEN = 2000;
 
     /** 配置 */
-    private final ConfigSchema.DiscordConfig cfg;
+    private final DiscordConfig cfg;
 
     /** HTTP 客户端（REST + 附件下载） */
     private final HttpClient http;
@@ -80,7 +81,7 @@ public class DiscordChannel extends BaseChannel {
     /** 标记当前连接是否需要重连 */
     private volatile boolean reconnectRequested = false;
 
-    public DiscordChannel(ConfigSchema.DiscordConfig config, MessageBus bus) {
+    public DiscordChannel(DiscordConfig config, MessageBus bus) {
         super(config, bus);
         this.cfg = config;
 

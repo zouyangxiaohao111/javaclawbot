@@ -1,6 +1,7 @@
 package context;
 
 import cn.hutool.core.util.StrUtil;
+import config.Config;
 import config.ConfigIO;
 import config.ConfigSchema;
 
@@ -250,7 +251,7 @@ public class BootstrapLoader {
     }
 
     public String loadAgents() {
-        ConfigSchema.Config config = ConfigIO.loadConfig(ConfigIO.getConfigPath(workspace));
+        Config config = ConfigIO.loadConfig(ConfigIO.getConfigPath(workspace));
         String content;
         // 是否开发者
         if (config.getAgents().getDefaults().isDevelopment()){
@@ -277,7 +278,7 @@ public class BootstrapLoader {
 
 
     public String loadIdentity() {
-        ConfigSchema.Config config = ConfigIO.loadConfig(ConfigIO.getConfigPath(workspace));
+        Config config = ConfigIO.loadConfig(ConfigIO.getConfigPath(workspace));
         if (config.getAgents().getDefaults().isDevelopment()){
             return doGetContent("IDENTITY_DEV.md");
         }
@@ -285,7 +286,7 @@ public class BootstrapLoader {
     }
 
     public String loadSoul() {
-        ConfigSchema.Config config = ConfigIO.loadConfig(ConfigIO.getConfigPath(workspace));
+        Config config = ConfigIO.loadConfig(ConfigIO.getConfigPath(workspace));
         if (config.getAgents().getDefaults().isDevelopment()){
             return doGetContent("SOUL_DEV.md");
         }
@@ -301,7 +302,7 @@ public class BootstrapLoader {
     }
 
     public String loadUser() {
-        ConfigSchema.Config config = ConfigIO.loadConfig(ConfigIO.getConfigPath(workspace));
+        Config config = ConfigIO.loadConfig(ConfigIO.getConfigPath(workspace));
         if (config.getAgents().getDefaults().isDevelopment()){
             return doGetContent("USER_DEV.md");
         }
@@ -309,7 +310,7 @@ public class BootstrapLoader {
     }
 
     public String loadTool() {
-        ConfigSchema.Config config = ConfigIO.loadConfig(ConfigIO.getConfigPath(workspace));
+        Config config = ConfigIO.loadConfig(ConfigIO.getConfigPath(workspace));
         if (config.getAgents().getDefaults().isDevelopment()){
             return doGetContent("TOOLS_DEV.md");
         }

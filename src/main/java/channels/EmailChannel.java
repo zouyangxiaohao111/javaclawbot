@@ -4,6 +4,7 @@ import bus.MessageBus;
 import bus.OutboundMessage;
 import config.ConfigSchema;
 
+import config.channel.EmailConfig;
 import jakarta.mail.*;
 import jakarta.mail.Flags.Flag;
 import jakarta.mail.internet.InternetAddress;
@@ -56,7 +57,7 @@ public class EmailChannel extends BaseChannel {
     private static final Pattern UID_PATTERN = Pattern.compile("\\bUID\\s+(\\d+)\\b");
 
     /** 配置对象 */
-    private final ConfigSchema.EmailConfig cfg;
+    private final EmailConfig cfg;
 
     /** sender -> last subject（用于构造回复主题） */
     private final ConcurrentHashMap<String, String> lastSubjectByChat = new ConcurrentHashMap<>();
@@ -73,7 +74,7 @@ public class EmailChannel extends BaseChannel {
     /** 轮询任务 */
     private volatile ScheduledFuture<?> pollFuture;
 
-    public EmailChannel(ConfigSchema.EmailConfig config, MessageBus bus) {
+    public EmailChannel(EmailConfig config, MessageBus bus) {
         super(config, bus);
         this.cfg = config;
         this.name = CHANNEL_NAME;

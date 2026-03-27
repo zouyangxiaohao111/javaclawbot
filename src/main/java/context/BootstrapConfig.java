@@ -2,6 +2,7 @@ package context;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
+import config.agent.AgentDefaults;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -82,7 +83,7 @@ public class BootstrapConfig {
     /**
      * 从配置对象解析 BootstrapConfig
      */
-    public static BootstrapConfig fromAgentDefaults(config.ConfigSchema.AgentDefaults defaults) {
+    public static BootstrapConfig fromAgentDefaults(AgentDefaults defaults) {
         BootstrapConfig config = new BootstrapConfig();
         if (defaults == null) {
             return config;

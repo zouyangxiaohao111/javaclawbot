@@ -8,6 +8,7 @@ import agent.tool.WebFetchTool;
 import agent.tool.WebSearchTool;
 import bus.MessageBus;
 import config.ConfigSchema;
+import config.tool.ExecToolConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import providers.LLMProvider;
@@ -41,7 +42,7 @@ public class LocalSubagentExecutor implements SubagentExecutor {
 
     private final LLMProvider provider;
     private final Path workspace;
-    private final ConfigSchema.ExecToolConfig execConfig;
+    private final ExecToolConfig execConfig;
     private final String braveApiKey;
     private final boolean restrictToWorkspace;
     private final ExecutorService executor;
@@ -66,7 +67,7 @@ public class LocalSubagentExecutor implements SubagentExecutor {
     public LocalSubagentExecutor(
             LLMProvider provider,
             Path workspace,
-            ConfigSchema.ExecToolConfig execConfig,
+            ExecToolConfig execConfig,
             String braveApiKey,
             boolean restrictToWorkspace,
             SubagentRegistry registry,
@@ -74,7 +75,7 @@ public class LocalSubagentExecutor implements SubagentExecutor {
     ) {
         this.provider = Objects.requireNonNull(provider);
         this.workspace = Objects.requireNonNull(workspace);
-        this.execConfig = execConfig != null ? execConfig : new ConfigSchema.ExecToolConfig();
+        this.execConfig = execConfig != null ? execConfig : new ExecToolConfig();
         this.braveApiKey = braveApiKey;
         this.restrictToWorkspace = restrictToWorkspace;
         this.registry = registry != null ? registry : SubagentRegistry.getInstance();
@@ -93,7 +94,7 @@ public class LocalSubagentExecutor implements SubagentExecutor {
     public LocalSubagentExecutor(
             LLMProvider provider,
             Path workspace,
-            ConfigSchema.ExecToolConfig execConfig,
+            ExecToolConfig execConfig,
             String braveApiKey,
             boolean restrictToWorkspace
     ) {

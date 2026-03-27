@@ -1,6 +1,8 @@
 package providers;
 
+import config.Config;
 import config.ConfigSchema;
+import config.provider.ProviderConfig;
 
 import java.util.Objects;
 
@@ -25,12 +27,12 @@ public final class ProviderFactory {
      * @param model        模型名称
      * @return LLMProvider 实例
      */
-    public static LLMProvider createProvider(ConfigSchema.Config config, String providerName, String model) {
+    public static LLMProvider createProvider(Config config, String providerName, String model) {
         Objects.requireNonNull(config, "config");
         Objects.requireNonNull(model, "model");
 
         // 获取 provider 配置
-        ConfigSchema.ProviderConfig providerConfig = resolveProviderConfig(config, providerName, model);
+        ProviderConfig providerConfig = resolveProviderConfig(config, providerName, model);
         String apiKey = providerConfig != null ? providerConfig.getApiKey() : null;
         String apiBase = providerConfig != null ? providerConfig.getApiBase() : null;
 
@@ -93,10 +95,10 @@ public final class ProviderFactory {
     /**
      * 解析 provider 配置
      */
-    public static ConfigSchema.ProviderConfig resolveProviderConfig(ConfigSchema.Config config, String providerName, String model) {
+    public static ProviderConfig resolveProviderConfig(Config config, String providerName, String model) {
         if (providerName != null && !"auto".equals(providerName)) {
             // 显式指定 provider
-            ConfigSchema.ProviderConfig pc = config.getProviders().getByName(providerName);
+            ProviderConfig pc = config.getProviders().getByName(providerName);
             if (pc != null) {
                 return pc;
             }
@@ -109,7 +111,7 @@ public final class ProviderFactory {
     /**
      * 解析 provider 名称
      */
-    public static String resolveProviderName(ConfigSchema.Config config, String providerName, String model) {
+    public static String resolveProviderName(Config config, String providerName, String model) {
         if (providerName != null && !"auto".equals(providerName)) {
             return providerName;
         }

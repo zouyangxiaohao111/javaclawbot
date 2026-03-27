@@ -4,16 +4,13 @@ import agent.AgentLoop;
 import bus.InboundMessage;
 import bus.MessageBus;
 import bus.OutboundMessage;
-import channels.BaseChannel;
-import channels.ChannelManager;
-import config.AgentRuntimeSettings;
+import config.Config;
 import config.ConfigIO;
 import config.ConfigReloader;
 import config.ConfigSchema;
 import corn.CronJob;
 import corn.CronSchedule;
 import corn.CronService;
-import heartbeat.HeartbeatService;
 import org.jline.reader.*;
 import org.jline.reader.impl.LineReaderImpl;
 import org.jline.reader.impl.history.DefaultHistory;
@@ -25,9 +22,7 @@ import org.slf4j.LoggerFactory;
 import picocli.CommandLine;
 import picocli.CommandLine.*;
 import providers.*;
-import session.SessionManager;
 import session.SessionCostUsage;
-import utils.Helpers;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -225,7 +220,7 @@ public class Commands implements Runnable {
             Path configPath = (config != null) ? Paths.get(config).toAbsolutePath() : null;
             Path workspacePath = (workspace != null) ? Paths.get(workspace).toAbsolutePath() : null;
             RuntimeComponents rt = createRuntimeComponents(configPath, workspacePath);
-            ConfigSchema.Config config = rt.config;
+            Config config = rt.config;
             MessageBus bus = new MessageBus();
 
             // 变成可fallback的
@@ -469,7 +464,7 @@ public class Commands implements Runnable {
         @Override
         public void run() {
             Path configPath = ConfigIO.getConfigPath();
-            ConfigSchema.Config config = ConfigIO.loadConfig(null);
+            Config config = ConfigIO.loadConfig(null);
             Path workspace = config.getWorkspacePath();
 
             System.out.println("🐱 javaclawbot Status\n");
@@ -507,7 +502,7 @@ public class Commands implements Runnable {
         static class Status implements Runnable {
             @Override
             public void run() {
-                ConfigSchema.Config config = ConfigIO.loadConfig(null);
+                Config config = ConfigIO.loadConfig(null);
                 System.out.println("Channel Status");
                 System.out.println("WhatsApp: " + (config.getChannels().getWhatsapp().isEnabled() ? "✓" : "✗") + " " + safe(config.getChannels().getWhatsapp().getBridgeUrl()));
                 System.out.println("Discord: " + (config.getChannels().getDiscord().isEnabled() ? "✓" : "✗") + " " + safe(config.getChannels().getDiscord().getGatewayUrl()));
@@ -693,9 +688,9 @@ public class Commands implements Runnable {
             public void run() {
 
                 // by zcw 改成动态配置读取
-//            ConfigSchema.Config config = ConfigIO.loadConfig(null);
+//            Config config = ConfigIO.loadConfig(null);
                 RuntimeComponents rt = createRuntimeComponents();
-                ConfigSchema.Config config = rt.config;
+                Config config = rt.config;
 
                 // 变成可fallback的
                 // LLMProvider provider = makeProvider(config);
@@ -799,7 +794,7 @@ public class Commands implements Runnable {
 
         @Override
         public void run() {
-            ConfigSchema.Config config = ConfigIO.loadConfig(null);
+            Config config = ConfigIO.loadConfig(null);
             Path workspace = config.getWorkspacePath();
             Path sessionsDir = workspace.resolve("sessions");
 

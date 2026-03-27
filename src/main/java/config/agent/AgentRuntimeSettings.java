@@ -1,4 +1,11 @@
-package config;
+package config.agent;
+
+import config.Config;
+import config.ConfigReloader;
+import config.ConfigSchema;
+import config.channel.ChannelsConfig;
+import config.mcp.MCPServerConfig;
+import config.tool.ExecToolConfig;
 
 import java.nio.file.Path;
 import java.util.Map;
@@ -25,7 +32,7 @@ public final class AgentRuntimeSettings {
         this.reloader = Objects.requireNonNull(reloader, "reloader");
     }
 
-    public ConfigSchema.Config getCurrentConfig(){
+    public Config getCurrentConfig(){
         try {
             reloader.refreshIfChanged();
         } catch (Exception ignored) {
@@ -47,7 +54,7 @@ public final class AgentRuntimeSettings {
         } catch (Exception ignored) {
         }
 
-        ConfigSchema.Config cfg = reloader.getCurrentConfig();
+        Config cfg = reloader.getCurrentConfig();
 
         return new Snapshot(
                 cfg.getWorkspacePath(),
@@ -77,9 +84,9 @@ public final class AgentRuntimeSettings {
             int memoryWindow,
             String reasoningEffort,
             String braveApiKey,
-            ConfigSchema.ExecToolConfig execConfig,
+            ExecToolConfig execConfig,
             boolean restrictToWorkspace,
-            Map<String, ConfigSchema.MCPServerConfig> mcpServers,
-            ConfigSchema.ChannelsConfig channelsConfig
+            Map<String, MCPServerConfig> mcpServers,
+            ChannelsConfig channelsConfig
     ) {}
 }

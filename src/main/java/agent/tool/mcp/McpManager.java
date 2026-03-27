@@ -4,8 +4,10 @@ import agent.tool.Tool;
 import agent.tool.ToolRegistry;
 import cn.hutool.core.util.StrUtil;
 import com.fasterxml.jackson.databind.json.JsonMapper;
+import config.Config;
 import config.ConfigIO;
 import config.ConfigSchema;
+import config.mcp.MCPServerConfig;
 import io.modelcontextprotocol.client.McpAsyncClient;
 import io.modelcontextprotocol.client.McpClient;
 import io.modelcontextprotocol.client.transport.HttpClientSseClientTransport;
@@ -40,7 +42,7 @@ import java.util.concurrent.*;
 @Slf4j
 public class McpManager {
 
-    private Map<String, ConfigSchema.MCPServerConfig> mcpServers;
+    private Map<String, MCPServerConfig> mcpServers;
     private final Executor executor;
 
     /**
@@ -71,7 +73,7 @@ public class McpManager {
 
     private final Path workspace;
 
-    public McpManager(Path workspace, Map<String, ConfigSchema.MCPServerConfig> mcpServers, Executor executor) {
+    public McpManager(Path workspace, Map<String, MCPServerConfig> mcpServers, Executor executor) {
         this.mcpServers = (mcpServers == null) ? Map.of() : mcpServers;
         this.executor = Objects.requireNonNull(executor, "executor");
         this.workspace = workspace;
@@ -117,9 +119,9 @@ public class McpManager {
                 StringBuilder sb = new StringBuilder();
 
                 try {
-                    for (Map.Entry<String, ConfigSchema.MCPServerConfig> entry : mcpServers.entrySet()) {
+                    for (Map.Entry<String, MCPServerConfig> entry : mcpServers.entrySet()) {
                         String serverName = entry.getKey();
-                        ConfigSchema.MCPServerConfig cfg = entry.getValue();
+                        MCPServerConfig cfg = entry.getValue();
 
                         if (cfg == null || !cfg.isEnable()) {
                             continue;
@@ -140,7 +142,7 @@ public class McpManager {
                     // 只要还有已连接句柄，就认为已连接；或者根本没有启用项，也算已完成
                     boolean hasEnabledServer = mcpServers.values().stream()
                             .filter(Objects::nonNull)
-                            .anyMatch(ConfigSchema.MCPServerConfig::isEnable);
+                            .anyMatch(MCPServerConfig::isEnable);
 
                     connected = !handles.isEmpty() || !hasEnabledServer;
 
@@ -184,11 +186,11 @@ public class McpManager {
      * @param cfg
      * @return
      */
-    private ConfigSchema.MCPServerConfig copyCfg(ConfigSchema.MCPServerConfig cfg) {
+    private MCPServerConfig copyCfg(MCPServerConfig cfg) {
         if (cfg == null) {
             return null;
         }
-        return GsonFactory.getGson().fromJson(GsonFactory.getGson().toJson(cfg), ConfigSchema.MCPServerConfig.class);
+        return GsonFactory.getGson().fromJson(GsonFactory.getGson().toJson(cfg), MCPServerConfig.class);
     }
 
     /**
@@ -197,8 +199,8 @@ public class McpManager {
      * @param newCfg
      * @return
      */
-    private boolean needsReconnect(ConfigSchema.MCPServerConfig oldCfg,
-                                   ConfigSchema.MCPServerConfig newCfg) {
+    private boolean needsReconnect(MCPServerConfig oldCfg,
+                                   MCPServerConfig newCfg) {
         if (oldCfg == null) {
             return true;
         }
@@ -238,9 +240,9 @@ public class McpManager {
 
                 try {
                     // 1) 实时读取配置文件
-                    ConfigSchema.Config config = ConfigIO.loadConfig(ConfigIO.getConfigPath(workspace));
+                    Config config = ConfigIO.loadConfig(ConfigIO.getConfigPath(workspace));
 
-                    Map<String, ConfigSchema.MCPServerConfig> latestServers =
+                    Map<String, MCPServerConfig> latestServers =
                             config != null
                                     && config.getTools() != null
                                     && config.getTools().getMcpServers() != null
@@ -250,7 +252,7 @@ public class McpManager {
                     // 2) 先处理：配置中已删除 / 已禁用 的 server
                     List<String> existingNames = new ArrayList<>(handles.keySet());
                     for (String existing : existingNames) {
-                        ConfigSchema.MCPServerConfig latestCfg = latestServers.get(existing);
+                        MCPServerConfig latestCfg = latestServers.get(existing);
                         if (latestCfg == null || !latestCfg.isEnable()) {
                             try {
                                 removeServer(existing);
@@ -266,9 +268,9 @@ public class McpManager {
                     }
 
                     // 3) 处理所有当前配置中的 server
-                    for (Map.Entry<String, ConfigSchema.MCPServerConfig> entry : latestServers.entrySet()) {
+                    for (Map.Entry<String, MCPServerConfig> entry : latestServers.entrySet()) {
                         String serverName = entry.getKey();
-                        ConfigSchema.MCPServerConfig newCfg = entry.getValue();
+                        MCPServerConfig newCfg = entry.getValue();
 
                         if (newCfg == null || !newCfg.isEnable()) {
                             continue;
@@ -303,7 +305,7 @@ public class McpManager {
                     }
 
                     connected = !handles.isEmpty()
-                            || latestServers.values().stream().noneMatch(ConfigSchema.MCPServerConfig::isEnable);
+                            || latestServers.values().stream().noneMatch(MCPServerConfig::isEnable);
 
                 } catch (Exception e) {
                     sb.append("[MCP] 刷新工具总流程失败，原因：")
@@ -396,7 +398,7 @@ public class McpManager {
     /**
      * 首次连接单个 server
      */
-    private void connectOneServer(String serverName, ConfigSchema.MCPServerConfig cfg) {
+    private void connectOneServer(String serverName, MCPServerConfig cfg) {
         McpAsyncClient client = createClient(cfg);
 
         client.initialize().block(Duration.ofSeconds(20));
@@ -418,7 +420,7 @@ public class McpManager {
      * - 已有 handle：复用 client，只更新工具集
      * - 没有 handle：按首次连接处理
      */
-    private void refreshOneServer(String serverName, ConfigSchema.MCPServerConfig cfg) {
+    private void refreshOneServer(String serverName, MCPServerConfig cfg) {
         ServerHandle oldHandle = handles.get(serverName);
 
         if (oldHandle == null) {
@@ -467,7 +469,7 @@ public class McpManager {
     private List<Tool> buildWrappedTools(
             String serverName,
             McpAsyncClient client,
-            ConfigSchema.MCPServerConfig cfg,
+            MCPServerConfig cfg,
             McpSchema.ListToolsResult toolsResult
     ) {
         List<Tool> registered = new ArrayList<>();
@@ -509,7 +511,7 @@ public class McpManager {
         }
     }
 
-    private McpAsyncClient createClient(ConfigSchema.MCPServerConfig cfg) {
+    private McpAsyncClient createClient(MCPServerConfig cfg) {
         McpClientTransport transport = createTransport(cfg);
 
         return McpClient.async(transport)
@@ -522,7 +524,7 @@ public class McpManager {
         return new JacksonMcpJsonMapper(JsonMapper.builder().build());
     }
 
-    private McpClientTransport createTransport(ConfigSchema.MCPServerConfig cfg) {
+    private McpClientTransport createTransport(MCPServerConfig cfg) {
         String transportType = determineTransportType(cfg);
 
         switch (transportType) {
@@ -568,7 +570,7 @@ public class McpManager {
         }
     }
 
-    private static String determineTransportType(ConfigSchema.MCPServerConfig cfg) {
+    private static String determineTransportType(MCPServerConfig cfg) {
         if (cfg.getType() != null && !cfg.getType().isBlank()) {
             return cfg.getType();
         }
@@ -637,7 +639,7 @@ public class McpManager {
         return fallback;
     }
 
-    private static Duration resolveToolTimeout(ConfigSchema.MCPServerConfig cfg) {
+    private static Duration resolveToolTimeout(MCPServerConfig cfg) {
         Integer seconds = cfg.getToolTimeout();
         if (seconds == null || seconds <= 0) {
             return Duration.ofSeconds(60);
@@ -649,6 +651,6 @@ public class McpManager {
             String serverName,
             McpAsyncClient client,
             List<Tool> registeredTools,
-            ConfigSchema.MCPServerConfig config
+            MCPServerConfig config
     ) {}
 }

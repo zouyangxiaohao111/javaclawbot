@@ -1,5 +1,6 @@
 package providers;
 
+import config.Config;
 import config.ConfigReloader;
 import config.ConfigSchema;
 import org.slf4j.Logger;
@@ -26,7 +27,7 @@ public final class HotSwappableProvider extends LLMProvider {
         this.reloader = Objects.requireNonNull(reloader, "reloader");
         this.fallbackManager = new ModelFallbackManager();
 
-        ConfigSchema.Config cfg = reloader.getCurrentConfig();
+        Config cfg = reloader.getCurrentConfig();
         long version = reloader.getVersion();
         this.activeSnapshot = buildSnapshot(cfg, version);
     }
@@ -75,7 +76,7 @@ public final class HotSwappableProvider extends LLMProvider {
             }
 
             try {
-                ConfigSchema.Config cfg = reloader.getCurrentConfig();
+                Config cfg = reloader.getCurrentConfig();
                 ProviderRuntimeSnapshot next = buildSnapshot(cfg, version);
                 activeSnapshot = next;
 
@@ -96,7 +97,7 @@ public final class HotSwappableProvider extends LLMProvider {
         }
     }
 
-    private ProviderRuntimeSnapshot buildSnapshot(ConfigSchema.Config config, long version) {
+    private ProviderRuntimeSnapshot buildSnapshot(Config config, long version) {
         ModelFallbackManager.FallbackChain chain = fallbackManager.buildFallbackChain(config);
         return new ProviderRuntimeSnapshot(version, chain);
     }
