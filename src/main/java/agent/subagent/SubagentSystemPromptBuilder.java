@@ -70,6 +70,9 @@ public class SubagentSystemPromptBuilder {
         lines.add("4. **Be ephemeral** - You may be terminated after task completion. That's fine.");
         lines.add("5. **Trust push-based completion** - Descendant results are auto-announced back to you; do not busy-poll for status.");
         lines.add("6. **Recover from compacted/truncated tool output** - If you see `[compacted: tool output removed to free context]` or `[truncated: output exceeded context limit]`, assume prior output was reduced. Re-read only what you need using smaller chunks.");
+        lines.add("7. **你在工具使用之外输出的所有文本都会显示给用户。输出文本以与用户沟通。**");
+        lines.add("8. **如果你认为某个技能哪怕只有1%的几率适用于你当前的任务，你也绝对必须使用该技能。如果某项技能适用于你的任务，你就别无选择，必须使用它。这没有商量的余地。这不是可选项。你无法用任何理由逃避责任。**");
+        lines.add("9. **调用工具前先说明意图，但在收到结果前不要预测或声称结果。**");
         lines.add("");
 
         // ========== 输出格式 ==========

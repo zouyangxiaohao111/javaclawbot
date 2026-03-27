@@ -1,6 +1,7 @@
 package context;
 
 import cn.hutool.core.util.StrUtil;
+import config.ConfigIO;
 import config.ConfigSchema;
 
 import java.io.IOException;
@@ -40,16 +41,16 @@ public class BootstrapLoader {
     );
 
     private final Path workspace;
-    private final BootstrapConfig config;
+    private final BootstrapConfig bootstrapConfig;
     private final Consumer<String> warnHandler;
 
     public BootstrapLoader(Path workspace) {
         this(workspace, new BootstrapConfig(), null);
     }
 
-    public BootstrapLoader(Path workspace, BootstrapConfig config, Consumer<String> warnHandler) {
+    public BootstrapLoader(Path workspace, BootstrapConfig bootstrapConfig, Consumer<String> warnHandler) {
         this.workspace = workspace;
-        this.config = config != null ? config : new BootstrapConfig();
+        this.bootstrapConfig = bootstrapConfig != null ? bootstrapConfig : new BootstrapConfig();
         this.warnHandler = warnHandler;
     }
 
@@ -103,12 +104,12 @@ public class BootstrapLoader {
      * 对齐 OpenClaw 的 applyContextModeFilter
      */
     public List<BootstrapFile> applyContextModeFilter(List<BootstrapFile> files) {
-        if (config.getContextMode() != BootstrapConfig.ContextMode.LIGHTWEIGHT) {
+        if (bootstrapConfig.getContextMode() != BootstrapConfig.ContextMode.LIGHTWEIGHT) {
             return files;
         }
 
         // lightweight 模式
-        switch (config.getRunKind()) {
+        switch (bootstrapConfig.getRunKind()) {
             case HEARTBEAT:
                 // heartbeat 只加载 HEARTBEAT.md
                 return files.stream()
@@ -127,7 +128,7 @@ public class BootstrapLoader {
      * 对齐 OpenClaw 的 buildBootstrapContextFiles
      */
     public List<BootstrapFile> applyCharLimits(List<BootstrapFile> files) {
-        int remainingTotalChars = config.getTotalMaxChars();
+        int remainingTotalChars = bootstrapConfig.getTotalMaxChars();
         List<BootstrapFile> result = new ArrayList<>();
 
         for (BootstrapFile file : files) {
@@ -152,7 +153,7 @@ public class BootstrapLoader {
             }
 
             // 文件最大字符
-            int fileMaxChars = Math.min(config.getMaxChars(), remainingTotalChars);
+            int fileMaxChars = Math.min(bootstrapConfig.getMaxChars(), remainingTotalChars);
             String trimmedContent = trimContent(file.getContent(), file.getName(), fileMaxChars);
 
             if (trimmedContent != null && !trimmedContent.isEmpty()) {
@@ -249,8 +250,14 @@ public class BootstrapLoader {
     }
 
     public String loadAgents() {
-        String content = doGetContent("AGENTS.md");
-
+        ConfigSchema.Config config = ConfigIO.loadConfig(ConfigIO.getConfigPath(workspace));
+        String content;
+        // 是否开发者
+        if (config.getAgents().getDefaults().isDevelopment()){
+            content = doGetContent("AGENTS_DEV.md");
+        }else {
+            content = doGetContent("AGENTS.md");
+        }
         // Python：workspace.expanduser().resolve()
         String workspacePath = workspace.toAbsolutePath().normalize().toString();
 
@@ -270,10 +277,18 @@ public class BootstrapLoader {
 
 
     public String loadIdentity() {
+        ConfigSchema.Config config = ConfigIO.loadConfig(ConfigIO.getConfigPath(workspace));
+        if (config.getAgents().getDefaults().isDevelopment()){
+            return doGetContent("IDENTITY_DEV.md");
+        }
         return doGetContent("IDENTITY.md");
     }
 
     public String loadSoul() {
+        ConfigSchema.Config config = ConfigIO.loadConfig(ConfigIO.getConfigPath(workspace));
+        if (config.getAgents().getDefaults().isDevelopment()){
+            return doGetContent("SOUL_DEV.md");
+        }
         return doGetContent("SOUL.md");
     }
 
@@ -286,10 +301,18 @@ public class BootstrapLoader {
     }
 
     public String loadUser() {
+        ConfigSchema.Config config = ConfigIO.loadConfig(ConfigIO.getConfigPath(workspace));
+        if (config.getAgents().getDefaults().isDevelopment()){
+            return doGetContent("USER_DEV.md");
+        }
         return doGetContent("USER.md");
     }
 
     public String loadTool() {
+        ConfigSchema.Config config = ConfigIO.loadConfig(ConfigIO.getConfigPath(workspace));
+        if (config.getAgents().getDefaults().isDevelopment()){
+            return doGetContent("TOOLS_DEV.md");
+        }
         return doGetContent("TOOLS.md");
     }
 }

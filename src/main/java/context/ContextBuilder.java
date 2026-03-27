@@ -90,6 +90,8 @@ public class ContextBuilder {
         // 配置工作流程
         String agents = bootstrapLoader.loadAgents();
         parts.add(agents);
+        // 可用技能说明
+        parts.add(skills.buildSkillsSimpleSummary());
 
         // 配置身份
         parts.add(bootstrapLoader.loadIdentity());
@@ -257,42 +259,17 @@ public class ContextBuilder {
 
         List<Map<String, Object>> userBlocks = new ArrayList<>();
 
-        // 构建第一条用户消息, 主要是技能相关
-        userBlocks.add(Map.of("type", "text", "text", skills.buildSkillsSimpleSummary()));
-        // 构建第二条用户消息, 该消息为内存上下文
-        userBlocks.add(Map.of("type", "text", "text", buildMemoryContext()));
-        // 构建第三条用户消息, 该消息为本地命令描述
-        userBlocks.add(Map.of("type", "text", "text", buildLocalCommandDesc()));
-        // 构建第四条用户消息, 该消息为常驻技能
+        // 构建第2条用户消息, 该消息为常驻技能
         userBlocks.add(Map.of("type", "text", "text", loadResidentSkill()));
+        // 构建第3条用户消息, 该消息为内存上下文
+        userBlocks.add(Map.of("type", "text", "text", buildMemoryContext()));
+        // 构建第4条用户消息, 该消息为本地命令描述
+        userBlocks.add(Map.of("type", "text", "text", buildLocalCommandDesc()));
         out.add(mapOf(
                 "role", "user",
                 "content", userBlocks
         ));
 
-        /*// 构建第一条用户消息, 主要是技能相关
-        out.add(mapOf(
-                "role", "user",
-                "content", skills.buildSkillsSimpleSummary()
-        ));
-
-        // 构建第二个消息,该消息为上下文消息
-        out.add(mapOf(
-                "role", "user",
-                "content", buildMemoryContext()
-        ));
-
-        // 构建第四个用户消息,该条消息是构建的用户输入的命令
-        out.add(mapOf(
-                "role", "user",
-                "content", buildLocalCommandDesc()
-        ));
-
-        // 添加常驻技能
-        out.add(mapOf(
-                "role", "user",
-                "content", loadResidentSkill()
-        ));*/
 
         // 添加历史
         if (CollUtil.isNotEmpty(history)) {
@@ -363,7 +340,7 @@ public class ContextBuilder {
         for (ContentBlock cb : contentBlocks) {
             sb.append(cb.getText()).append("\n");
         }
-        return "<resident-skill>"+ sb + "</resident-skill>";
+        return "以下为常驻技能,涉及这些技能不需要使用skill加载: <resident-skill>"+ sb + "</resident-skill>";
     }
 
 

@@ -572,6 +572,10 @@ public final class ConfigSchema {
         private String provider = "dashscope";
         private int maxTokens = 163840;
         private double temperature = 0.1;
+        /**
+         * 是否开发者
+         */
+        private boolean development = false;
         private int maxToolIterations = 500;
         private int memoryWindow = 200;
         /**

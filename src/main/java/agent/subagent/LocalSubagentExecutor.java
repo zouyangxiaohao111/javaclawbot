@@ -14,14 +14,12 @@ import providers.LLMProvider;
 import providers.LLMResponse;
 import providers.ToolCallRequest;
 
-import java.lang.reflect.Method;
 import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
-import static agent.AgentLoop.toolHint;
 import static utils.Helpers.stripThink;
 import static utils.Helpers.toolHint;
 
