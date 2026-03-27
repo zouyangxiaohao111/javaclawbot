@@ -563,8 +563,6 @@ public class AgentLoop {
                 msg.getChatId()
         );
 
-        //log.info("测试消息：{}", GsonFactory.getGson().toJson(initialMessages));
-
         ProgressCallback busProgress = (content1, toolHint) -> {
             Map<String, Object> meta = new LinkedHashMap<>();
             if (msg.getMetadata() != null) meta.putAll(msg.getMetadata());
@@ -610,6 +608,11 @@ public class AgentLoop {
      */
     private void tryScheduleConsolidation(Session session, List<Map<String, Object>> messages, int skip) {
         String sessionKey = session.getKey();
+
+        // 保存当前上下文至session中
+        saveTurn(session, messages, skip);
+
+        // 计算待压缩的大小
         int unconsolidated = session.getMessages().size() - session.getLastConsolidated();
 
         // 阈值提高，别太早触发
@@ -646,7 +649,7 @@ public class AgentLoop {
                         consolidateMemory(session, false).toCompletableFuture().join();
 
                         // 压缩完成后, 保存session
-                        saveTurn(session, messages, skip);
+                        //saveTurn(session, messages, skip); // 这里不需要再次保存，上面已经保存一次了
                         sessions.save(session);
                     } catch (Exception e) {
                         log.warn("会话压缩失败, sessionKey={}", sessionKey, e);

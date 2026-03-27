@@ -2,15 +2,18 @@ package session;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.extern.slf4j.Slf4j;
 import utils.Helpers;
 
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
+import java.io.Closeable;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.time.LocalDateTime;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.*;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -29,7 +32,8 @@ import java.util.logging.Logger;
  * - sessionKey：用于标识会话路由（如 "cli:direct"），是固定的
  * - sessionId：用于标识具体的会话实例（如 "amber-atlas"），每次新会话生成新的
  */
-public final class SessionManager {
+@Slf4j
+public final class SessionManager implements Closeable {
 
     private static final Logger LOG = Logger.getLogger(SessionManager.class.getName());
 
@@ -48,6 +52,12 @@ public final class SessionManager {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
+    /** 自动保存线程池（单线程，避免并发调度） */
+    private ScheduledExecutorService autoSaveExecutor;
+
+    /** 自动保存启停锁，避免重复启动多个线程 */
+    private final Object autoSaveLock = new Object();
+
     public SessionManager(Path workspace) {
         this.workspace = workspace;
         this.sessionsDir = Helpers.ensureDir(workspace.resolve("sessions"));
@@ -55,6 +65,87 @@ public final class SessionManager {
         
         // 加载 sessionKey -> sessionId 映射
         loadKeyToIdMap();
+
+        // 开始执行定时任务
+        startAutoSave();
+    }
+
+    /**
+     * 启动自动保存线程
+     * 每隔 1 分钟遍历缓存中的会话并执行 save()
+     */
+    public void startAutoSave() {
+        synchronized (autoSaveLock) {
+            if (autoSaveExecutor != null && !autoSaveExecutor.isShutdown()) {
+                return; // 已启动，避免重复启动多个线程
+            }
+
+            autoSaveExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread t = new Thread(r, "session-auto-save");
+                t.setDaemon(true); // 守护线程，不阻止 JVM 退出
+                return t;
+            });
+
+            autoSaveExecutor.scheduleWithFixedDelay(() -> {
+                log.info("会话定时保存任务正在执行...");
+                try {
+                    // 复制快照，避免遍历时 cache 被并发修改
+                    List<Session> snapshot = new ArrayList<>(cache.values());
+
+                    for (Session session : snapshot) {
+                        // 没有历史消息或者为空跳过
+                        if (session == null || session.getMessages().isEmpty()) {
+                            continue;
+                        }
+
+                        try {
+                            // 如你的 Session 有 setUpdatedAt，可在这里顺手更新时间
+                            // session.setUpdatedAt(LocalDateTime.now());
+
+                            save(session);
+                        } catch (Exception e) {
+                            LOG.log(Level.WARNING,
+                                    "自动保存 session 失败：" + session.getKey() + "，原因：" + e.getMessage(), e);
+                        }
+                    }
+                } catch (Exception e) {
+                    LOG.log(Level.WARNING, "自动保存任务执行失败：" + e.getMessage(), e);
+                }
+            }, 3, 5, TimeUnit.MINUTES);
+        }
+    }
+
+    /**
+     * 停止自动保存线程
+     */
+    public void stopAutoSave() {
+        synchronized (autoSaveLock) {
+            if (autoSaveExecutor != null) {
+                autoSaveExecutor.shutdown();
+                autoSaveExecutor = null;
+            }
+        }
+    }
+
+    /**
+     * 优雅关闭自动保存线程
+     */
+    public void shutdown() {
+        synchronized (autoSaveLock) {
+            if (autoSaveExecutor != null) {
+                autoSaveExecutor.shutdown();
+                try {
+                    if (!autoSaveExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+                        autoSaveExecutor.shutdownNow();
+                    }
+                } catch (InterruptedException e) {
+                    autoSaveExecutor.shutdownNow();
+                    Thread.currentThread().interrupt();
+                } finally {
+                    autoSaveExecutor = null;
+                }
+            }
+        }
     }
 
     /**
@@ -829,7 +920,12 @@ public final class SessionManager {
             return 0;
         }
     }
-    
+
+    @Override
+    public void close() throws IOException {
+        shutdown();
+    }
+
     /**
      * 维护报告
      */

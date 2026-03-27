@@ -315,13 +315,16 @@ public class MemoryStore {
                 return CompletableFuture.completedFuture(true);
             }
 
+            // 上一次压缩指针
             int from = session.getLastConsolidated();
+            // 大小减去需要保留的消息数即为压缩数量，从后往前保留
             int toExclusive = session.getMessages().size() - keepCount;
 
             if (toExclusive <= from) {
                 return CompletableFuture.completedFuture(true);
             }
 
+            // 待压缩消息
             oldMessages = session.getMessages().subList(from, toExclusive);
 
             if (oldMessages.isEmpty()) {
@@ -331,7 +334,7 @@ public class MemoryStore {
             log.info("记忆压缩：压缩 {} 条，保留 {} 条", oldMessages.size(), keepCount);
         }
 
-        // 工具调用配对修复
+        // 待压缩的消息将孤立工具调用分别配对修复
         var repairResult = MemoryCompaction.repairToolUseResultPairing(new ArrayList<>(oldMessages));
         List<Map<String, Object>> repairedMessages = repairResult.messages;
         if (repairResult.droppedOrphanCount > 0) {
@@ -343,7 +346,7 @@ public class MemoryStore {
         int maxChunkTokens = maxTokens - MemoryCompaction.SUMMARIZATION_OVERHEAD_TOKENS;
 
         if (estimatedTokens > maxChunkTokens) {
-            log.info("消息总 token 数 {} 超出限制 {}，启用分块压缩", estimatedTokens, maxChunkTokens);
+            log.info("消息总 token 数 {} 超出最大分块数量限制 {}，启用分块压缩", estimatedTokens, maxChunkTokens);
             return consolidateInChunks(session, repairedMessages, provider, model, maxTokens, temperature, archiveAll, keepCount);
         }
 
