@@ -277,8 +277,7 @@ public class SkillsLoader {
      */
     public List<String> getAlwaysSkills() {
         List<String> result = new ArrayList<>();
-        for (Map<String, String> s : listSkills(true)) {
-            Map<String, String> meta = getSkillMetadata(s.get("name"));
+        for (Map<String, String> meta : listSkills(true)) {
             if (meta == null) meta = Collections.emptyMap();
 
             Map<String, Object> skillMeta = parseJavaClawBotMetadata(meta.getOrDefault("metadata", ""));
@@ -296,7 +295,7 @@ public class SkillsLoader {
             }
 
             if (isAlways) {
-                result.add(s.get("name"));
+                result.add(meta.get("name"));
             }
         }
         return result;
