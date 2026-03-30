@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.*;
+import utils.GsonFactory;
 import utils.Helpers;
 
 import java.io.IOException;
@@ -255,11 +256,6 @@ public final class ConfigIO {
      * JSON 字符串解析为 Map
      */
     private static Map<String, Object> parseJsonToMap(String json) throws IOException {
-        ObjectMapper mapper = objectMapper();
-
-        if (json == null || json.isBlank()) {
-            return new LinkedHashMap<>();
-        }
-        return mapper.readValue(json, new TypeReference<Map<String, Object>>() {});
+        return GsonFactory.getGson().fromJson(json, Map.class);
     }
 }

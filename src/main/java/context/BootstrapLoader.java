@@ -1,9 +1,9 @@
 package context;
 
+import cn.hutool.core.io.resource.ResourceUtil;
 import cn.hutool.core.util.StrUtil;
 import config.Config;
 import config.ConfigIO;
-import config.ConfigSchema;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -255,10 +255,12 @@ public class BootstrapLoader {
         String content;
         // 是否开发者
         if (config.getAgents().getDefaults().isDevelopment()){
-            content = doGetContent("AGENTS_DEV.md");
+            content = ResourceUtil.readUtf8Str("templates/AGENTS_DEV.md");
+            content = ifBlankDoGetNew(content, "AGENTS.md");
         }else {
             content = doGetContent("AGENTS.md");
         }
+        content = ifBlankDoGetNew(content, "AGENTS.md");
         // Python：workspace.expanduser().resolve()
         String workspacePath = workspace.toAbsolutePath().normalize().toString();
 
@@ -276,21 +278,41 @@ public class BootstrapLoader {
         return content.replace("{runtime}", runtime).replace("{workspace}", workspacePath);
     }
 
+    private String ifBlankDoGetNew(String content, String name) {
+        if (StrUtil.isBlank(content)) {
+            content = doGetContent(name);
+        }
+        return content;
+    }
+
 
     public String loadIdentity() {
         Config config = ConfigIO.loadConfig(ConfigIO.getConfigPath(workspace));
+        String content = "";
         if (config.getAgents().getDefaults().isDevelopment()){
-            return doGetContent("IDENTITY_DEV.md");
+            content = ResourceUtil.readUtf8Str("templates/IDENTITY_DEV.md");
+            content = ifBlankDoGetNew(content, "IDENTITY.md");
+        }else {
+            content = doGetContent("IDENTITY.md");
         }
-        return doGetContent("IDENTITY.md");
+        content = ifBlankDoGetNew(content, "IDENTITY.md");
+        return content;
     }
 
     public String loadSoul() {
         Config config = ConfigIO.loadConfig(ConfigIO.getConfigPath(workspace));
+        String content = "";
         if (config.getAgents().getDefaults().isDevelopment()){
-            return doGetContent("SOUL_DEV.md");
+            content = ResourceUtil.readUtf8Str("templates/SOUL_DEV.md");
+            content = ifBlankDoGetNew(content, "SOUL.md");
+        }else {
+            content = doGetContent("SOUL.md");
         }
-        return doGetContent("SOUL.md");
+
+        if (StrUtil.isBlank(content)) {
+            content = doGetContent("SOUL.md");
+        }
+        return content;
     }
 
     private String doGetContent(String name) {
@@ -303,17 +325,28 @@ public class BootstrapLoader {
 
     public String loadUser() {
         Config config = ConfigIO.loadConfig(ConfigIO.getConfigPath(workspace));
+        String content = "";
         if (config.getAgents().getDefaults().isDevelopment()){
-            return doGetContent("USER_DEV.md");
+            content = ResourceUtil.readUtf8Str("templates/USER_DEV.md");
+            content = ifBlankDoGetNew(content, "USER.md");
+        }else {
+            content = doGetContent("USER.md");
         }
-        return doGetContent("USER.md");
+        content = ifBlankDoGetNew(content, "USER.md");
+        return content;
     }
 
     public String loadTool() {
         Config config = ConfigIO.loadConfig(ConfigIO.getConfigPath(workspace));
+        String content = "";
         if (config.getAgents().getDefaults().isDevelopment()){
-            return doGetContent("TOOLS_DEV.md");
+            content = ResourceUtil.readUtf8Str("templates/TOOLS_DEV.md");
+            content = ifBlankDoGetNew(content, "TOOLS.md");
+        }else {
+            content = doGetContent("TOOLS.md");
         }
-        return doGetContent("TOOLS.md");
+        content = ifBlankDoGetNew(content, "TOOLS.md");
+
+        return content;
     }
 }

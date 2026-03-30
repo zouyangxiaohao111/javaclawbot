@@ -49,7 +49,7 @@ public final class GatewayRuntime {
     private static final Logger log = LoggerFactory.getLogger(GatewayRuntime.class);
 
     private final Object lifecycleLock = new Object();
-    private final ExecutorService lifecycleExecutor = Executors.newSingleThreadExecutor(r -> {
+    private final ExecutorService lifecycleExecutor = Executors.newCachedThreadPool(r -> {
         Thread t = new Thread(r, "javaclawbot-gateway-runtime");
         t.setDaemon(true);
         return t;

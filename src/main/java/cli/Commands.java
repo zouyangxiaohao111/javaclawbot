@@ -94,21 +94,29 @@ public class Commands implements Runnable {
     }
 
     static void createWorkspaceTemplates(Path workspace) {
-        try { Files.createDirectories(workspace); } catch (IOException ignored) {}
+        try {
+            Files.createDirectories(workspace);
+        } catch (IOException ignored) {
+        }
 
         try {
             Path skills = workspace.resolve("skills");
             Files.createDirectories(skills);
-        } catch (IOException ignored) {}
+        } catch (IOException ignored) {
+        }
 
         Path memoryDir = workspace.resolve("memory");
-        try { Files.createDirectories(memoryDir); } catch (IOException ignored) {}
+        try {
+            Files.createDirectories(memoryDir);
+        } catch (IOException ignored) {
+        }
 
         Path memoryFile = memoryDir.resolve("MEMORY.md");
         if (Files.notExists(memoryFile)) {
             try {
                 Files.writeString(memoryFile, "", StandardCharsets.UTF_8, StandardOpenOption.CREATE_NEW);
-            } catch (IOException ignored) {}
+            } catch (IOException ignored) {
+            }
         }
 
         /*Path historyFile = memoryDir.resolve("HISTORY.md");
@@ -121,7 +129,7 @@ public class Commands implements Runnable {
 
     /**
      * 创建“可热更新 + fallback”的 Provider 代理
-     *
+     * <p>
      * 设计说明：
      * - AgentLoop 依旧只依赖 LLMProvider 抽象
      * - 实际传入的是 HotSwappableProvider（代理）
@@ -215,247 +223,59 @@ public class Commands implements Runnable {
 
         @Override
         public void run() {
-
-            // 支持自定义配置路径和 workspace 路径（对齐 Python 的 --config/--workspace）
             Path configPath = (config != null) ? Paths.get(config).toAbsolutePath() : null;
             Path workspacePath = (workspace != null) ? Paths.get(workspace).toAbsolutePath() : null;
-            RuntimeComponents rt = createRuntimeComponents(configPath, workspacePath);
-            Config config = rt.config;
-            MessageBus bus = new MessageBus();
 
-            // 变成可fallback的
-            // LLMProvider provider = makeProvider(config);
-            LLMProvider provider = makeHotProvider();
+            AgentRuntime agent = new AgentRuntime(configPath, workspacePath);
+            AtomicBoolean shutdownOnce = new AtomicBoolean(false);
 
-            Path cronStorePath = ConfigIO.getDataDir().resolve("cron").resolve("jobs.json");
-            CronService cron = new CronService(cronStorePath, null);
-
-            AgentLoop agentLoop = new AgentLoop(
-                    bus,
-                    provider,
-                    config.getWorkspacePath(),
-                    config.getAgents().getDefaults().getModel(),
-                    config.getAgents().getDefaults().getMaxToolIterations(),
-                    config.getAgents().getDefaults().getTemperature(),
-                    config.getAgents().getDefaults().getMaxTokens(),
-                    config.getAgents().getDefaults().getMemoryWindow(),
-                    config.getAgents().getDefaults().getReasoningEffort(),
-                    config.getTools().getWeb().getSearch().getApiKey(),
-                    config.getTools().getExec(),
-                    cron,
-                    config.getTools().isRestrictToWorkspace(),
-                    null,
-                    config.getTools().getMcpServers(),
-                    config.getChannels(),
-                    rt.runtimeSettings
-            );
-
-
-            BiProgress progress = new BiProgress(agentLoop);
-
-            // 单次模式：直接调用，不需要 bus
-            if (message != null && !message.isBlank()) {
-                String resp = agentLoop.processDirect(
-                        message,
-                        sessionId,
-                        "cli",
-                        "direct",
-                        progress::onProgress
-                ).toCompletableFuture().join();
-                printAgentResponse(resp, markdown);
-                try { agentLoop.closeMcp().toCompletableFuture().join(); } catch (Exception ignored) {}
-                return;
-            }
-
-            cron.setOnJob(job -> {
-                // 防止 cron 作业内部递归调度新作业
-                var cronTool = agentLoop.getCronTool();
-                if (cronTool != null) cronTool.setCronContext(true);
-                try {
-                    return agentLoop.processDirect(
-                            job.getPayload().getMessage(),
-                            "cron:" + job.getId(),
-                            job.getPayload().getChannel() != null ? job.getPayload().getChannel() : "cli",
-                            job.getPayload().getTo() != null ? job.getPayload().getTo() : "direct",
-                            (c, toolHint) -> CompletableFuture.completedFuture(null)
-                    ).thenCompose(resp -> {
-                        if (job.getPayload().isDeliver() && job.getPayload().getTo() != null) {
-                            return bus.publishOutbound(new OutboundMessage(
-                                    job.getPayload().getChannel() != null ? job.getPayload().getChannel() : "cli",
-                                    job.getPayload().getTo(),
-                                    resp != null ? resp : "",
-                                    null,
-                                    null
-                            )).thenApply(x -> resp);
-                        }
-                        return CompletableFuture.completedFuture(resp);
-                    });
-                } finally {
-                    if (cronTool != null) cronTool.setCronContext(false);
-                }
-            });
-
-            // 交互模式：通过 bus 路由（对齐 Python）
-            String cliChannel;
-            String cliChatId;
-            if (sessionId.contains(":")) {
-                String[] parts = sessionId.split(":", 2);
-                cliChannel = parts[0];
-                cliChatId = parts[1];
-            } else {
-                cliChannel = "cli";
-                cliChatId = sessionId;
-            }
-
-            Path histFile = Paths.get(System.getProperty("user.home"), ".javaclawbot", "history", "cli_history");
-            try { Files.createDirectories(histFile.getParent()); } catch (IOException ignored) {}
-
-            Terminal terminal;
-            try {
-                terminal = TerminalBuilder.builder().system(true).build();
-            } catch (IOException e) {
-                throw new CommandLine.ExecutionException(new CommandLine(new Commands()), "Failed to init terminal", e);
-            }
-
-            DefaultHistory history;
-            try {
-                history = new DefaultHistory();
-                history.read(histFile, false);
-            } catch (Exception e) {
-                history = new DefaultHistory(); // 确保是干净的
-            }
-
-            LineReader reader = LineReaderBuilder.builder()
-                    .terminal(terminal)
-                    .history(history)
-                    .build();
-
-            // JLine 有时会把 history 只写到内存，这里确保退出时 flush
-            if (reader instanceof LineReaderImpl impl) {
-                impl.setVariable(LineReader.HISTORY_SIZE, 10000);
-            }
-
-            System.out.println("🐱 Interactive mode (type exit or Ctrl+C to quit)\n");
-
-            CompletableFuture<Void> busTask = CompletableFuture.runAsync(agentLoop::run);
-
-            AtomicBoolean running = new AtomicBoolean(true);
-
-            // turn 同步：一次输入等待一次“非 progress”的回复
-            final AtomicReference<CountDownLatch> turnLatchRef = new AtomicReference<>(new CountDownLatch(0));
-            final AtomicReference<String> turnResponseRef = new AtomicReference<>(null);
-
-            CompletableFuture<Void> outboundTask = CompletableFuture.runAsync(() -> {
-                while (running.get()) {
+            Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                if (shutdownOnce.compareAndSet(false, true)) {
                     try {
-                        OutboundMessage out = bus.consumeOutbound(1, TimeUnit.SECONDS);
-                        // by zcw 发现如果是 outbound.take 然后使用同一个线程池 造成无限等待, 并不会消费到消息
-                                /*.toCompletableFuture().get(1, TimeUnit.SECONDS);*/
-                        if (out == null) continue;
-
-                        Map<String, Object> meta = out.getMetadata() != null ? out.getMetadata() : Map.of();
-                        boolean isProgress = Boolean.TRUE.equals(meta.get("_progress"));
-                        boolean isToolHint = Boolean.TRUE.equals(meta.get("_tool_hint"));
-
-                        if (isProgress) {
-                            var ch = agentLoop.getChannelsConfig();
-                            if (ch != null && isToolHint && !ch.isSendToolHints()) continue;
-                            if (ch != null && !isToolHint && !ch.isSendProgress()) continue;
-                            System.out.println("  ↳ " + (out.getContent() == null ? "" : out.getContent()));
-                            continue;
-                        }
-
-                        // 非 progress：如果当前 turn 在等待，则把内容交给 turnLatch；否则当作异步消息直接打印
-                        CountDownLatch latch = turnLatchRef.get();
-                        if (latch != null && latch.getCount() > 0) {
-                            if (out.getContent() != null && !out.getContent().isBlank()) {
-                                turnResponseRef.compareAndSet(null, out.getContent());
-                            }
-                            latch.countDown();
-                        } else {
-                            if (out.getContent() != null && !out.getContent().isBlank()) {
-                                printAgentResponse(out.getContent(), markdown);
-                            }
-                        }
-                    } catch (CancellationException ce) {
-                        break;
+                        agent.stop().toCompletableFuture().join();
                     } catch (Exception ignored) {
                     }
                 }
-            });
+            }, "javaclawbot-agent-shutdown"));
 
             try {
-                while (true) {
-                    String userInput;
+                agent.start().toCompletableFuture().join();
+
+                if (message != null && !message.isBlank()) {
+                    String[] pair = splitSession(sessionId);
+                    String resp = agent.processDirect(
+                            message,
+                            sessionId,
+                            pair[0],
+                            pair[1],
+                            null
+                    ).toCompletableFuture().join();
+
+                    printAgentResponse(resp, markdown);
+                    return;
+                }
+
+                new AgentConsoleSession(agent, sessionId, markdown).run();
+
+            } catch (Exception e) {
+                log.error("启动失败!", e);
+                throw e;
+            } finally {
+                if (shutdownOnce.compareAndSet(false, true)) {
                     try {
-                        userInput = reader.readLine("You: ");
-                    } catch (UserInterruptException e) {
-                        System.out.println("\nGoodbye!");
-                        break;
-                    } catch (EndOfFileException e) {
-                        System.out.println("\nGoodbye!");
-                        break;
-                    }
-
-                    if (userInput == null) continue;
-                    String command = userInput.trim();
-                    if (command.isEmpty()) continue;
-
-                    if (isExitCommand(command)) {
-                        System.out.println("\nGoodbye!");
-                        break;
-                    }
-
-                    // history 写入
-                    try { history.add(userInput); history.save(); } catch (Exception ignored) {}
-
-                    // 准备等待本次回复
-                    turnResponseRef.set(null);
-                    CountDownLatch latch = new CountDownLatch(1);
-                    turnLatchRef.set(latch);
-
-                    InboundMessage in = new InboundMessage(cliChannel, "user", cliChatId, userInput, null, null);
-                    bus.publishInbound(in).toCompletableFuture().join();
-
-                    // 等待回复（可改更小/更大超时）
-                    System.out.println("[dim]javaclawbot is thinking...[/dim]");
-                    boolean ok = latch.await(10, TimeUnit.MINUTES);
-                    String resp = turnResponseRef.get();
-                    turnLatchRef.set(new CountDownLatch(0));
-
-                    if (!ok) {
-                        System.out.println("Timed out waiting for response.");
-                    } else if (resp != null && !resp.isBlank()) {
-                        printAgentResponse(resp, markdown);
+                        agent.stop().toCompletableFuture().join();
+                    } catch (Exception ignored) {
                     }
                 }
-            } catch (InterruptedException ie) {
-                Thread.currentThread().interrupt();
-            } finally {
-                running.set(false);
-                agentLoop.stop();
-                outboundTask.cancel(true);
-                try { CompletableFuture.allOf(busTask, outboundTask).join(); } catch (Exception ignored) {}
-                try { agentLoop.closeMcp().toCompletableFuture().join(); } catch (Exception ignored) {}
-                try { history.save(); } catch (Exception ignored) {}
             }
         }
 
-        static class BiProgress {
-            final AgentLoop agentLoop;
-            BiProgress(AgentLoop agentLoop) { this.agentLoop = agentLoop; }
-
-            CompletionStage<Void> onProgress(String content, boolean toolHint) {
-                var ch = agentLoop.getChannelsConfig();
-                if (ch != null && toolHint && !ch.isSendToolHints()) {
-                    return CompletableFuture.completedFuture(null);
-                }
-                if (ch != null && !toolHint && !ch.isSendProgress()) {
-                    return CompletableFuture.completedFuture(null);
-                }
-                System.out.println("  ↳ " + (content == null ? "" : content));
-                return CompletableFuture.completedFuture(null);
+        private static String[] splitSession(String sessionId) {
+            if (sessionId != null && sessionId.contains(":")) {
+                String[] parts = sessionId.split(":", 2);
+                return new String[]{parts[0], parts[1]};
             }
+            return new String[]{"cli", sessionId != null ? sessionId : "direct"};
         }
     }
 
@@ -496,7 +316,10 @@ public class Commands implements Runnable {
             ChannelsCmd.Login.class
     })
     static class ChannelsCmd implements Runnable {
-        @Override public void run() { throw new ParameterException(new CommandLine(this), "Missing channels subcommand"); }
+        @Override
+        public void run() {
+            throw new ParameterException(new CommandLine(this), "Missing channels subcommand");
+        }
 
         @Command(name = "status", description = "Show channel status.")
         static class Status implements Runnable {
@@ -516,7 +339,10 @@ public class Commands implements Runnable {
                 System.out.println("Email: " + (config.getChannels().getEmail().isEnabled() ? "✓" : "✗") + " " + safe(config.getChannels().getEmail().getImapHost()));
             }
 
-            static String safe(String s) { return (s == null || s.isBlank()) ? "not configured" : s; }
+            static String safe(String s) {
+                return (s == null || s.isBlank()) ? "not configured" : s;
+            }
+
             static String mask(String s) {
                 if (s == null || s.isBlank()) return "not configured";
                 int n = Math.min(10, s.length());
@@ -541,7 +367,10 @@ public class Commands implements Runnable {
             CronCmd.RunCmd.class
     })
     static class CronCmd implements Runnable {
-        @Override public void run() { throw new ParameterException(new CommandLine(this), "Missing cron subcommand"); }
+        @Override
+        public void run() {
+            throw new ParameterException(new CommandLine(this), "Missing cron subcommand");
+        }
 
         @Command(name = "list", description = "List scheduled jobs.")
         static class ListCmd implements Runnable {
@@ -743,7 +572,10 @@ public class Commands implements Runnable {
                     System.out.println("Failed to run job " + jobId);
                 }
 
-                try { agentLoop.closeMcp().toCompletableFuture().join(); } catch (Exception ignored) {}
+                try {
+                    agentLoop.closeMcp().toCompletableFuture().join();
+                } catch (Exception ignored) {
+                }
             }
         }
     }
@@ -752,7 +584,10 @@ public class Commands implements Runnable {
             ProviderCmd.LoginCmd.class
     })
     static class ProviderCmd implements Runnable {
-        @Override public void run() { throw new ParameterException(new CommandLine(this), "Missing provider subcommand"); }
+        @Override
+        public void run() {
+            throw new ParameterException(new CommandLine(this), "Missing provider subcommand");
+        }
 
         @Command(name = "login", description = "Authenticate with an OAuth provider.")
         static class LoginCmd implements Runnable {
@@ -822,7 +657,7 @@ public class Commands implements Runnable {
                         " (user: " + summary.messageCounts().user() +
                         ", assistant: " + summary.messageCounts().assistant() + ")");
                 System.out.println("Tool calls: " + summary.messageCounts().toolCalls());
-                
+
                 if (summary.totals() != null) {
                     System.out.println("\nToken Usage:");
                     System.out.println("  Input: " + formatNumber(summary.totals().input()));

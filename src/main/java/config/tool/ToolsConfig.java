@@ -1,9 +1,12 @@
 package config.tool;
 
+import cn.hutool.json.JSON;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import config.mcp.MCPServerConfig;
 import lombok.Data;
+import utils.GsonFactory;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -15,6 +18,7 @@ public class ToolsConfig {
     private WebToolsConfig web = new WebToolsConfig();
     private ExecToolConfig exec = new ExecToolConfig();
     private boolean restrictToWorkspace = false;
+    @JsonProperty("mcpServers")
     private Map<String, MCPServerConfig> mcpServers = new HashMap<>();
 
     public WebToolsConfig getWeb() {

@@ -10,6 +10,8 @@ import agent.tool.mcp.McpManager;
 import bus.InboundMessage;
 import bus.MessageBus;
 import bus.OutboundMessage;
+import cn.hutool.core.io.resource.ClassPathResource;
+import cn.hutool.core.io.resource.ResourceUtil;
 import cn.hutool.core.util.StrUtil;
 import config.agent.AgentRuntimeSettings;
 import config.ConfigSchema;
@@ -33,11 +35,13 @@ import session.SessionManager;
 import skills.SkillsLoader;
 import utils.GsonFactory;
 
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReentrantLock;
 
 import static utils.Helpers.stripThink;
@@ -160,12 +164,25 @@ public class AgentLoop {
         this.runtimeSettings = runtimeSettings;
 
         this.sessions = (sessionManager != null) ? sessionManager : new SessionManager(workspace);
-        this.executor = Executors.newCachedThreadPool(r -> {
-            Thread t = new Thread(r);
-            t.setDaemon(true);
-            t.setName("javaclawbot-agent-" + t.getId());
-            return t;
-        });
+        this.executor = new ThreadPoolExecutor(
+                Runtime.getRuntime().availableProcessors(),
+                Math.max(4, Runtime.getRuntime().availableProcessors()),
+                60L,
+                TimeUnit.SECONDS,
+                new LinkedBlockingQueue<>(),
+                new ThreadFactory() {
+                    private final ThreadFactory delegate = Executors.defaultThreadFactory();
+                    private final AtomicInteger idx = new AtomicInteger(1);
+
+                    @Override
+                    public Thread newThread(Runnable r) {
+                        Thread t = delegate.newThread(r);
+                        t.setName("agent-" + idx.getAndIncrement());
+                        t.setDaemon(false); // 关键：不要是 daemon
+                        return t;
+                    }
+                }
+        );
         this.subagents = new SubagentManager(
                 provider, workspace, bus, this.model, this.temperature, this.maxTokens,
                 this.reasoningEffort, braveApiKey, this.execConfig, restrictToWorkspace, null
@@ -498,14 +515,31 @@ public class AgentLoop {
             });
         }
 
+        // 获取命令
+        String cmd = msg.getContent() == null ? "" : msg.getContent().trim().toLowerCase(Locale.ROOT);
+
+        // init初始化命令
+        if ("/init".equalsIgnoreCase(cmd)) {
+            String initPrompt = ResourceUtil.readUtf8Str("templates/init/INIT.md");
+            commandManager.addLocalCommand(new LocalCommand(cmd, ""));
+            bus.publishInbound(new InboundMessage(msg.getChannel(), msg.getSenderId(), msg.getChatId(), initPrompt));
+            return CompletableFuture.completedFuture(new OutboundMessage(
+                    msg.getChannel(),
+                    msg.getChatId(),
+                    "init命令已执行",
+                    List.of(),
+                    Map.of()
+            ));
+        }
+
         String sessionKey = (sessionKeyOverride != null) ? sessionKeyOverride : msg.getSessionKey();
         // 新任务开始前清理 stop 标记
         clearStopRequested(sessionKey);
 
         Session session = sessions.getOrCreate(sessionKey);
-        String cmd = msg.getContent() == null ? "" : msg.getContent().trim().toLowerCase(Locale.ROOT);
 
-        if ("/new".equals(cmd)) {
+
+        if ("/new".equalsIgnoreCase(cmd)) {
             String output = "历史会话完成压缩记忆, 新会话已开始";
             commandManager.addLocalCommand(new LocalCommand(cmd, output));
             // 发给用户
@@ -515,7 +549,7 @@ public class AgentLoop {
             return handleNewCommand(msg, session);
         }
 
-        if ("/help".equals(cmd)) {
+        if ("/help".equalsIgnoreCase(cmd)) {
             String output = "javaclawbot 命令:\n/new — 开始新对话\n/stop — 停止当前任务\n/help — 显示可用命令";
             commandManager.addLocalCommand(new LocalCommand(cmd, output));
             return CompletableFuture.completedFuture(new OutboundMessage(
@@ -527,7 +561,7 @@ public class AgentLoop {
             ));
         }
 
-        if ("/mcp-reload".equals(cmd) || "/mcp-init".equals(cmd)) {
+        if ("/mcp-reload".equalsIgnoreCase(cmd) || "/mcp-init".equalsIgnoreCase(cmd)) {
             String cmdResp = mcpManager.refreshTools().toCompletableFuture().join();
             String output = StrUtil.isBlank(cmdResp) ? "🐱 MCP 插件已重新加载。" : cmdResp;
             commandManager.addLocalCommand(new LocalCommand(cmd, output));
@@ -600,6 +634,8 @@ public class AgentLoop {
             );
         });
     }
+
+
 
     /**
      * 尝试压缩上下文
@@ -980,7 +1016,7 @@ public class AgentLoop {
                     assistant.put("timestamp", LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
                     memoryStore.appendToToday(GsonFactory.getGson().toJson(assistant));
 
-                    log.info("LLM 回复:\n{}", clean);
+                    log.info("LLM 回复:\n{} \n\n", clean);
 
                     List<Map<String, Object>> updated = context.addAssistantMessage(
                             messages,

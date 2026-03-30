@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.JavaType;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import io.modelcontextprotocol.json.McpJsonMapper;
 import io.modelcontextprotocol.json.TypeRef;
+import org.jetbrains.annotations.NotNull;
 
 import java.io.IOException;
 
@@ -26,10 +27,18 @@ public final class JacksonMcpJsonMapper implements McpJsonMapper {
     @Override
     public <T> T readValue(String content, Class<T> type) throws IOException {
         try {
+            content = structToJson(content);
             return this.jsonMapper.readValue(content, type);
         } catch (JsonProcessingException ex) {
             throw new IOException("Failed to read value", ex);
         }
+    }
+
+    private static @NotNull String structToJson(String content) {
+        if (content.endsWith(",")) {
+            content = content.substring(0, content.length() - 1);
+        }
+        return content;
     }
 
     @Override
@@ -47,6 +56,7 @@ public final class JacksonMcpJsonMapper implements McpJsonMapper {
     public <T> T readValue(String content, TypeRef<T> type) throws IOException {
         JavaType javaType = this.jsonMapper.getTypeFactory().constructType(type.getType());
         try {
+            content = structToJson(content);
             if (content.equalsIgnoreCase(windowContent)) {
                 return null;
             }

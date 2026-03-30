@@ -217,8 +217,8 @@ public final class SessionManager implements Closeable {
         
         ReentrantLock lock = sessionLocks.computeIfAbsent(key, k -> new ReentrantLock());
 
-        lock.lock();
         try {
+            lock.lock();
             Path target = getSessionPath(sessionId);
             Helpers.ensureDir(target.getParent());
 
