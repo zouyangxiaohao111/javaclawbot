@@ -18,6 +18,8 @@ import java.util.function.Consumer;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
 
+import static javax.swing.UIManager.get;
+
 /**
  * Bootstrap 文件加载器
  * 对齐 OpenClaw 的 bootstrap-files.ts 和 pi-embedded-helpers/bootstrap.ts
@@ -217,7 +219,11 @@ public class BootstrapLoader {
             return null;
         }
         file = applyContextModeFilter(List.of(file)).get(0);
-        file = applyCharLimits(List.of(file)).get(0);
+        List<BootstrapFile> bootstrapFiles = applyCharLimits(List.of(file));
+        if (bootstrapFiles.isEmpty()) {
+            return file;
+        }
+        file = bootstrapFiles.get(0);
         return file;
     }
 
