@@ -7,8 +7,7 @@ import agent.tool.ToolRegistry;
 import agent.tool.WebFetchTool;
 import agent.tool.WebSearchTool;
 import bus.MessageBus;
-import config.ConfigSchema;
-import config.tool.ExecToolConfig;
+import config.tool.ToolsConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import providers.LLMProvider;
@@ -42,8 +41,7 @@ public class LocalSubagentExecutor implements SubagentExecutor {
 
     private final LLMProvider provider;
     private final Path workspace;
-    private final ExecToolConfig execConfig;
-    private final String braveApiKey;
+    private final ToolsConfig toolsConfig;
     private final boolean restrictToWorkspace;
     private final ExecutorService executor;
 
@@ -67,16 +65,14 @@ public class LocalSubagentExecutor implements SubagentExecutor {
     public LocalSubagentExecutor(
             LLMProvider provider,
             Path workspace,
-            ExecToolConfig execConfig,
-            String braveApiKey,
+            ToolsConfig toolsConfig,
             boolean restrictToWorkspace,
             SubagentRegistry registry,
             MessageBus messageBus
     ) {
         this.provider = Objects.requireNonNull(provider);
         this.workspace = Objects.requireNonNull(workspace);
-        this.execConfig = execConfig != null ? execConfig : new ExecToolConfig();
-        this.braveApiKey = braveApiKey;
+        this.toolsConfig = toolsConfig;
         this.restrictToWorkspace = restrictToWorkspace;
         this.registry = registry != null ? registry : SubagentRegistry.getInstance();
         this.messageBus = messageBus;
@@ -88,18 +84,6 @@ public class LocalSubagentExecutor implements SubagentExecutor {
         });
     }
 
-    /**
-     * 兼容旧构造函数
-     */
-    public LocalSubagentExecutor(
-            LLMProvider provider,
-            Path workspace,
-            ExecToolConfig execConfig,
-            String braveApiKey,
-            boolean restrictToWorkspace
-    ) {
-        this(provider, workspace, execConfig, braveApiKey, restrictToWorkspace, null, null);
-    }
 
     /**
      * 设置 SubagentManager 引用（由 SubagentManager 构造时调用）
@@ -282,16 +266,16 @@ public class LocalSubagentExecutor implements SubagentExecutor {
 
         // Shell工具
         tools.register(new ExecTool(
-                execConfig.getTimeout(),
+                toolsConfig.getExec().getTimeout(),
                 workspace.toString(),
                 null, null,
                 restrictToWorkspace,
-                execConfig.getPathAppend()
+                toolsConfig.getExec().getPathAppend()
         ));
 
         // Web工具
-        tools.register(new WebSearchTool(braveApiKey, null));
-        tools.register(new WebFetchTool(null));
+        tools.register(new WebSearchTool(toolsConfig.getWeb().getSearch().getApiKey(), toolsConfig.getWeb().getSearch().getMaxResults(), toolsConfig.getWeb().getSearch().getProxy()));
+        tools.register(new WebFetchTool(toolsConfig.getWeb().getFetch().getMaxChars(), toolsConfig.getWeb().getFetch().getProxy()));
 
         // ========== 关键：根据深度判断是否注册spawn/subagents工具 ==========
         int currentDepth = record.getDepth();

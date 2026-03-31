@@ -207,7 +207,7 @@ public class ExecTool extends Tool {
         boolean isWindows = isWindows();
 
         List<String> cmd = isWindows
-                ? List.of("cmd.exe", "/c", command)
+                ? List.of("cmd.exe", "/c", "chcp 65001 >nul && " + command)
                 : List.of("/bin/sh", "-c", command);
 
         ProcessBuilder pb = new ProcessBuilder(cmd);

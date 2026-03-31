@@ -19,102 +19,125 @@ public class ProvidersConfig {
     }
 
     private void initDefaultModelConfigs() {
-        // OpenAI
+        // OpenAI - 2026年3月更新
         openai.setModelConfigs(List.of(
                 model("gpt-4o", "gpt4o", ModelType.VISION, 16384),
                 model("gpt-4o-mini", "gpt4o-mini", ModelType.CHAT, 16384),
-                model("gpt-4-turbo", "gpt4-turbo", ModelType.VISION, 4096),
-                model("gpt-3.5-turbo", "gpt35", ModelType.CHAT, 4096),
                 model("o1", "o1", ModelType.CHAT, 100000),
                 model("o1-mini", "o1-mini", ModelType.CHAT, 65536),
-                model("o3-mini", "o3-mini", ModelType.CHAT, 100000)
+                model("o3-mini", "o3-mini", ModelType.CHAT, 100000),
+                model("gpt-4-turbo", "gpt4-turbo", ModelType.VISION, 4096),
+                model("gpt-3.5-turbo", "gpt35", ModelType.CHAT, 4096)
         ));
 
-        // Anthropic
+        // Anthropic - 2026年3月更新 (基于官方SDK)
         anthropic.setModelConfigs(List.of(
-                model("claude-sonnet-4-20250514", "claude-sonnet-4", ModelType.VISION, 64000),
+                model("claude-opus-4-6", "claude-opus-4.6", ModelType.VISION, 32000),
+                model("claude-sonnet-4-6", "claude-sonnet-4.6", ModelType.VISION, 64000),
+                model("claude-haiku-4-5", "claude-haiku-4.5", ModelType.VISION, 8192),
+                model("claude-opus-4-5", "claude-opus-4.5", ModelType.VISION, 32000),
+                model("claude-sonnet-4-5", "claude-sonnet-4.5", ModelType.VISION, 64000),
+                model("claude-opus-4-0", "claude-opus-4", ModelType.VISION, 16384),
+                model("claude-sonnet-4-0", "claude-sonnet-4", ModelType.VISION, 64000),
                 model("claude-3-5-sonnet-20241022", "claude-3.5-sonnet", ModelType.VISION, 8192),
                 model("claude-3-5-haiku-20241022", "claude-3.5-haiku", ModelType.CHAT, 8192),
-                model("claude-3-opus-20240229", "claude-3-opus", ModelType.VISION, 4096)
+                model("claude-3-haiku-20240307", "claude-3-haiku", ModelType.CHAT, 4096)
         ));
 
-        // DeepSeek
+        // DeepSeek - 2026年3月更新
         deepseek.setModelConfigs(List.of(
                 model("deepseek-chat", "deepseek-chat", ModelType.CHAT, 8192),
                 model("deepseek-reasoner", "deepseek-reasoner", ModelType.CHAT, 8192)
         ));
 
-        // 智谱 GLM (zhipu)
+        // 智谱 GLM (zhipu) - 2026年3月更新 (基于官方文档)
         zhipu.setModelConfigs(List.of(
-                model("glm-4-plus", "glm-4-plus", ModelType.CHAT, 128000),
-                model("glm-4-0520", "glm-4", ModelType.CHAT, 128000),
-                model("glm-4-flash", "glm-4-flash", ModelType.CHAT, 128000),
+                model("glm-5", "glm-5", ModelType.CHAT, 131072),
+                model("glm-5-turbo", "glm-5-turbo", ModelType.CHAT, 131072),
+                model("glm-4.7", "glm-4.7", ModelType.CHAT, 131072),
+                model("glm-4.7-flashx", "glm-4.7-flashx", ModelType.CHAT, 131072),
+                model("glm-4.6", "glm-4.6", ModelType.CHAT, 131072),
+                model("glm-4.5-air", "glm-4.5-air", ModelType.CHAT, 98304),
+                model("glm-4.5-airx", "glm-4.5-airx", ModelType.CHAT, 98304),
+                model("glm-4-long", "glm-4-long", ModelType.CHAT, 4096),
+                model("glm-4.7-flash", "glm-4.7-flash", ModelType.CHAT, 131072),
+                model("glm-4.5-flash", "glm-4.5-flash", ModelType.CHAT, 98304),
+                model("glm-4-flash", "glm-4-flash", ModelType.CHAT, 16384),
                 model("glm-4v-plus", "glm-4v", ModelType.VISION, 8192)
         ));
 
-        // 阿里云 DashScope (通义千问)
+        // 阿里云 DashScope (通义千问) - 2026年3月更新 (基于官方文档)
         dashscope.setModelConfigs(List.of(
-                model("qwen-max", "qwen-max", ModelType.CHAT, 32768),
-                model("qwen-plus", "qwen-plus", ModelType.CHAT, 131072),
+                model("qwen3-max", "qwen3-max", ModelType.CHAT, 32768),
+                model("qwen3.5-plus", "qwen3.5-plus", ModelType.CHAT, 65536),
+                model("qwen-plus", "qwen-plus", ModelType.CHAT, 32768),
+                model("qwen-max", "qwen-max", ModelType.CHAT, 8192),
                 model("qwen-turbo", "qwen-turbo", ModelType.CHAT, 131072),
                 model("qwen-vl-max", "qwen-vl", ModelType.VISION, 8192),
                 model("qwen-long", "qwen-long", ModelType.CHAT, 1000000)
         ));
 
-        // Groq
+        // Groq - 2026年3月更新
         groq.setModelConfigs(List.of(
                 model("llama-3.3-70b-versatile", "llama-3.3-70b", ModelType.CHAT, 8192),
                 model("llama-3.1-8b-instant", "llama-3.1-8b", ModelType.CHAT, 8192),
                 model("mixtral-8x7b-32768", "mixtral-8x7b", ModelType.CHAT, 32768)
         ));
 
-        // Google Gemini
+        // Google Gemini - 2026年3月更新
         gemini.setModelConfigs(List.of(
+                model("gemini-2.5-pro", "gemini-2.5-pro", ModelType.VISION, 65536),
+                model("gemini-2.5-flash", "gemini-2.5-flash", ModelType.VISION, 65536),
                 model("gemini-2.0-flash", "gemini-2.0-flash", ModelType.VISION, 8192),
                 model("gemini-1.5-pro", "gemini-1.5-pro", ModelType.VISION, 8192),
-                model("gemini-1.5-flash", "gemini-1.5-flash", ModelType.VISION, 8192),
-                model("gemini-1.0-pro", "gemini-pro", ModelType.CHAT, 8192)
+                model("gemini-1.5-flash", "gemini-1.5-flash", ModelType.VISION, 8192)
         ));
 
-        // Moonshot (月之暗面)
+        // Moonshot (月之暗面) - 2026年3月更新 (基于官方文档)
         moonshot.setModelConfigs(List.of(
+                model("kimi-k2.5", "kimi-k2.5", ModelType.VISION, 131072),
+                model("kimi-k2", "kimi-k2", ModelType.CHAT, 131072),
                 model("moonshot-v1-8k", "moonshot-v1-8k", ModelType.CHAT, 8192),
                 model("moonshot-v1-32k", "moonshot-v1-32k", ModelType.CHAT, 32768),
                 model("moonshot-v1-128k", "moonshot-v1-128k", ModelType.CHAT, 131072)
         ));
 
-        // MiniMax
+        // MiniMax - 2026年3月更新
         minimax.setModelConfigs(List.of(
                 model("abab6.5s-chat", "abab6.5s", ModelType.CHAT, 245760),
                 model("abab6.5g-chat", "abab6.5g", ModelType.CHAT, 245760),
                 model("abab6.5t-chat", "abab6.5t", ModelType.CHAT, 245760)
         ));
 
-        // SiliconFlow (硅基流动)
+        // SiliconFlow (硅基流动) - 2026年3月更新
         siliconflow.setModelConfigs(List.of(
                 model("Qwen/Qwen2.5-72B-Instruct", "qwen2.5-72b", ModelType.CHAT, 8192),
                 model("deepseek-ai/DeepSeek-V3", "deepseek-v3", ModelType.CHAT, 8192),
                 model("meta-llama/Llama-3.3-70B-Instruct", "llama-3.3-70b", ModelType.CHAT, 8192)
         ));
 
-        // OpenRouter
+        // OpenRouter - 2026年3月更新
         openrouter.setModelConfigs(List.of(
-                model("anthropic/claude-sonnet-4", "claude-sonnet-4", ModelType.VISION, 64000),
+                model("anthropic/claude-opus-4-6", "claude-opus-4.6", ModelType.VISION, 32000),
+                model("anthropic/claude-sonnet-4-6", "claude-sonnet-4.6", ModelType.VISION, 64000),
                 model("openai/gpt-4o", "gpt-4o", ModelType.VISION, 16384),
+                model("google/gemini-2.5-pro", "gemini-2.5-pro", ModelType.VISION, 65536),
                 model("google/gemini-2.0-flash-exp:free", "gemini-2.0-flash-free", ModelType.VISION, 8192)
         ));
 
-        // 火山引擎
+        // 火山引擎 - 2026年3月更新
         volcengine.setModelConfigs(List.of(
                 model("doubao-pro-32k", "doubao-pro-32k", ModelType.CHAT, 32768),
                 model("doubao-pro-128k", "doubao-pro-128k", ModelType.CHAT, 131072),
                 model("doubao-lite-32k", "doubao-lite-32k", ModelType.CHAT, 32768)
         ));
 
-        // AIHubMix
+        // AIHubMix - 2026年3月更新
         aihubmix.setModelConfigs(List.of(
                 model("gpt-4o", "gpt-4o", ModelType.VISION, 16384),
-                model("claude-sonnet-4-20250514", "claude-sonnet-4", ModelType.VISION, 64000),
+                model("claude-opus-4-6", "claude-opus-4.6", ModelType.VISION, 32000),
+                model("claude-sonnet-4-6", "claude-sonnet-4.6", ModelType.VISION, 64000),
+                model("gemini-2.5-pro", "gemini-2.5-pro", ModelType.VISION, 65536),
                 model("gemini-2.0-flash", "gemini-2.0-flash", ModelType.VISION, 8192)
         ));
     }

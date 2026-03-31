@@ -88,8 +88,24 @@ public class AgentLoopQueue {
     private final Map<String, QueueConfig> sessionConfigs = new ConcurrentHashMap<>();
     private final QueueConfig defaultConfig;
 
+    /**
+     * 队列执行器（独立线程池，避免与 AgentLoop 共享导致死锁）
+     *
+     * 为什么需要独立线程池：
+     * - executeImmediately 中使用 join() 等待任务完成
+     * - 如果共享 AgentLoop 的 executor，线程会被 join() 阻塞
+     * - AgentLoop 的 step 无法执行，造成死锁
+     */
+    private final ExecutorService queueExecutor;
+
     private volatile boolean running = true;
 
+    /**
+     * 完整构造函数
+     *
+     * @param maxConcurrent 最大并发数
+     * @param defaultConfig 默认队列配置
+     */
     public AgentLoopQueue(int maxConcurrent, QueueConfig defaultConfig) {
         this.maxConcurrent = maxConcurrent;
         this.globalLane = new Semaphore(maxConcurrent);
@@ -99,8 +115,14 @@ public class AgentLoopQueue {
             t.setDaemon(true);
             return t;
         });
+        // 独立线程池，专门用于队列调度
+        this.queueExecutor = Executors.newCachedThreadPool(r -> {
+            Thread t = new Thread(r, "agent-queue-executor");
+            t.setDaemon(true);
+            return t;
+        });
 
-        LOG.info("AgentLoopQueue initialized: maxConcurrent={}, defaultMode={}", 
+        LOG.info("AgentLoopQueue initialized: maxConcurrent={}, defaultMode={}",
             maxConcurrent, this.defaultConfig.mode());
     }
 
@@ -288,10 +310,11 @@ public class AgentLoopQueue {
         CompletableFuture<T> result = new CompletableFuture<>();
         lane.currentRun = result;
 
+        // 使用共享的 executor，避免 ForkJoinPool.commonPool() 被阻塞
         CompletableFuture.runAsync(() -> {
             lane.currentThread = Thread.currentThread();
             long startedAt = System.currentTimeMillis();
-            
+
             try {
                 // 获取全局 Lane 许可
                 globalLane.acquire();
@@ -301,7 +324,7 @@ public class AgentLoopQueue {
                     try {
                         long waitedMs = System.currentTimeMillis() - startedAt;
                         if (waitedMs > 2000) {
-                            LOG.info("Task started after {}ms wait: session={}, desc={}", 
+                            LOG.info("Task started after {}ms wait: session={}, desc={}",
                                 waitedMs, sessionKey, description);
                         }
 
@@ -325,11 +348,11 @@ public class AgentLoopQueue {
             } finally {
                 lane.currentThread = null;
                 lane.currentRun = null;
-                
+
                 // 检查是否有排队任务
                 processNextInQueue(lane, sessionKey);
             }
-        });
+        }, this.queueExecutor);  // 使用独立线程池，避免与 AgentLoop 共享导致死锁
 
         return result;
     }
@@ -440,6 +463,7 @@ public class AgentLoopQueue {
     public void shutdown() {
         running = false;
         scheduler.shutdownNow();
+        queueExecutor.shutdownNow();  // 关闭独立线程池
 
         // 取消所有排队任务
         for (SessionLane lane : sessionLanes.values()) {

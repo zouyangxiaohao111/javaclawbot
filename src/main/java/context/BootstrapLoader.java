@@ -340,7 +340,7 @@ public class BootstrapLoader {
         Config config = ConfigIO.loadConfig(ConfigIO.getConfigPath(workspace));
         String content = "";
         if (config.getAgents().getDefaults().isDevelopment()){
-            content = doGetDevContent("TOOL_DEV.md");
+            content = doGetDevContent("TOOLS_DEV.md");
         }else {
             content = doGetContent("TOOLS.md");
         }

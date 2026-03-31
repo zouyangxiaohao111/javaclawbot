@@ -10,17 +10,17 @@ import agent.tool.mcp.McpManager;
 import bus.InboundMessage;
 import bus.MessageBus;
 import bus.OutboundMessage;
-import cn.hutool.core.collection.CollUtil;
-import cn.hutool.core.io.resource.ClassPathResource;
 import cn.hutool.core.io.resource.ResourceUtil;
 import cn.hutool.core.util.StrUtil;
 import config.Config;
 import config.agent.AgentRuntimeSettings;
-import config.ConfigSchema;
+
 import config.channel.ChannelsConfig;
 import config.mcp.MCPServerConfig;
 import config.provider.model.ModelConfig;
-import config.tool.ExecToolConfig;
+import config.tool.ToolsConfig;
+import config.tool.WebFetchConfig;
+import config.tool.WebSearchConfig;
 import context.ContextBuilder;
 import context.ContextOverflowDetector;
 import context.ContextWindowDiscovery;
@@ -38,7 +38,6 @@ import session.SessionManager;
 import skills.SkillsLoader;
 import utils.GsonFactory;
 
-import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
@@ -69,14 +68,11 @@ public class AgentLoop {
     private final int contextWindow;
     private final int memoryWindow;
     private final String reasoningEffort;
-    private final String braveApiKey;
-    private final ExecToolConfig execConfig;
     private final CronService cronService;
     private final boolean restrictToWorkspace;
     /**
      * 是否启用思考模式（保留推理内容）
      */
-    private final boolean enableThink;
     private final ContextBuilder context;
     private final SessionManager sessions;
     private final SubagentManager subagents;
@@ -103,13 +99,12 @@ public class AgentLoop {
      * 独立的压缩线程池，不和主 AgentLoop 共用
      */
     private final ExecutorService consolidationExecutor =
-            Executors.newSingleThreadExecutor(r -> {
+            Executors.newCachedThreadPool(r -> {
                 Thread t = new Thread(r, "memory-consolidation");
                 t.setDaemon(true);
                 return t;
             });
 
-    private final Set<CompletableFuture<?>> consolidationTasks = ConcurrentHashMap.newKeySet();
     private final ConcurrentHashMap<String, ReentrantLock> consolidationLocks = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, CopyOnWriteArrayList<CompletableFuture<?>>> activeTasks = new ConcurrentHashMap<>();
 
@@ -150,8 +145,6 @@ public class AgentLoop {
             Integer contextWindow,
             Integer memoryWindow,
             String reasoningEffort,
-            String braveApiKey,
-            ExecToolConfig execConfig,
             CronService cronService,
             boolean restrictToWorkspace,
             SessionManager sessionManager,
@@ -170,19 +163,9 @@ public class AgentLoop {
         this.memoryWindow = (memoryWindow != null) ? memoryWindow : 100;
         this.reasoningEffort = reasoningEffort;
         this.contextWindow = contextWindow;
-        this.braveApiKey = braveApiKey;
-        this.execConfig = (execConfig != null) ? execConfig : new ExecToolConfig();
         this.cronService = cronService;
         this.restrictToWorkspace = restrictToWorkspace;
         this.runtimeSettings = runtimeSettings;
-
-        // 从配置中读取 enableThink
-        boolean thinkEnabled = false;
-        if (runtimeSettings != null) {
-            var cfg = runtimeSettings.getCurrentConfig();
-            thinkEnabled = cfg.getAgents().getDefaults().isEnableThink();
-        }
-        this.enableThink = thinkEnabled;
 
         this.sessions = (sessionManager != null) ? sessionManager : new SessionManager(workspace);
         this.executor = new ThreadPoolExecutor(
@@ -206,7 +189,7 @@ public class AgentLoop {
         );
         this.subagents = new SubagentManager(
                 provider, workspace, bus, this.model, this.temperature, this.maxTokens,
-                this.reasoningEffort, braveApiKey, this.execConfig, restrictToWorkspace, null
+                this.reasoningEffort, currentTools(), restrictToWorkspace, null
         );
         this.mcpServers = (mcpServers != null) ? mcpServers : Map.of();
         this.mcpManager = new McpManager(workspace, mcpServers, executor);
@@ -227,6 +210,7 @@ public class AgentLoop {
             maxConcurrent = cfg.getAgents().getDefaults().getMaxConcurrent();
         }
         this.context = new ContextBuilder(workspace, runtimeSettings.getCurrentConfig().getAgents().getDefaults().getBootstrapConfig());
+        // AgentLoopQueue 使用独立线程池，避免 executeImmediately 中的 join() 阻塞共享线程池导致死锁
         this.queue = new AgentLoopQueue(maxConcurrent);
         this.cronToolFacade = (cronService != null) ? new CronTool(cronService) : null;
     }
@@ -237,7 +221,7 @@ public class AgentLoop {
         }
         return new AgentRuntimeSettings.Snapshot(
                 workspace, model, maxIterations, temperature, maxTokens, contextWindow, memoryWindow,
-                reasoningEffort, enableThink, null, null, braveApiKey, execConfig, restrictToWorkspace, mcpServers, channelsConfig
+                reasoningEffort, null, null, restrictToWorkspace, mcpServers, channelsConfig
         );
     }
 
@@ -279,15 +263,19 @@ public class AgentLoop {
         sharedTools.register(new FileSystemTools.ReadWordTool(workspace, allowedDir));
         sharedTools.register(new FileSystemTools.ReadWordStructuredTool(workspace, allowedDir));
         sharedTools.register(new ExecTool(
-                execConfig.getTimeout(),
+                currentTools().getExec().getTimeout(),
                 workspace.toString(),
                 null,
                 null,
                 restrictToWorkspace,
-                execConfig.getPathAppend()
+                currentTools().getExec().getPathAppend()
         ));
-        sharedTools.register(new WebSearchTool(braveApiKey, null));
-        sharedTools.register(new WebFetchTool(null));
+
+        // 注册web工具
+        WebSearchConfig search = currentTools().getWeb().getSearch();
+        WebFetchConfig fetch = currentTools().getWeb().getFetch();
+        sharedTools.register(new WebSearchTool(search.getApiKey(), search.getMaxResults(), null));
+        sharedTools.register(new WebFetchTool(fetch.getMaxChars(), fetch.getProxy()));
 
         sharedTools.register(new SkillTool(commandManager, skillsLoader));
         //sharedTools.register(new UninstallSkillTool(skillsLoader));
@@ -299,6 +287,11 @@ public class AgentLoop {
         // sharedTools.register(new MemoryGetTool(workspace));
 
     }
+
+    private ToolsConfig currentTools() {
+        return currentConfig().getTools();
+    }
+
     /**
      * 构建当前请求的工具视图：
      * - sharedTools：全局共享、无上下文工具
@@ -320,6 +313,7 @@ public class AgentLoop {
         localTools.register(spawnTool);
 
         SubagentsControlTool subagentsControlTool = new SubagentsControlTool(subagents);
+        subagentsControlTool.setAgentSessionKey(sessionKy);  // 关键：设置会话Key以便查询子代理
         localTools.register(subagentsControlTool);
 
 
@@ -435,7 +429,7 @@ public class AgentLoop {
         // 1) 标记会话停止，并取消底层 LLM 请求 future
         requestStop(sessionKey);
 
-        // 2) 再取消外层任务
+        // 2) 取消外层任务（不等待完成，避免阻塞）
         List<CompletableFuture<?>> tasks = activeTasks.remove(sessionKey);
         int cancelled = 0;
 
@@ -445,12 +439,7 @@ public class AgentLoop {
                     cancelled++;
                 }
             }
-            for (CompletableFuture<?> f : tasks) {
-                try {
-                    f.get(5, TimeUnit.SECONDS);
-                } catch (Exception ignored) {
-                }
-            }
+            // 移除同步等待，直接继续
         }
 
         int finalCancelled = cancelled;
@@ -533,8 +522,8 @@ public class AgentLoop {
             );
 
             return runAgentLoop(sessionKy, initial, requestTools, null).thenApply(rr -> {
-                saveTurn(session, rr.messages, 2 + history.size());
-                sessions.save(session);
+                //saveTurn(session, rr.messages, 2 + history.size());
+                //sessions.save(session);
                 return new OutboundMessage(
                         channel,
                         chatId,
@@ -734,7 +723,7 @@ public class AgentLoop {
         consolidating.add(session.getKey());
         CompletableFuture<OutboundMessage> out = new CompletableFuture<>();
 
-        executor.execute(() -> {
+        consolidationExecutor.execute(() -> {
             try {
                 lock.lock();
                 List<Map<String, Object>> snapshot =
@@ -970,8 +959,8 @@ public class AgentLoop {
 
                     if (resp.hasToolCalls()) {
                         if (onProgress != null) {
-                            // 根据 enableThink 决定是否移除  标签
-                            String clean =  enableThink ? resp.getContent() :stripThink(resp.getContent());
+                            // 移除思考标签
+                            String clean =  stripThink(resp.getContent());
                             if (clean != null) onProgress.onProgress(clean, false);
                             onProgress.onProgress(toolHint(resp.getToolCalls()), true);
                         }
@@ -1040,8 +1029,8 @@ public class AgentLoop {
                     }
 
                     log.info("思考: \n{}", resp.getReasoningContent());
-                    // 根据 enableThink 决定是否移除  标签
-                    String clean = enableThink ? resp.getContent() : stripThink(resp.getContent());
+                    // 移除思考标签
+                    String clean = stripThink(resp.getContent());
 
                     // 添加原始日志
                     Map<String, Object> assistant = new HashMap<>();
@@ -1072,18 +1061,6 @@ public class AgentLoop {
 
         executor.execute(step);
         return out;
-    }
-
-    private static String getContextFromMap(Map<String, Object> ... userMsgs) {
-        StringBuilder sb = new StringBuilder();
-        for (Map<String, Object> userMsg : userMsgs) {
-            if (!userMsg.get("role").equals("user")) {
-                continue;
-            }
-            String content = GsonFactory.getGson().toJson(userMsg);
-            sb.append(content).append("\n");
-        }
-        return sb.toString();
     }
 
     private CompletionStage<Void> executeToolCallsSequential(
@@ -1295,7 +1272,7 @@ public class AgentLoop {
                 );
 
                 if (pruneResult.droppedChunks == 0 && pruneResult.messages.size() == historyMessages.size()) {
-                    log.info("无需修剪，消息在预算范围内");
+                    log.info("无需修剪，消息在预算范围内, 开始总结");
                     return compactMessagesInternal(messages, contextWindow);
                 }
 
@@ -1322,7 +1299,7 @@ public class AgentLoop {
                 log.error("压缩失败: {}", e.toString());
                 return false;
             }
-        }, executor);
+        }, consolidationExecutor);
     }
 
     private boolean compactMessagesInternal(List<Map<String, Object>> messages, int contextWindow) {
@@ -1378,7 +1355,21 @@ public class AgentLoop {
                 toCompact.size(), keepFirst, keepLast);
 
         StringBuilder prompt = new StringBuilder();
-        prompt.append("请简洁地总结以下对话，保留关键信息、决策和上下文：\n\n");
+        prompt.append("""
+                请简洁地总结以下对话，保留关键信息、决策和上下文：\n\n
+                ## 如何总结
+                - 按主题语义组织，而非按时间顺序
+                
+                ## 要总结什么：
+                - 在多次交互中确认的稳定模式和惯例
+                - 关键架构决策、重要文件路径和项目结构
+                - 用户对工作流程、工具和沟通风格的偏好
+                - 反复出现问题的解决方案和调试洞见
+                ## 哪些是不该总结的：
+                - 可能不完整的信息——在撰写前核对项目文档
+                - 任何重复或与现有 CODE_AGENT.md 指令相矛盾的内容
+                - 通过阅读单一文件得出的推测性或未经验证的结论
+                """);
         prompt.append(MemoryCompaction.IDENTIFIER_PRESERVATION_INSTRUCTIONS).append("\n\n");
 
         for (Map<String, Object> msg : toCompact) {

@@ -5,7 +5,7 @@ import bus.MessageBus;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import config.ConfigSchema;
-import config.tool.ExecToolConfig;
+import config.tool.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import providers.LLMProvider;
@@ -45,8 +45,7 @@ public class SubagentManager {
     private final double temperature;
     private final int maxTokens;
     private final String reasoningEffort;
-    private final String braveApiKey;
-    private final ExecToolConfig execConfig;
+    private final ToolsConfig toolsConfig;
     private final boolean restrictToWorkspace;
 
     // ========== 核心组件 ==========
@@ -74,21 +73,18 @@ public class SubagentManager {
             Double temperature,
             Integer maxTokens,
             String reasoningEffort,
-            String braveApiKey,
-            ExecToolConfig execConfig,
+            ToolsConfig toolsConfig,
             boolean restrictToWorkspace,
             Executor executor
     ) {
         this.provider = Objects.requireNonNull(provider, "provider");
         this.workspace = Objects.requireNonNull(workspace, "workspace");
         this.bus = Objects.requireNonNull(bus, "bus");
-
+        this.toolsConfig = toolsConfig;
         this.model = (model == null || model.isBlank()) ? provider.getDefaultModel() : model;
         this.temperature = (temperature == null) ? 0.7 : temperature;
         this.maxTokens = (maxTokens == null) ? 8192 : maxTokens;
         this.reasoningEffort = (reasoningEffort == null || reasoningEffort.isBlank()) ? null : reasoningEffort;
-        this.braveApiKey = braveApiKey;
-        this.execConfig = (execConfig == null) ? new ExecToolConfig() : execConfig;
         this.restrictToWorkspace = restrictToWorkspace;
 
         if (executor instanceof ExecutorService es) {
@@ -123,7 +119,7 @@ public class SubagentManager {
         this.promptBuilder = new SubagentSystemPromptBuilder(workspace);
         this.announceService = new SubagentAnnounceService(bus, promptBuilder);
         this.localExecutor = new LocalSubagentExecutor(
-                provider, workspace, execConfig, braveApiKey, restrictToWorkspace,
+                provider, workspace, toolsConfig, restrictToWorkspace,
                 registry, bus
         );
         // 设置回引用，让嵌套 spawn 也走 Manager 统一入口
@@ -362,23 +358,18 @@ public class SubagentManager {
         if (ids.isEmpty()) return CompletableFuture.completedFuture(0);
 
         int[] count = {0};
-        List<CompletableFuture<Void>> toCancel = new ArrayList<>();
 
         for (String tid : ids) {
             CompletableFuture<Void> f = runningTasks.get(tid);
             if (f != null && !f.isDone()) {
                 f.cancel(true);
-                toCancel.add(f);
                 count[0]++;
             }
             localExecutor.terminate(tid);
         }
 
-        if (toCancel.isEmpty()) return CompletableFuture.completedFuture(0);
-
-        return CompletableFuture
-                .allOf(toCancel.toArray(new CompletableFuture[0]))
-                .handle((v, ex) -> count[0]);
+        // 直接返回，不等待任务完成（避免阻塞）
+        return CompletableFuture.completedFuture(count[0]);
     }
 
     // ==========================

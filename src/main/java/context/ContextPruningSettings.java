@@ -8,7 +8,7 @@ package context;
 public class ContextPruningSettings {
 
     /** 每个字符估算的 token 数 */
-    public static final double CHARS_PER_TOKEN_ESTIMATE = 3;
+    public static final double CHARS_PER_TOKEN_ESTIMATE = 1.2;
 
     /** 图片估算字符数 */
     public static final int IMAGE_CHAR_ESTIMATE = 8_000;

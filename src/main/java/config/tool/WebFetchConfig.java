@@ -7,9 +7,9 @@ import lombok.Data;
 @JsonIgnoreProperties(ignoreUnknown = true)
 @JsonInclude(JsonInclude.Include.NON_NULL)
 @Data
-public class WebSearchConfig {
+public class WebFetchConfig {
     private String apiKey = "";
-    private int maxResults = 5;
+    private int maxChars = 10_000;
     private String proxy = "";
 
 }

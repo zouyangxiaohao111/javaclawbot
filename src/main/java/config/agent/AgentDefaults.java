@@ -36,12 +36,6 @@ public class AgentDefaults {
 
     private String reasoningEffort = null;
 
-    /**
-     * 是否启用思考模式
-     * - true:
-     * - false:
-     */
-    private boolean enableThink = true;
 
     /**
      * 全局最大并发数（对齐 OpenClaw maxConcurrent）

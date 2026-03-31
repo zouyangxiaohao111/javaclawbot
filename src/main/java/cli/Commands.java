@@ -537,8 +537,6 @@ public class Commands implements Runnable {
                         config.obtainContextWindow(provider.getDefaultModel()),
                         config.getAgents().getDefaults().getMemoryWindow(),
                         config.getAgents().getDefaults().getReasoningEffort(),
-                        config.getTools().getWeb().getSearch().getApiKey(),
-                        config.getTools().getExec(),
                         null,
                         config.getTools().isRestrictToWorkspace(),
                         null,

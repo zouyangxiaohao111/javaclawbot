@@ -83,11 +83,8 @@ public final class AgentRuntimeSettings {
                 contextWindow,
                 defaults.getMemoryWindow(),
                 defaults.getReasoningEffort(),
-                defaults.isEnableThink(),
                 think,
                 extraBody,
-                cfg.getTools().getWeb().getSearch().getApiKey(),
-                cfg.getTools().getExec(),
                 cfg.getTools().isRestrictToWorkspace(),
                 cfg.getTools().getMcpServers(),
                 cfg.getChannels()
@@ -107,13 +104,10 @@ public final class AgentRuntimeSettings {
             int contentWindow,
             int memoryWindow,
             String reasoningEffort,
-            boolean enableThink,
             /** 思考模式配置（来自 ModelConfig.think），启用时合并到请求 body */
             Map<String, Object> think,
             /** 额外请求参数（来自 ModelConfig.extraBody），直接合并到请求 body */
             Map<String, Object> extraBody,
-            String braveApiKey,
-            ExecToolConfig execConfig,
             boolean restrictToWorkspace,
             Map<String, MCPServerConfig> mcpServers,
             ChannelsConfig channelsConfig

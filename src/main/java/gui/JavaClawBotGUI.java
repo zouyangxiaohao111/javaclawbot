@@ -677,8 +677,6 @@ public class JavaClawBotGUI extends JFrame {
                 this.config.obtainContextWindow(provider.getDefaultModel()),
                 this.config.getAgents().getDefaults().getMemoryWindow(),
                 this.config.getAgents().getDefaults().getReasoningEffort(),
-                this.config.getTools().getWeb().getSearch().getApiKey(),
-                this.config.getTools().getExec(),
                 cron,
                 this.config.getTools().isRestrictToWorkspace(),
                 sessionManager,

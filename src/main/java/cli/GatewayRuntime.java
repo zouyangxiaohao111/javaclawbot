@@ -214,8 +214,6 @@ public final class GatewayRuntime {
                 config.getAgents().getDefaults().getMemoryWindow(),
                 config.obtainContextWindow(provider.getDefaultModel()),
                 config.getAgents().getDefaults().getReasoningEffort(),
-                config.getTools().getWeb().getSearch().getApiKey(),
-                config.getTools().getExec(),
                 cron,
                 config.getTools().isRestrictToWorkspace(),
                 sessionManager,
