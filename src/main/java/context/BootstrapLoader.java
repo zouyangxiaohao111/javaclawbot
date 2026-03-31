@@ -4,15 +4,19 @@ import cn.hutool.core.io.resource.ResourceUtil;
 import cn.hutool.core.util.StrUtil;
 import config.Config;
 import config.ConfigIO;
+import config.plugin.PluginConfig;
+import config.plugin.PluginsConfig;
+import org.graalvm.polyglot.Context;
+import org.graalvm.polyglot.HostAccess;
+import org.graalvm.polyglot.Value;
 
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Locale;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.*;
+import java.util.*;
 import java.util.function.Consumer;
 import java.util.logging.Logger;
+import java.util.stream.Collectors;
 
 /**
  * Bootstrap 文件加载器
@@ -348,5 +352,204 @@ public class BootstrapLoader {
         content = ifBlankDoGetNew(content, "TOOLS.md");
 
         return content;
+    }
+
+    /**
+     * 加载插件
+     * <p>
+     * 扫描 workspace/plugins/ 目录下的 .js 和 .py 文件，
+     * 根据配置决定是否执行，按 priority 排序后依次执行，
+     * 将所有执行结果拼接返回。
+     *
+     * @return 所有启用插件的执行结果，用 "---" 分隔
+     */
+    public String loadPlugin() {
+        Path pluginsDir = workspace.resolve("plugins");
+
+        if (!Files.exists(pluginsDir) || !Files.isDirectory(pluginsDir)) {
+            return "";
+        }
+
+        Config config = ConfigIO.loadConfig(ConfigIO.getConfigPath(workspace));
+        PluginsConfig pluginsConfig = config.getPlugins();
+
+        // 发现所有插件文件
+        List<PluginEntry> plugins = discoverPlugins(pluginsDir);
+
+        // 过滤已启用的插件并根据配置筛选
+        List<PluginEntry> enabledPlugins = plugins.stream()
+                .filter(p -> isPluginEnabled(p.name, pluginsConfig))
+                .sorted(Comparator.comparingInt(p -> getPluginPriority(p.name, pluginsConfig)))
+                .collect(Collectors.toList());
+
+        if (enabledPlugins.isEmpty()) {
+            return "";
+        }
+
+        // 执行所有启用的插件
+        List<String> results = new ArrayList<>();
+        for (PluginEntry plugin : enabledPlugins) {
+            try {
+                String result = executePlugin(plugin);
+                if (StrUtil.isNotBlank(result)) {
+                    results.add(result);
+                }
+            } catch (Exception e) {
+                warn("执行插件失败: " + plugin.name + " - " + e.getMessage());
+            }
+        }
+
+        if (results.isEmpty()) {
+            return "";
+        }
+
+        return String.join("\n---\n", results);
+    }
+
+    /**
+     * 发现 plugins 目录下的所有插件文件
+     */
+    private List<PluginEntry> discoverPlugins(Path pluginsDir) {
+        List<PluginEntry> plugins = new ArrayList<>();
+
+        try (DirectoryStream<Path> stream = Files.newDirectoryStream(pluginsDir)) {
+            for (Path file : stream) {
+                if (!Files.isRegularFile(file)) continue;
+
+                String fileName = file.getFileName().toString();
+                String ext = getFileExtension(fileName).toLowerCase(Locale.ROOT);
+
+                if ("js".equals(ext) || "py".equals(ext)) {
+                    String name = fileName.substring(0, fileName.lastIndexOf('.'));
+                    plugins.add(new PluginEntry(name, file, ext));
+                }
+            }
+        } catch (IOException e) {
+            warn("扫描插件目录失败: " + e.getMessage());
+        }
+
+        return plugins;
+    }
+
+    /**
+     * 判断插件是否启用
+     */
+    private boolean isPluginEnabled(String name, PluginsConfig config) {
+        return config.isPluginEnabled(name, ConfigIO.loadConfig(ConfigIO.getConfigPath(workspace)), ConfigIO.getConfigPath(workspace));
+    }
+
+    /**
+     * 获取插件优先级
+     */
+    private int getPluginPriority(String name, PluginsConfig config) {
+        PluginConfig pc = config.getPluginConfig(name, ConfigIO.loadConfig(ConfigIO.getConfigPath(workspace)), ConfigIO.getConfigPath(workspace));
+        return pc.getPriority();
+    }
+
+    /**
+     * 执行单个插件
+     */
+    private String executePlugin(PluginEntry plugin) throws Exception {
+        String ext = plugin.extension;
+
+        if ("js".equals(ext)) {
+            return executeJsPlugin(plugin.path);
+        } else if ("py".equals(ext)) {
+            return executePyPlugin(plugin.path);
+        }
+
+        return "";
+    }
+
+    /**
+     * 执行 JS 插件（使用 GraalJS）
+     * <p>
+     * JS 脚本可以通过以下方式返回结果：
+     * 1. 脚本最后一行表达式（自动返回）
+     * 2. 设置全局变量 result
+     * 3. 调用 setResult(value) 函数
+     */
+    private String executeJsPlugin(Path path) throws IOException {
+        String script = Files.readString(path, StandardCharsets.UTF_8);
+
+        try (Context context = Context.newBuilder("js")
+                .allowHostAccess(HostAccess.ALL)
+                .allowHostClassLookup(className -> true)
+                .option("engine.WarnInterpreterOnly", "false")
+                .build()) {
+
+            // 获取 JS bindings，用于注入变量和获取结果
+            Value bindings = context.getBindings("js");
+
+            // 注入工作区路径
+            bindings.putMember("workspace", workspace.toAbsolutePath().normalize().toString());
+
+            // 结果容器
+            String[] resultHolder = {null};
+
+            // 注入 setResult 函数，让 JS 可以主动设置返回值
+            bindings.putMember("setResult", (java.util.function.Consumer<String>) result -> resultHolder[0] = result);
+
+            // 执行脚本
+            context.eval("js", script);
+
+            // 获取结果（优先级：setResult > result 变量 > 最后一行表达式）
+            String result = resultHolder[0];
+
+            if (result == null && bindings.hasMember("result")) {
+                Value resultValue = bindings.getMember("result");
+                if (resultValue != null && !resultValue.isNull()) {
+                    result = resultValue.asString();
+                }
+            }
+
+            return result != null ? result : "";
+
+        } catch (Exception e) {
+            warn("JS 插件执行失败 [" + path.getFileName() + "]: " + e.getMessage());
+            return "";
+        }
+    }
+
+    /**
+     * 执行 Python 插件（通过 subprocess）
+     */
+    private String executePyPlugin(Path path) throws IOException, InterruptedException {
+        ProcessBuilder pb = new ProcessBuilder("python", path.toAbsolutePath().toString());
+        pb.directory(workspace.toFile());
+        pb.redirectErrorStream(true);
+
+        Process process = pb.start();
+        String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        int exitCode = process.waitFor();
+
+        if (exitCode != 0) {
+            warn("Python 插件执行失败 [" + path.getFileName() + "]: exit code " + exitCode);
+        }
+
+        return output.trim();
+    }
+
+    /**
+     * 获取文件扩展名
+     */
+    private String getFileExtension(String fileName) {
+        int idx = fileName.lastIndexOf('.');
+        return (idx > 0) ? fileName.substring(idx + 1) : "";
+    }
+
+    /**
+     * 插件条目（内部使用）
+     */
+    private static class PluginEntry {
+        final String name;
+        final Path path;
+        final String extension;
+
+        PluginEntry(String name, Path path, String extension) {
+            this.name = name;
+            this.path = path;
+            this.extension = extension;
+        }
     }
 }

@@ -102,6 +102,8 @@ public class ContextBuilder {
         // 加载用户说明
         parts.add(bootstrapLoader.loadTool());
 
+        parts.add(bootstrapLoader.loadPlugin());
+
         // by zcw 3/19 无需加载其他文件了,改为手动指定加载
         /*List<BootstrapFile> bootstrapFiles = bootstrapLoader.resolveBootstrapFiles();
         String bootstrap = bootstrapLoader.buildProjectContext(bootstrapFiles);
