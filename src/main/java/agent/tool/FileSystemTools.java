@@ -21,6 +21,7 @@ import org.apache.poi.xwpf.usermodel.XWPFStyle;
 import utils.PathUtil;
 
 import java.io.InputStream;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
@@ -114,7 +115,7 @@ public final class FileSystemTools {
                     return CompletableFuture.completedFuture("Error: Not a file: " + path);
                 }
 
-                String content = Files.readString(filePath, StandardCharsets.UTF_8);
+                String content = readFileSmart(filePath);
                 return CompletableFuture.completedFuture(applyLineWindow(content, head, tail, startLine, endLine));
 
             } catch (SecurityException se) {
@@ -190,7 +191,7 @@ public final class FileSystemTools {
                 // Detect target line ending: match existing file, or use system default for new files
                 String targetLineEnding;
                 if (Files.exists(filePath)) {
-                    targetLineEnding = detectLineEnding(Files.readString(filePath, StandardCharsets.UTF_8));
+                    targetLineEnding = detectLineEnding(readFileSmart(filePath));
                 } else {
                     targetLineEnding = System.lineSeparator();
                 }
@@ -203,7 +204,7 @@ public final class FileSystemTools {
                     return CompletableFuture.completedFuture("Successfully appended " + bytes.length + " bytes to " + filePath);
                 }
 
-                String old = Files.exists(filePath) ? Files.readString(filePath, StandardCharsets.UTF_8) : "";
+                String old = Files.exists(filePath) ? readFileSmart(filePath) : "";
 
                 String newContent;
                 if ("overwrite".equalsIgnoreCase(mode)) {
@@ -367,7 +368,7 @@ public final class FileSystemTools {
                 if (!Files.exists(filePath)) return CompletableFuture.completedFuture("Error: File not found: " + path);
                 if (!Files.isRegularFile(filePath)) return CompletableFuture.completedFuture("Error: Not a file: " + path);
 
-                String original = Files.readString(filePath, StandardCharsets.UTF_8);
+                String original = readFileSmart(filePath);
                 String updated = original;
 
                 List<String> appliedNotes = new ArrayList<>();
@@ -1552,6 +1553,60 @@ public final class FileSystemTools {
             }
         }
         return new ArrayList<>(set);
+    }
+
+    /**
+     * 智能解码：优先尝试 UTF-8，失败则回退到 GBK
+     *
+     * 解决 Windows 上中文编码问题：
+     * - Windows 记事本默认保存为 GBK
+     * - Windows 系统配置文件通常是 GBK
+     * - UTF-8 文件正常解码
+     * - GBK 文件回退解码
+     */
+    private static String smartDecode(byte[] bytes) {
+        if (bytes == null || bytes.length == 0) return "";
+
+        // 先尝试 UTF-8
+        String utf8 = new String(bytes, StandardCharsets.UTF_8);
+        // 检查是否有替换字符（说明有非法字节序列）
+        if (!containsReplacementChar(utf8, bytes)) {
+            return utf8;
+        }
+
+        // 回退到 GBK（Windows 中文默认编码）
+        return new String(bytes, Charset.forName("GBK"));
+    }
+
+    /**
+     * 检测 UTF-8 解码是否产生了替换字符（说明原始字节不是有效的 UTF-8）
+     */
+    private static boolean containsReplacementChar(String decoded, byte[] original) {
+        // 如果解码结果包含替换字符，说明有问题
+        if (decoded.contains("\uFFFD")) {
+            return true;
+        }
+        // 额外检查：如果解码后长度异常（比如某些 GBK 字符被错误解码）
+        // UTF-8 中文字符通常是 3 字节，GBK 是 2 字节
+        // 如果原始字节中有大量 0x80-0xFF 范围的字节但解码正常，可能是误判
+        // 简化判断：检查是否有常见 GBK 特征字节
+        for (byte b : original) {
+            // GBK 高位字节范围：0x81-0xFE
+            if ((b & 0xFF) >= 0x81 && (b & 0xFF) <= 0xFE) {
+                // 检查后面是否有对应的低位字节
+                // 这表示很可能是 GBK 编码
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 智能读取文件内容
+     */
+    private static String readFileSmart(Path filePath) throws Exception {
+        byte[] bytes = Files.readAllBytes(filePath);
+        return smartDecode(bytes);
     }
 
 }

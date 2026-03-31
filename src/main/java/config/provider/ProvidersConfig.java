@@ -19,6 +19,25 @@ public class ProvidersConfig {
     }
 
     private void initDefaultModelConfigs() {
+        // 初始化所有 ProviderConfig
+        custom = new ProviderConfig("http://localhost:8000/v1");
+        anthropic = new ProviderConfig("https://api.anthropic.com");
+        openai = new ProviderConfig("https://api.openai.com/v1");
+        openrouter = new ProviderConfig("https://openrouter.ai/api/v1");
+        deepseek = new ProviderConfig("https://api.deepseek.com");
+        groq = new ProviderConfig("https://api.groq.com/openai/v1");
+        zhipu = new ProviderConfig("https://open.bigmodel.cn/api/paas/v4");
+        dashscope = new ProviderConfig("https://dashscope.aliyuncs.com/compatible-mode/v1");
+        vllm = new ProviderConfig("http://localhost:8000/v1");
+        gemini = new ProviderConfig("https://generativelanguage.googleapis.com/v1beta");
+        moonshot = new ProviderConfig("https://api.moonshot.cn/v1");
+        minimax = new ProviderConfig("https://api.minimax.chat/v1");
+        aihubmix = new ProviderConfig("https://api.aihubmix.com/v1");
+        siliconflow = new ProviderConfig("https://api.siliconflow.cn/v1");
+        volcengine = new ProviderConfig("https://ark.cn-beijing.volces.com/api/v3");
+        openaiCodex = new ProviderConfig("https://api.openai.com/v1");
+        githubCopilot = new ProviderConfig("https://api.githubcopilot.com");
+
         // OpenAI - 2026年3月更新
         openai.setModelConfigs(List.of(
                 model("gpt-4o", "gpt4o", ModelType.VISION, 16384),
@@ -154,55 +173,23 @@ public class ProvidersConfig {
     /**
      * 自定义模型
      */
-    private ProviderConfig custom = new ProviderConfig("http://localhost:8000/v1");
-
-    private ProviderConfig anthropic =
-            new ProviderConfig("https://api.anthropic.com");
-
-    private ProviderConfig openai =
-            new ProviderConfig("https://api.openai.com/v1");
-
-    private ProviderConfig openrouter =
-            new ProviderConfig("https://openrouter.ai/api/v1");
-
-    private ProviderConfig deepseek =
-            new ProviderConfig("https://api.deepseek.com");
-
-    private ProviderConfig groq =
-            new ProviderConfig("https://api.groq.com/openai/v1");
-
-    private ProviderConfig zhipu =
-            new ProviderConfig("https://open.bigmodel.cn/api/paas/v4");
-
-    private ProviderConfig dashscope =
-            new ProviderConfig("https://dashscope.aliyuncs.com/compatible-mode/v1");
-
-    private ProviderConfig vllm =
-            new ProviderConfig("http://localhost:8000/v1");
-
-    private ProviderConfig gemini =
-            new ProviderConfig("https://generativelanguage.googleapis.com/v1beta");
-
-    private ProviderConfig moonshot =
-            new ProviderConfig("https://api.moonshot.cn/v1");
-
-    private ProviderConfig minimax =
-            new ProviderConfig("https://api.minimax.chat/v1");
-
-    private ProviderConfig aihubmix =
-            new ProviderConfig("https://api.aihubmix.com/v1");
-
-    private ProviderConfig siliconflow =
-            new ProviderConfig("https://api.siliconflow.cn/v1");
-
-    private ProviderConfig volcengine =
-            new ProviderConfig("https://ark.cn-beijing.volces.com/api/v3");
-
-    private ProviderConfig openaiCodex =
-            new ProviderConfig("https://api.openai.com/v1");
-
-    private ProviderConfig githubCopilot =
-            new ProviderConfig("https://api.githubcopilot.com");
+    private ProviderConfig custom;
+    private ProviderConfig anthropic;
+    private ProviderConfig openai;
+    private ProviderConfig openrouter;
+    private ProviderConfig deepseek;
+    private ProviderConfig groq;
+    private ProviderConfig zhipu;
+    private ProviderConfig dashscope;
+    private ProviderConfig vllm;
+    private ProviderConfig gemini;
+    private ProviderConfig moonshot;
+    private ProviderConfig minimax;
+    private ProviderConfig aihubmix;
+    private ProviderConfig siliconflow;
+    private ProviderConfig volcengine;
+    private ProviderConfig openaiCodex;
+    private ProviderConfig githubCopilot;
 
     public ProviderConfig getByName(String name) {
         if (name == null) return null;

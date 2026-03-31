@@ -274,7 +274,7 @@ public class AgentLoop {
         // 注册web工具
         WebSearchConfig search = currentTools().getWeb().getSearch();
         WebFetchConfig fetch = currentTools().getWeb().getFetch();
-        sharedTools.register(new WebSearchTool(search.getApiKey(), search.getMaxResults(), null));
+        sharedTools.register(new WebSearchTool(search.getApiKey(), search.getMaxResults(), search.getProxy()));
         sharedTools.register(new WebFetchTool(fetch.getMaxChars(), fetch.getProxy()));
 
         sharedTools.register(new SkillTool(commandManager, skillsLoader));
