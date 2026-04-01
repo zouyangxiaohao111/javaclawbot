@@ -15,7 +15,7 @@ description: Use when you have a spec or requirements for a multi-step task, bef
 
 **上下文：**这应该在专用工作树中运行（由 brainstorming 技能创建）。
 
-**计划保存位置：**`docs/superpowers/plans/YYYY-MM-DD-<feature-name>.md`
+**计划保存位置：**`docs/zjkycode/plans/YYYY-MM-DD-<feature-name>.md`
 - （用户对计划位置的偏好会覆盖此默认值）
 
 ## 范围检查
@@ -49,7 +49,7 @@ description: Use when you have a spec or requirements for a multi-step task, bef
 ```markdown
 # [功能名称] 实施计划
 
-> **对于代理工作者：**必需的子技能：使用 superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans 来逐任务实施此计划。步骤使用复选框（`- [ ]`）语法进行跟踪。
+> **对于代理工作者：**必需的子技能：使用 zjkycode:subagent-driven-development（推荐）或 zjkycode:executing-plans 来逐任务实施此计划。步骤使用复选框（`- [ ]`）语法进行跟踪。
 
 **目标：**[一句话描述这构建了什么]
 
@@ -135,7 +135,7 @@ git commit -m "feat: add specific feature"
 
 保存计划后，提供执行选择：
 
-**"计划完成并保存到 `docs/superpowers/plans/<filename>.md`。两种执行选项：**
+**"计划完成并保存到 `docs/zjkycode/plans/<filename>.md`。两种执行选项：**
 
 **1. 子代理驱动（推荐）** - 我为每个任务调度一个新子代理，在任务之间审查，快速迭代
 
@@ -144,9 +144,9 @@ git commit -m "feat: add specific feature"
 **选择哪种方式？"**
 
 **如果选择子代理驱动：**
-- **必需的子技能：**使用 superpowers:subagent-driven-development
+- **必需的子技能：**使用 zjkycode:subagent-driven-development
 - 每个任务一个新子代理 + 两阶段审查
 
 **如果选择内联执行：**
-- **必需的子技能：**使用 superpowers:executing-plans
+- **必需的子技能：**使用 zjkycode:executing-plans
 - 带检查点的批量执行以供审查

@@ -43,7 +43,7 @@ grep -i "worktree.*director" CLAUDE.md 2>/dev/null
 No worktree directory found. Where should I create worktrees?
 
 1. .worktrees/ (project-local, hidden)
-2. ~/.config/superpowers/worktrees/<project-name>/ (global location)
+2. ~/.config/zjkycode/worktrees/<project-name>/ (global location)
 
 Which would you prefer?
 ```
@@ -68,7 +68,7 @@ git check-ignore -q .worktrees 2>/dev/null || git check-ignore -q worktrees 2>/d
 
 **为何关键：** 防止意外将 worktree 内容提交到仓库。
 
-### 对于全局目录（~/.config/superpowers/worktrees）
+### 对于全局目录（~/.config/zjkycode/worktrees）
 
 无需 .gitignore 验证 — 完全在项目之外。
 
@@ -88,8 +88,8 @@ case $LOCATION in
   .worktrees|worktrees)
     path="$LOCATION/$BRANCH_NAME"
     ;;
-  ~/.config/superpowers/worktrees/*)
-    path="~/.config/superpowers/worktrees/$project/$BRANCH_NAME"
+  ~/.config/zjkycode/worktrees/*)
+    path="~/.config/zjkycode/worktrees/$project/$BRANCH_NAME"
     ;;
 esac
 

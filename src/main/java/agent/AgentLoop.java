@@ -855,7 +855,9 @@ public class AgentLoop {
                 }
 
                 List<Map<String, Object>> prunedMessages = ContextPruner.pruneContextMessages(
-                        messages, pruningSettings, contextWindow, null
+                        messages, pruningSettings, contextWindow,
+                        // 不修剪 skill 工具的结果，因为其中包含技能内容，裁剪后 LLM 不知道该技能
+                        toolName -> !"skill".equals(toolName)
                 );
                 int beforeChars = ContextPruner.estimateContextChars(messages);
                 int afterChars = ContextPruner.estimateContextChars(prunedMessages);

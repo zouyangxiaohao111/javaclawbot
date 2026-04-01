@@ -4,7 +4,7 @@
 
 **目的：** 验证规范是否完整、一致，并准备好进行实施计划。
 
-**派发时机：** 规范文档写入 docs/superpowers/specs/ 之后
+**派发时机：** 规范文档写入 docs/zjkycode/specs/ 之后
 
 ```
 Task tool（通用）：

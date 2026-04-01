@@ -99,7 +99,7 @@ if ($env:CODEX_CI -and -not $Foreground -and -not $ForceBackground) {
 $SessionId = "$PID-$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())"
 
 if (-not [string]::IsNullOrWhiteSpace($ProjectDir)) {
-    $SessionDir = Join-Path $ProjectDir ".superpowers\brainstorm\$SessionId"
+    $SessionDir = Join-Path $ProjectDir ".zjkycode\brainstorm\$SessionId"
 } else {
     $TempRoot = $env:TEMP
     if ([string]::IsNullOrWhiteSpace($TempRoot)) {

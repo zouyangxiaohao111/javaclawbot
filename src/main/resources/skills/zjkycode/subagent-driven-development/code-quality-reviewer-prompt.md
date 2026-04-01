@@ -7,7 +7,7 @@
 **仅在规范合规性审查通过后派发。**
 
 ```
-Task 工具（superpowers:code-reviewer）：
+Task 工具（zjkycode:code-reviewer）：
   使用 requesting-code-review/code-reviewer.md 中的模板
 
   WHAT_WAS_IMPLEMENTED: [来自实施者的报告]

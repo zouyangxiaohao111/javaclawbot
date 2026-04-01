@@ -85,7 +85,7 @@ public class ProjectContext {
     public void setProjectPath(String path) {
         Config config = ConfigIO.loadConfig(ConfigIO.getConfigPath(workspace));
         // 支持windows的路径，将 \ 转义为 \\，否则会报错
-        path = path.replace("\\", "\\\\");
+        //path = path.replace("\\", "\\\\");
 
         if (path == null || path.isBlank() || "clear".equalsIgnoreCase(path)) {
             // 清除项目路径

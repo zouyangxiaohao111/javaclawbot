@@ -18,7 +18,7 @@
  *   "plugins": {
  *     "items": {
  *       "example": { "enabled": true, "priority": 10 },
- *       "superpowers": { "enabled": false, "priority": 20 }
+ *       "zjkycode": { "enabled": false, "priority": 20 }
  *     }
  *   }
  * }

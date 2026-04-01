@@ -4,7 +4,7 @@
 #
 # Kills the server process. Only deletes session directory if it's
 # under the system temp directory (ephemeral).
-# Persistent directories (.superpowers/) are kept so mockups can be reviewed later.
+# Persistent directories (.zjkycode/) are kept so mockups can be reviewed later.
 
 param(
     [Parameter(Position = 0)]

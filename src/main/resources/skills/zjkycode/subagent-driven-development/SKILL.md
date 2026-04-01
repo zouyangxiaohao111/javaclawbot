@@ -61,7 +61,7 @@ digraph process {
     "读取计划，提取所有任务完整文本，记录上下文，创建 TodoWrite" [shape=box];
     "还有更多任务？" [shape=diamond];
     "派发最终代码审查者子代理审查整个实现" [shape=box];
-    "使用 superpowers:finishing-a-development-branch" [shape=box style=filled fillcolor=lightgreen];
+    "使用 zjkycode:finishing-a-development-branch" [shape=box style=filled fillcolor=lightgreen];
 
     "读取计划，提取所有任务完整文本，记录上下文，创建 TodoWrite" -> "派发实施者子代理（./implementer-prompt.md）";
     "派发实施者子代理（./implementer-prompt.md）" -> "实施者子代理有问题？";
@@ -80,7 +80,7 @@ digraph process {
     "在 TodoWrite 中标记任务完成" -> "还有更多任务？";
     "还有更多任务？" -> "派发实施者子代理（./implementer-prompt.md）" [label="是"];
     "还有更多任务？" -> "派发最终代码审查者子代理审查整个实现" [label="否"];
-    "派发最终代码审查者子代理审查整个实现" -> "使用 superpowers:finishing-a-development-branch";
+    "派发最终代码审查者子代理审查整个实现" -> "使用 zjkycode:finishing-a-development-branch";
 }
 ```
 
@@ -128,7 +128,7 @@ digraph process {
 ```
 你：我正在使用子代理驱动开发来执行这个计划。
 
-[读取计划文件一次：docs/superpowers/plans/feature-plan.md]
+[读取计划文件一次：docs/zjkycode/plans/feature-plan.md]
 [提取所有 5 个任务的完整文本和上下文]
 [创建包含所有任务的 TodoWrite]
 
@@ -139,7 +139,7 @@ digraph process {
 
 实施者："开始之前 - 钩子应该安装在用户级别还是系统级别？"
 
-你："用户级别（~/.config/superpowers/hooks/）"
+你："用户级别（~/.config/zjkycode/hooks/）"
 
 实施者："明白了。正在实施..."
 [稍后] 实施者：
@@ -265,13 +265,13 @@ digraph process {
 ## 集成
 
 **必需的工作流技能：**
-- **superpowers:using-git-worktrees** - 必需：开始前设置隔离工作区
-- **superpowers:writing-plans** - 创建此技能执行的计划
-- **superpowers:requesting-code-review** - 审查者子代理的代码审查模板
-- **superpowers:finishing-a-development-branch** - 所有任务完成后完成开发
+- **zjkycode:using-git-worktrees** - 必需：开始前设置隔离工作区
+- **zjkycode:writing-plans** - 创建此技能执行的计划
+- **zjkycode:requesting-code-review** - 审查者子代理的代码审查模板
+- **zjkycode:finishing-a-development-branch** - 所有任务完成后完成开发
 
 **子代理应使用：**
-- **superpowers:test-driven-development** - 子代理为每个任务遵循 TDD
+- **zjkycode:test-driven-development** - 子代理为每个任务遵循 TDD
 
 **替代工作流：**
-- **superpowers:executing-plans** - 用于并行会话而非同会话执行
+- **zjkycode:executing-plans** - 用于并行会话而非同会话执行

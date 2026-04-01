@@ -37,15 +37,15 @@
 scripts/start-server.sh --project-dir /path/to/project
 
 # Returns: {"type":"server-started","port":52341,"url":"http://localhost:52341",
-#           "screen_dir":"/path/to/project/.superpowers/brainstorm/12345-1706000000/content",
-#           "state_dir":"/path/to/project/.superpowers/brainstorm/12345-1706000000/state"}
+#           "screen_dir":"/path/to/project/.zjkycode/brainstorm/12345-1706000000/content",
+#           "state_dir":"/path/to/project/.zjkycode/brainstorm/12345-1706000000/state"}
 ```
 
 保存响应中的 `screen_dir` 和 `state_dir`。告诉用户打开 URL。
 
-**查找连接信息：** 服务器将其启动 JSON 写入 `$STATE_DIR/server-info`。如果你在后台启动服务器但没有捕获 stdout，读取该文件获取 URL 和端口。使用 `--project-dir` 时，检查 `<project>/.superpowers/brainstorm/` 获取会话目录。
+**查找连接信息：** 服务器将其启动 JSON 写入 `$STATE_DIR/server-info`。如果你在后台启动服务器但没有捕获 stdout，读取该文件获取 URL 和端口。使用 `--project-dir` 时，检查 `<project>/.zjkycode/brainstorm/` 获取会话目录。
 
-**注意：** 将项目根目录作为 `--project-dir` 传递，这样模型会持久保存在 `.superpowers/brainstorm/` 中，并在服务器重启后保留。没有它，文件会进入 `/tmp` 并被清理。提醒用户将 `.superpowers/` 添加到 `.gitignore`（如果还没有）。
+**注意：** 将项目根目录作为 `--project-dir` 传递，这样模型会持久保存在 `.zjkycode/brainstorm/` 中，并在服务器重启后保留。没有它，文件会进入 `/tmp` 并被清理。提醒用户将 `.zjkycode/` 添加到 `.gitignore`（如果还没有）。
 
 **按平台启动服务器：**
 
@@ -279,7 +279,7 @@ scripts/start-server.sh \
 scripts/stop-server.sh $SESSION_DIR
 ```
 
-如果会话使用了 `--project-dir`，模型文件会持久保存在 `.superpowers/brainstorm/` 中供以后参考。只有 `/tmp` 会话会在停止时被删除。
+如果会话使用了 `--project-dir`，模型文件会持久保存在 `.zjkycode/brainstorm/` 中供以后参考。只有 `/tmp` 会话会在停止时被删除。
 
 ## 参考
 
