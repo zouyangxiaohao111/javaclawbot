@@ -188,21 +188,28 @@ public final class FileSystemTools {
                 Path parent = filePath.getParent();
                 if (parent != null) Files.createDirectories(parent);
 
-                // Detect target line ending: match existing file, or use system default for new files
+                // Detect target line ending: match existing file, or use LF for new files
+                // (LF is universal: Windows apps handle it, and it's native on Unix/macOS)
                 String targetLineEnding;
                 Charset targetCharset;
+                boolean preserveBom;  // 是否保留 UTF-8 BOM
+
                 if (Files.exists(filePath)) {
-                    targetLineEnding = detectLineEnding(readFileSmart(filePath));
-                    targetCharset = detectFileCharset(filePath);
+                    byte[] existingBytes = Files.readAllBytes(filePath);
+                    targetLineEnding = detectLineEnding(smartDecode(existingBytes));
+                    targetCharset = detectCharset(existingBytes);
+                    preserveBom = hasUtf8Bom(existingBytes);
                 } else {
-                    targetLineEnding = System.lineSeparator();
-                    targetCharset = StandardCharsets.UTF_8;  // 新文件默认 UTF-8
+                    // 新文件：使用 LF（跨平台兼容），UTF-8 无 BOM
+                    targetLineEnding = "\n";  // 强制 LF，跨平台兼容
+                    targetCharset = StandardCharsets.UTF_8;
+                    preserveBom = false;  // 新文件不添加 BOM
                 }
                 // Normalize incoming content to match target line ending
                 content = normalizeLineEndings(content, targetLineEnding);
 
                 if ("append".equalsIgnoreCase(mode)) {
-                    // 使用原文件编码追加
+                    // 使用原文件编码追加（不重复写 BOM）
                     byte[] bytes = content.getBytes(targetCharset);
                     Files.write(filePath, bytes, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
                     return CompletableFuture.completedFuture("Successfully appended " + bytes.length + " bytes to " + filePath + " (charset=" + targetCharset.name() + ")");
@@ -229,20 +236,40 @@ public final class FileSystemTools {
                     return CompletableFuture.completedFuture("Error: unknown mode: " + mode);
                 }
 
-                Files.writeString(
-                        filePath,
-                        newContent,
-                        targetCharset,
-                        StandardOpenOption.CREATE,
-                        StandardOpenOption.TRUNCATE_EXISTING
-                );
+                // 写入文件：如果需要保留 BOM，先写 BOM 再写内容
+                if (preserveBom && targetCharset == StandardCharsets.UTF_8) {
+                    // UTF-8 BOM: EF BB BF
+                    byte[] bomBytes = new byte[]{(byte) 0xEF, (byte) 0xBB, (byte) 0xBF};
+                    byte[] contentBytes = newContent.getBytes(StandardCharsets.UTF_8);
+                    byte[] fullBytes = new byte[bomBytes.length + contentBytes.length];
+                    System.arraycopy(bomBytes, 0, fullBytes, 0, bomBytes.length);
+                    System.arraycopy(contentBytes, 0, fullBytes, bomBytes.length, contentBytes.length);
+                    Files.write(filePath, fullBytes, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+                } else {
+                    Files.writeString(
+                            filePath,
+                            newContent,
+                            targetCharset,
+                            StandardOpenOption.CREATE,
+                            StandardOpenOption.TRUNCATE_EXISTING
+                    );
+                }
 
-                return CompletableFuture.completedFuture("Successfully wrote to " + filePath + " (mode=" + mode + ", charset=" + targetCharset.name() + ")");
+                String bomNote = preserveBom ? " (UTF-8 BOM preserved)" : "";
+                return CompletableFuture.completedFuture("Successfully wrote to " + filePath + " (mode=" + mode + ", charset=" + targetCharset.name() + ", lineEnding=" + lineEndingName(targetLineEnding) + bomNote + ")");
             } catch (SecurityException se) {
                 return CompletableFuture.completedFuture("Error: " + se.getMessage());
             } catch (Exception e) {
                 return CompletableFuture.completedFuture("Error writing file: " + e.getMessage());
             }
+        }
+
+        /** 换行符名称 */
+        private static String lineEndingName(String le) {
+            if ("\r\n".equals(le)) return "CRLF";
+            if ("\n".equals(le)) return "LF";
+            if ("\r".equals(le)) return "CR";
+            return "unknown";
         }
 
         /** 插入定位：二选一，charOffset 或 line/column */
@@ -1562,20 +1589,95 @@ public final class FileSystemTools {
     }
 
     /**
-     * 检测文件编码
+     * BOM 检测结果：包含编码和 BOM 长度
+     */
+    private static final class BomResult {
+        final Charset charset;
+        final int bomLength;  // BOM 字节数，用于跳过
+
+        BomResult(Charset charset, int bomLength) {
+            this.charset = charset;
+            this.bomLength = bomLength;
+        }
+    }
+
+    /**
+     * 检测 BOM（字节顺序标记），返回编码和 BOM 长度
+     *
+     * BOM 标记：
+     * - UTF-8:    EF BB BF       (3 bytes)
+     * - UTF-16 BE: FE FF         (2 bytes)
+     * - UTF-16 LE: FF FE         (2 bytes)
+     * - UTF-32 BE: 00 00 FE FF   (4 bytes)
+     * - UTF-32 LE: FF FE 00 00   (4 bytes)
+     */
+    private static BomResult detectBom(byte[] bytes) {
+        if (bytes == null || bytes.length < 2) {
+            return null;
+        }
+
+        // UTF-8 BOM: EF BB BF
+        if (bytes.length >= 3
+                && bytes[0] == (byte) 0xEF
+                && bytes[1] == (byte) 0xBB
+                && bytes[2] == (byte) 0xBF) {
+            return new BomResult(StandardCharsets.UTF_8, 3);
+        }
+
+        // UTF-32 BE: 00 00 FE FF (先检测，避免与 UTF-16 BE 混淆)
+        if (bytes.length >= 4
+                && bytes[0] == 0x00
+                && bytes[1] == 0x00
+                && bytes[2] == (byte) 0xFE
+                && bytes[3] == (byte) 0xFF) {
+            // Java 标准 Charset 没有 UTF-32，使用自定义名称
+            return new BomResult(Charset.forName("UTF-32BE"), 4);
+        }
+
+        // UTF-32 LE: FF FE 00 00
+        if (bytes.length >= 4
+                && bytes[0] == (byte) 0xFF
+                && bytes[1] == (byte) 0xFE
+                && bytes[2] == 0x00
+                && bytes[3] == 0x00) {
+            return new BomResult(Charset.forName("UTF-32LE"), 4);
+        }
+
+        // UTF-16 BE: FE FF
+        if (bytes[0] == (byte) 0xFE && bytes[1] == (byte) 0xFF) {
+            return new BomResult(StandardCharsets.UTF_16BE, 2);
+        }
+
+        // UTF-16 LE: FF FE (排除 UTF-32 LE 的情况)
+        if (bytes[0] == (byte) 0xFF && bytes[1] == (byte) 0xFE
+                && (bytes.length < 4 || bytes[2] != 0x00 || bytes[3] != 0x00)) {
+            return new BomResult(StandardCharsets.UTF_16LE, 2);
+        }
+
+        return null;
+    }
+
+    /**
+     * 检测文件编码（优先 BOM，再尝试 UTF-8/GBK）
      */
     private static Charset detectCharset(byte[] bytes) {
         if (bytes == null || bytes.length == 0) {
-            return StandardCharsets.UTF_8;  // 默认 UTF-8
+            return StandardCharsets.UTF_8;  // 默认 UTF-8（无 BOM）
         }
 
-        // 先尝试 UTF-8
+        // 优先检测 BOM
+        BomResult bom = detectBom(bytes);
+        if (bom != null) {
+            return bom.charset;
+        }
+
+        // 无 BOM：尝试 UTF-8，失败则回退 GBK
         String utf8 = new String(bytes, StandardCharsets.UTF_8);
         if (!containsReplacementChar(utf8, bytes)) {
             return StandardCharsets.UTF_8;
         }
 
-        // 回退到 GBK
+        // 回退到 GBK（Windows 中文默认编码）
         return Charset.forName("GBK");
     }
 
@@ -1584,27 +1686,53 @@ public final class FileSystemTools {
      */
     private static Charset detectFileCharset(Path filePath) throws Exception {
         if (!Files.exists(filePath)) {
-            return StandardCharsets.UTF_8;  // 新文件默认 UTF-8
+            return StandardCharsets.UTF_8;  // 新文件默认 UTF-8（无 BOM）
         }
         byte[] bytes = Files.readAllBytes(filePath);
         return detectCharset(bytes);
     }
 
     /**
-     * 棺能解码：优先尝试 UTF-8，失败则回退到 GBK
+     * 检测文件是否有 UTF-8 BOM
+     */
+    private static boolean hasUtf8Bom(byte[] bytes) {
+        return bytes != null && bytes.length >= 3
+                && bytes[0] == (byte) 0xEF
+                && bytes[1] == (byte) 0xBB
+                && bytes[2] == (byte) 0xBF;
+    }
+
+    /**
+     * 检测文件是否有 UTF-8 BOM
+     */
+    private static boolean hasUtf8Bom(Path filePath) throws Exception {
+        if (!Files.exists(filePath)) return false;
+        byte[] bytes = Files.readAllBytes(filePath);
+        return hasUtf8Bom(bytes);
+    }
+
+    /**
+     * 智能解码：优先 BOM，再 UTF-8，最后 GBK
      *
      * 解决 Windows 上中文编码问题：
-     * - Windows 记事本默认保存为 GBK
-     * - Windows 系统配置文件通常是 GBK
-     * - UTF-8 文件正常解码
-     * - GBK 文件回退解码
+     * - BOM 标记文件：直接使用对应编码
+     * - UTF-8 无 BOM：正常解码
+     * - GBK 文件：回退解码
      */
     private static String smartDecode(byte[] bytes) {
         if (bytes == null || bytes.length == 0) return "";
 
-        // 先尝试 UTF-8
+        // 优先检测 BOM
+        BomResult bom = detectBom(bytes);
+        if (bom != null) {
+            // 使用 BOM 指定的编码，跳过 BOM 字节
+            byte[] contentBytes = new byte[bytes.length - bom.bomLength];
+            System.arraycopy(bytes, bom.bomLength, contentBytes, 0, contentBytes.length);
+            return new String(contentBytes, bom.charset);
+        }
+
+        // 无 BOM：尝试 UTF-8
         String utf8 = new String(bytes, StandardCharsets.UTF_8);
-        // 检查是否有替换字符（说明有非法字节序列）
         if (!containsReplacementChar(utf8, bytes)) {
             return utf8;
         }
@@ -1617,22 +1745,13 @@ public final class FileSystemTools {
      * 检测 UTF-8 解码是否产生了替换字符（说明原始字节不是有效的 UTF-8）
      */
     private static boolean containsReplacementChar(String decoded, byte[] original) {
-        // 如果解码结果包含替换字符，说明有问题
+        // 如果解码结果包含替换字符，说明 UTF-8 解码失败，可能是 GBK
         if (decoded.contains("\uFFFD")) {
             return true;
         }
-        // 额外检查：如果解码后长度异常（比如某些 GBK 字符被错误解码）
-        // UTF-8 中文字符通常是 3 字节，GBK 是 2 字节
-        // 如果原始字节中有大量 0x80-0xFF 范围的字节但解码正常，可能是误判
-        // 简化判断：检查是否有常见 GBK 特征字节
-        for (byte b : original) {
-            // GBK 高位字节范围：0x81-0xFE
-            if ((b & 0xFF) >= 0x81 && (b & 0xFF) <= 0xFE) {
-                // 检查后面是否有对应的低位字节
-                // 这表示很可能是 GBK 编码
-                return true;
-            }
-        }
+        // 注意：不能通过检测 0x81-0xFE 字节来判断 GBK，因为 UTF-8 多字节编码
+        // 的后续字节（0x80-0xBF）也落在这个范围内，会导致 UTF-8 中文文件被误判为 GBK。
+        // 正确的做法是只依赖替换字符检测：UTF-8 解码器遇到非法字节会插入 \uFFFD
         return false;
     }
 
