@@ -167,7 +167,7 @@ public class ProjectContext {
         if (projectPath == null) return null;
 
         // 优先读取 CODE-AGENT.md
-        Path codeAgent = projectPath.resolve("CODE-AGENT.md");
+        Path codeAgent = projectPath.resolve("CODE_AGENT.md");
         if (Files.isRegularFile(codeAgent)) {
             return readFileMaxLines(codeAgent);
         }
