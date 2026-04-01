@@ -107,7 +107,7 @@ public class EmailPoller {
                 MailInfo mail = parseMessage(msg);
                 if (mail != null) {
                     // 使用 UID 去重
-                    long uid = folder.getUID(msg);
+                    long uid = ((UIDFolder) folder).getUID(msg);
                     if (!processedUids.contains(uid)) {
                         result.add(mail);
                         markProcessed(uid);
