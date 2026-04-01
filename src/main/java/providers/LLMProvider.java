@@ -34,20 +34,10 @@ public abstract class LLMProvider {
     /** 重试延迟（秒），对齐 Python: _CHAT_RETRY_DELAYS = (1, 2, 4) */
     protected static final List<Integer> CHAT_RETRY_DELAYS = Arrays.asList(1, 2, 4);
 
-    /** 瞬态错误标记，对齐 Python: _TRANSIENT_ERROR_MARKERS */
+    /** 瞬态错误标记（仅 rate limit，不重试） */
     protected static final List<String> TRANSIENT_ERROR_MARKERS = Arrays.asList(
             "429",
-            "rate limit",
-            "500",
-            "502",
-            "503",
-            "504",
-            "overloaded",
-            "timeout",
-            "timed out",
-            "connection",
-            "server error",
-            "temporarily unavailable"
+            "rate limit"
     );
 
     protected LLMProvider(String apiKey, String apiBase) {
@@ -246,10 +236,10 @@ public abstract class LLMProvider {
                         return CompletableFuture.completedFuture(response);
                     }
 
-                    // 瞬态判断
-                     if (!isTransientError(response.getContent())) {
-                         return CompletableFuture.completedFuture(response);
-                     }
+                    // 瞬态判断：rate limit 不重试，其他错误重试
+                    if (isTransientError(response.getContent())) {
+                        return CompletableFuture.completedFuture(response);
+                    }
 
                     if (attempt >= CHAT_RETRY_DELAYS.size()) {
                         if (cancelChecker != null && cancelChecker.isCancelled()) {
