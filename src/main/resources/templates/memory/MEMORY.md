@@ -29,7 +29,7 @@ This file stores important information that should persist across sessions.
 ```
 memory/
 ├── semantic/patterns.json     # 抽象模式（可复用）
-├── episodic/2026/             # 具体经验（时间记录）
+├── episodic/{年份}/             # 具体经验（时间记录）
 └── working/current_session.json # 当前会话状态
 ```
 
