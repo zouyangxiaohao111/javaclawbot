@@ -594,8 +594,15 @@ public class AgentLoop {
         }
 
         // 处理 /project 前缀命令
-        if (cmd.startsWith("/project")) {
-            Object[] result = context.handleProjectPrefix(msg.getContent());
+        if (cmd.trim().startsWith("/project")) {
+            Object[] result = null;
+            try {
+                result = context.handleProjectPrefix(msg.getContent());
+            } catch (Exception e) {
+                log.error("项目路径处理异常", e);
+                bus.publishOutbound(new OutboundMessage(msg.getChannel(), msg.getChatId(), "抱歉，处理项目路径时出错。如果是window环境请这样使用: /project {项目路径} 不需要加引号", List.of(), Map.of()));
+                return CompletableFuture.completedFuture(null);
+            }
             String output = (String) result[0];
             commandManager.addLocalCommand(new LocalCommand(cmd, output));
             bus.publishOutbound(new OutboundMessage(msg.getChannel(), msg.getChatId(), output, List.of(), Map.of()));
