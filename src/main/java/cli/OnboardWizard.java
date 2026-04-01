@@ -476,12 +476,20 @@ public final class OnboardWizard {
             return;
         }
 
-        // QuickStart 默认跳过技能安装
+        // QuickStart 默认安装所有技能
         if (flow == WizardFlow.QUICKSTART) {
-            System.out.println("  跳过技能安装（可稍后使用 'javaclawbot skills' 安装）");
+            System.out.println("  快速模式：安装所有内置技能...");
+            BuiltinSkillsInstaller.InstallSummary summary =
+                    BuiltinSkillsInstaller.installSelectedSkills(
+                            cfg.getWorkspacePath(),
+                            builtinSkills,
+                            overwrite
+                    );
+            BuiltinSkillsInstaller.printSummary(summary);
             return;
         }
 
+        // Advanced 模式：让用户选择要安装的技能
         TerminalPrompts.SelectionResult<BuiltinSkillsInstaller.SkillResource> selection =
                 BuiltinSkillsInstaller.promptSelection(terminal, builtinSkills);
 

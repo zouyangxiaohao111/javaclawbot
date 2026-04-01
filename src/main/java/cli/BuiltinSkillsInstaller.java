@@ -172,8 +172,7 @@ public final class BuiltinSkillsInstaller {
         try (DirectoryStream<Path> ds = Files.newDirectoryStream(root)) {
             for (Path p : ds) {
                 if (!Files.isDirectory(p)) continue;
-                if (Files.notExists(p.resolve("SKILL.md"))) continue;
-
+                // 所有 skills 目录下的子目录都视为技能，不再要求 SKILL.md
                 String name = p.getFileName().toString();
                 out.add(new SkillResource(name, CLASSPATH_SKILLS_ROOT + "/" + name));
             }
@@ -197,8 +196,7 @@ public final class BuiltinSkillsInstaller {
             try (DirectoryStream<Path> ds = Files.newDirectoryStream(root)) {
                 for (Path p : ds) {
                     if (!Files.isDirectory(p)) continue;
-                    if (Files.notExists(p.resolve("SKILL.md"))) continue;
-
+                    // 所有 skills 目录下的子目录都视为技能，不再要求 SKILL.md
                     String name = p.getFileName().toString();
                     out.add(new SkillResource(name, CLASSPATH_SKILLS_ROOT + "/" + name));
                 }
