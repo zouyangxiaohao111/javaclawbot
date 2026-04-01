@@ -21,6 +21,7 @@ public class ContextPruner {
 
     private static final String PRUNED_CONTEXT_IMAGE_MARKER = "[image removed during context pruning]";
 
+
     /**
      * 修剪上下文消息
      *
@@ -118,7 +119,7 @@ public class ContextPruner {
         }
 
         // 如果可修剪字符数不足，不执行硬清除
-        if (prunableToolChars < settings.getMinPrunableToolChars()) {
+        if (prunableToolChars < settings.obtainMinPrunableToolCharsByContextWindow(charWindow)) {
             return result;
         }
 

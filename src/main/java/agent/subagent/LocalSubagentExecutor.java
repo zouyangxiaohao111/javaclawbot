@@ -1,11 +1,7 @@
 package agent.subagent;
 
 import agent.ProgressCallback;
-import agent.tool.ExecTool;
-import agent.tool.FileSystemTools;
-import agent.tool.ToolRegistry;
-import agent.tool.WebFetchTool;
-import agent.tool.WebSearchTool;
+import agent.tool.*;
 import bus.MessageBus;
 import config.tool.ToolsConfig;
 import org.slf4j.Logger;

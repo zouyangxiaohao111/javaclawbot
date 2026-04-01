@@ -225,14 +225,15 @@ public class ProjectContext {
             return false;
         }
 
-        for (String marker : PROJECT_MARKERS) {
+        return true;
+        /*for (String marker : PROJECT_MARKERS) {
             Path markerPath = dir.resolve(marker);
             if (Files.exists(markerPath)) {
                 return true;
             }
         }
 
-        return false;
+        return false;*/
     }
 
     /**

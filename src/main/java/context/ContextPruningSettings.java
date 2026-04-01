@@ -1,5 +1,7 @@
 package context;
 
+import lombok.Data;
+
 /**
  * 上下文修剪配置
  * 
@@ -23,13 +25,13 @@ public class ContextPruningSettings {
     private long ttlMs = 5 * 60 * 1000;
 
     /** 保留最后 N 个助手消息 */
-    private int keepLastAssistants = 3;
+    private int keepLastAssistants = 5;
 
     /** 软修剪阈值（上下文使用率 > 此值时修剪工具结果） */
     private double softTrimRatio = 0.3;
 
     /** 硬清除阈值（上下文使用率 > 此值时清除旧工具结果） */
-    private double hardClearRatio = 0.5;
+    private double hardClearRatio = 0.85;
 
     /** 最小可修剪工具字符数 */
     private int minPrunableToolChars = 50_000;
@@ -82,6 +84,15 @@ public class ContextPruningSettings {
 
     public int getMinPrunableToolChars() {
         return minPrunableToolChars;
+    }
+
+    public int obtainMinPrunableToolCharsByContextWindow(Integer contextWindow) {
+        if (contextWindow == null) {
+            return minPrunableToolChars;
+        }
+
+        // 当字符数大于上下文0.8时,触发修剪
+        return (int) Math.floor(0.8 * contextWindow * CHARS_PER_TOKEN_ESTIMATE);
     }
 
     public void setMinPrunableToolChars(int minPrunableToolChars) {
