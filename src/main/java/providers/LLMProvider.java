@@ -130,6 +130,112 @@ public abstract class LLMProvider {
     }
 
     /**
+     * 检查是否已取消，若取消则抛出异常
+     */
+    private void checkCancelled(CancelChecker cancelChecker) {
+        if (cancelChecker != null && cancelChecker.isCancelled()) {
+            throw new CancellationException("LLM request cancelled");
+        }
+    }
+
+    /**
+     * 创建错误响应
+     */
+    private LLMResponse errorResponse(String message) {
+        return new LLMResponse(message, null, "error", null, null, null);
+    }
+
+    /**
+     * 判断是否需要重试
+     * - 非错误响应：不重试
+     * - Rate limit 错误（isTransientError=true）：不重试
+     * - 其他错误：重试
+     */
+    private boolean shouldRetry(LLMResponse response) {
+        if (!"error".equals(response.getFinishReason())) {
+            return false;
+        }
+        // isTransientError 识别 rate limit
+        // rate limit 不重试，其他错误重试
+        return !isTransientError(response.getContent());
+    }
+
+    /**
+     * 统一处理异常
+     */
+    private LLMResponse handleException(Throwable ex, CancelChecker cancelChecker) {
+        Throwable root = (ex instanceof CompletionException && ex.getCause() != null)
+                ? ex.getCause() : ex;
+
+        if (root instanceof CancellationException) {
+            throw new CompletionException(root);
+        }
+
+        log.error("调用LLM失败", root);
+        return errorResponse("调用 LLM 失败: " + root.getMessage());
+    }
+
+    /**
+     * 延迟执行，支持取消检查
+     */
+    private CompletableFuture<Void> delayWithCancelCheck(int delayMs, CancelChecker cancelChecker) {
+        return CompletableFuture.runAsync(() -> {
+            long slept = 0L;
+            while (slept < delayMs) {
+                checkCancelled(cancelChecker);
+                long sleepMs = Math.min(100L, delayMs - slept);
+                try {
+                    TimeUnit.MILLISECONDS.sleep(sleepMs);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new CompletionException(e);
+                }
+                slept += sleepMs;
+            }
+        });
+    }
+
+    /**
+     * 记录重试日志
+     */
+    private void logRetry(int attempt, int delayMs, String content) {
+        String preview = content != null && content.length() > 120
+                ? content.substring(0, 120) : content;
+        log.warn("LLM error (attempt {}/{}), retrying in {}ms: {}",
+                attempt + 1, CHAT_RETRY_DELAYS.size(), delayMs, preview);
+    }
+
+    /**
+     * 执行重试逻辑
+     */
+    private CompletableFuture<LLMResponse> retryTransientError(
+            List<Map<String, Object>> messages,
+            List<Map<String, Object>> tools,
+            String model,
+            int maxTokens,
+            double temperature,
+            String reasoningEffort,
+            Map<String, Object> think,
+            Map<String, Object> extraBody,
+            int attempt,
+            CancelChecker cancelChecker,
+            LLMResponse lastError
+    ) {
+        if (attempt >= CHAT_RETRY_DELAYS.size()) {
+            return CompletableFuture.completedFuture(lastError);
+        }
+
+        int delayMs = CHAT_RETRY_DELAYS.get(attempt) * 1000;
+        logRetry(attempt, delayMs, lastError.getContent());
+
+        return delayWithCancelCheck(delayMs, cancelChecker)
+                .thenCompose(v -> chatWithRetryInternal(
+                        messages, tools, model, maxTokens, temperature,
+                        reasoningEffort, think, extraBody, attempt + 1, cancelChecker
+                ));
+    }
+
+    /**
      * 发送对话请求（异步）- 主方法
      *
      * @param think         思考参数（不同模型格式不同），如 {"type": "enabled", "clear_thinking": false}
@@ -169,6 +275,7 @@ public abstract class LLMProvider {
                 messages, tools, model, maxTokens, temperature, reasoningEffort, think, extraBody, 0, cancelChecker
         );
     }
+
     /**
      * 兼容旧签名
      */
@@ -195,119 +302,25 @@ public abstract class LLMProvider {
             int attempt,
             CancelChecker cancelChecker
     ) {
+        // 前置取消检查
         if (cancelChecker != null && cancelChecker.isCancelled()) {
             return CompletableFuture.failedFuture(new CancellationException("LLM request cancelled"));
         }
 
         return chat(messages, tools, model, maxTokens, temperature, reasoningEffort, think, extraBody, cancelChecker)
-                .handle((response, ex) -> {
-                    if (cancelChecker != null && cancelChecker.isCancelled()) {
-                        throw new CompletionException(new CancellationException("LLM request cancelled"));
-                    }
-
-                    if (ex != null) {
-                        Throwable root = (ex instanceof CompletionException && ex.getCause() != null)
-                                ? ex.getCause()
-                                : ex;
-
-                        if (root instanceof CancellationException) {
-                            throw new CompletionException(root);
-                        }
-
-                        log.error("调用LLM失败", root);
-                        return new LLMResponse(
-                                "调用 LLM 失败: " + root.getMessage(),
-                                null,
-                                "error",
-                                null,
-                                null,
-                                null
-                        );
-                    }
-
+                .thenApply(response -> {
+                    checkCancelled(cancelChecker);
                     return response;
                 })
+                .exceptionally(ex -> handleException(ex, cancelChecker))
                 .thenCompose(response -> {
-                    if (cancelChecker != null && cancelChecker.isCancelled()) {
-                        return CompletableFuture.failedFuture(new CancellationException("LLM request cancelled"));
-                    }
-
-                    if (!"error".equals(response.getFinishReason())) {
+                    if (!shouldRetry(response)) {
                         return CompletableFuture.completedFuture(response);
                     }
-
-                    // 瞬态判断：rate limit 不重试，其他错误重试
-                    if (isTransientError(response.getContent())) {
-                        return CompletableFuture.completedFuture(response);
-                    }
-
-                    if (attempt >= CHAT_RETRY_DELAYS.size()) {
-                        if (cancelChecker != null && cancelChecker.isCancelled()) {
-                            return CompletableFuture.failedFuture(new CancellationException("LLM request cancelled"));
-                        }
-
-                        return chat(messages, tools, model, maxTokens, temperature, reasoningEffort, think, extraBody, cancelChecker)
-                                .handle((resp, ex) -> {
-                                    if (ex != null) {
-                                        Throwable root = (ex instanceof CompletionException && ex.getCause() != null)
-                                                ? ex.getCause()
-                                                : ex;
-
-                                        if (root instanceof CancellationException) {
-                                            throw new CompletionException(root);
-                                        }
-
-                                        return new LLMResponse(
-                                                "Error calling LLM: " + root.getMessage(),
-                                                null,
-                                                "error",
-                                                null,
-                                                null,
-                                                null
-                                        );
-                                    }
-                                    return resp;
-                                });
-                    }
-
-                    int delayMs = CHAT_RETRY_DELAYS.get(attempt) * 1000;
-                    String errPreview = response.getContent() != null && response.getContent().length() > 120
-                            ? response.getContent().substring(0, 120)
-                            : response.getContent();
-
-                    System.getLogger(LLMProvider.class.getName()).log(
-                            System.Logger.Level.WARNING,
-                            "LLM transient error (attempt {0}/{1}), retrying in {2}ms: {3}",
-                            attempt + 1, CHAT_RETRY_DELAYS.size(), delayMs, errPreview
-                    );
-
-                    CompletableFuture<Void> delayFuture = CompletableFuture.runAsync(() -> {
-                        long slept = 0L;
-                        long chunk = 100L;
-                        try {
-                            while (slept < delayMs) {
-                                if (cancelChecker != null && cancelChecker.isCancelled()) {
-                                    throw new CancellationException("Retry cancelled");
-                                }
-                                long thisSleep = Math.min(chunk, delayMs - slept);
-                                TimeUnit.MILLISECONDS.sleep(thisSleep);
-                                slept += thisSleep;
-                            }
-                        } catch (InterruptedException e) {
-                            Thread.currentThread().interrupt();
-                            throw new CompletionException(e);
-                        }
-                    });
-
-                    return delayFuture.thenCompose(v ->
-                            chatWithRetryInternal(
-                                    messages, tools, model, maxTokens, temperature, reasoningEffort, think, extraBody,
-                                    attempt + 1, cancelChecker
-                            )
-                    );
+                    return retryTransientError(messages, tools, model, maxTokens, temperature,
+                            reasoningEffort, think, extraBody, attempt, cancelChecker, response);
                 });
     }
-
 
     public CompletableFuture<LLMResponse> chatWithRetry(
             List<Map<String, Object>> messages,
