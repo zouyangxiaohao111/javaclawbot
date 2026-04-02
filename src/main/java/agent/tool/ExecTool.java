@@ -196,6 +196,20 @@ public class ExecTool extends Tool {
     }
 
     /**
+     * 检测 javac 命令并自动注入 -encoding UTF-8
+     */
+    private String injectJavacEncoding(String command) {
+        // 匹配 javac 命令（可能带路径）
+        // 不处理已有 -encoding 的情况
+        if (command.contains("javac") && !command.contains("-encoding")) {
+            // 找到 javac 后面的第一个参数位置
+            // 简单处理：在 javac 后插入 -encoding UTF-8
+            return command.replaceFirst("(javac\\s*)", "$1-encoding UTF-8 ");
+        }
+        return command;
+    }
+
+    /**
      * 执行命令并拼接输出：
      * - stdout：直接输出
      * - stderr：非空时输出 "STDERR:\n..."
@@ -205,6 +219,9 @@ public class ExecTool extends Tool {
      */
     private String runCommand(String command, String cwd) {
         boolean isWindows = isWindows();
+
+        // 检测 javac 命令并自动注入 -encoding UTF-8
+        command = injectJavacEncoding(command);
 
         List<String> cmd = isWindows
                 ? List.of("cmd.exe", "/c", "chcp 65001 >nul && " + command)
@@ -219,6 +236,12 @@ public class ExecTool extends Tool {
             String sep = File.pathSeparator;
             String old = env.getOrDefault("PATH", "");
             env.put("PATH", old + sep + pathAppend);
+        }
+
+        // Linux/macOS: 设置 UTF-8 区域，确保 Java 工具使用 UTF-8 编码
+        if (!isWindows) {
+            env.put("LC_ALL", "en_US.UTF-8");
+            env.put("LANG", "en_US.UTF-8");
         }
 
         Process process = null;

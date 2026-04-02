@@ -26,10 +26,13 @@ public class ContextOverflowDetector {
 
     /** 上下文溢出提示的正则 */
     private static final Pattern CONTEXT_OVERFLOW_HINT = Pattern.compile(
-            "context.*overflow|" +
-            "context window.*(too (?:large|long)|exceed|over|limit|max(?:imum)?|requested|sent|tokens)|" +
-            "prompt.*(too (?:large|long)|exceed|over|limit|max(?:imum)?)|" +
-            "(?:request|input).*(?:context|window|length|token).*(too (?:large|long)|exceed|over|limit|max(?:imum)?)",
+            """
+        context.*overflow|
+        context window.*(too (?:large|long)|exceed|over|limit|max(?:imum)?|requested|sent|tokens)|
+        prompt.*(too (?:large|long)|exceed|over|limit|max(?:imum)?)|
+        (?:request|input).*(?:context|window|length|token).*(too (?:large|long)|exceed|over|limit|max(?:imum)?)|
+        \\b(?:context|window|long|limit|tokens)\\b
+""",
             Pattern.CASE_INSENSITIVE
     );
 

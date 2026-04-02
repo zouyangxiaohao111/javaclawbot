@@ -193,8 +193,6 @@ public class AgentLoop {
         );
         this.mcpServers = (mcpServers != null) ? mcpServers : Map.of();
         this.mcpManager = new McpManager(workspace, mcpServers, executor);
-
-        this.memoryStore = new MemoryStore(workspace);
         // 注册工具
         this.sharedTools = new ToolRegistry();
 
@@ -210,6 +208,7 @@ public class AgentLoop {
             maxConcurrent = cfg.getAgents().getDefaults().getMaxConcurrent();
         }
         this.context = new ContextBuilder(workspace, currentConfig().getAgents().getDefaults().getBootstrapConfig());
+        this.memoryStore = new MemoryStore(workspace, context);
         // AgentLoopQueue 使用独立线程池，避免 executeImmediately 中的 join() 阻塞共享线程池导致死锁
         this.queue = new AgentLoopQueue(maxConcurrent);
         this.cronToolFacade = (cronService != null) ? new CronTool(cronService) : null;
@@ -521,7 +520,7 @@ public class AgentLoop {
                     history, msg.getContent(), null, null, channel, chatId
             );
 
-            return runAgentLoop(sessionKy, initial, requestTools, null).thenApply(rr -> {
+            return runAgentLoop(msg, initial, requestTools, null).thenApply(rr -> {
                 //saveTurn(session, rr.messages, 2 + history.size());
                 //sessions.save(session);
                 return new OutboundMessage(
@@ -647,7 +646,7 @@ public class AgentLoop {
         };
         ProgressCallback progress = (onProgress != null) ? onProgress : busProgress;
 
-        return runAgentLoop(sessionKey, initialMessages, requestTools, progress).thenApply(rr -> {
+        return runAgentLoop(msg, initialMessages, requestTools, progress).thenApply(rr -> {
             String finalContent = rr.finalContent != null
                     ? rr.finalContent
                     : "处理完成但没有响应内容。";
@@ -796,7 +795,7 @@ public class AgentLoop {
     }
 
     private CompletionStage<RunResult> runAgentLoop(
-            String sessionKey,
+            InboundMessage msg,
             List<Map<String, Object>> initialMessages,
             ToolView tools,
             ProgressCallback onProgress
@@ -805,7 +804,7 @@ public class AgentLoop {
         List<Map<String, Object>> messages = new ArrayList<>(initialMessages);
         List<String> toolsUsed = new ArrayList<>();
 
-        UsageAccumulator usageAcc = usageTrackers.computeIfAbsent(sessionKey, k -> new UsageAccumulator());
+        UsageAccumulator usageAcc = usageTrackers.computeIfAbsent(msg.getSessionKey(), k -> new UsageAccumulator());
 
         ContextPruningSettings pruningSettings = ContextPruningSettings.DEFAULT;
         int contextWindow = ContextWindowDiscovery.resolveContextTokensForModel(
@@ -821,7 +820,7 @@ public class AgentLoop {
         // 添加原始日志
         memoryStore.appendToToday(GsonFactory.getGson().toJson(userMsg1));
 
-        if (completeIfStopped(sessionKey, st, out, toolsUsed, messages, usageAcc)) {
+        if (completeIfStopped(msg.getSessionKey(), st, out, toolsUsed, messages, usageAcc)) {
             return out;
         }
 
@@ -832,7 +831,7 @@ public class AgentLoop {
                     return;
                 }
 
-                if (completeIfStopped(sessionKey, st, out, toolsUsed, messages, usageAcc)) {
+                if (completeIfStopped(msg.getSessionKey(), st, out, toolsUsed, messages, usageAcc)) {
                     return;
                 }
 
@@ -854,19 +853,20 @@ public class AgentLoop {
                     return;
                 }
 
+                // 执行上下文修剪
                 List<Map<String, Object>> prunedMessages = ContextPruner.pruneContextMessages(
                         messages, pruningSettings, contextWindow,
                         // 不修剪 skill 工具的结果，因为其中包含技能内容，裁剪后 LLM 不知道该技能
-                        toolName -> !"skill".equals(toolName)
+                        toolName -> !"skill".equalsIgnoreCase(toolName)
                 );
                 int beforeChars = ContextPruner.estimateContextChars(messages);
                 int afterChars = ContextPruner.estimateContextChars(prunedMessages);
-                log.debug("上下文已修剪: {} 字符 -> {} 字符", beforeChars, afterChars);
+                log.info("上下文已修剪: {} 字符 -> {} 字符", beforeChars, afterChars);
                 messages.clear();
                 messages.addAll(prunedMessages);
 
                 // 是否停止
-                if (completeIfStopped(sessionKey, st, out, toolsUsed, messages, usageAcc)) {
+                if (completeIfStopped(msg.getSessionKey(), st, out, toolsUsed, messages, usageAcc)) {
                     return;
                 }
 
@@ -880,10 +880,10 @@ public class AgentLoop {
                         rs.reasoningEffort(),
                         rs.think(),
                         rs.extraBody(),
-                        () -> isStopRequested(sessionKey)
+                        () -> isStopRequested(msg.getSessionKey())
                 ).toCompletableFuture();
 
-                registerLlmCall(sessionKey, llmFuture);
+                registerLlmCall(msg.getSessionKey(), llmFuture);
 
                 llmFuture.whenComplete((resp, ex) -> {
                     // 通过llm执行上下文压缩
@@ -892,7 +892,7 @@ public class AgentLoop {
                         return;
                     }
 
-                    if (completeIfStopped(sessionKey, st, out, toolsUsed, messages, usageAcc)) {
+                    if (completeIfStopped(msg.getSessionKey(), st, out, toolsUsed, messages, usageAcc)) {
                         return;
                     }
 
@@ -901,7 +901,7 @@ public class AgentLoop {
                                 ? ex.getCause()
                                 : ex;
 
-                        if (root instanceof CancellationException || isStopRequested(sessionKey)) {
+                        if (root instanceof CancellationException || isStopRequested(msg.getSessionKey())) {
                             if (st.done.compareAndSet(false, true)) {
                                 out.complete(new RunResult("已停止。", toolsUsed, messages, usageAcc.getTotal()));
                             }
@@ -912,15 +912,23 @@ public class AgentLoop {
 
                         if (ContextOverflowDetector.isLikelyContextOverflowError(errorMsg)) {
                             log.warn("检测到上下文溢出: {}", errorMsg);
+                            // 发送通知给用户
+                            bus.publishOutbound(new OutboundMessage(msg.getChannel(), msg.getChatId(), "检测到上下文溢出, 正在尝试压缩上下文", List.of(), Map.of()));
 
                             if (overflowCompactionAttempts[0] < maxOverflowCompactionAttempts) {
                                 overflowCompactionAttempts[0]++;
+                                String notice = "上下文尝试自动压缩 (第 %s/%s 次)".formatted(overflowCompactionAttempts[0], maxOverflowCompactionAttempts);
                                 log.info("尝试自动压缩 (第 {}/{} 次)",
                                         overflowCompactionAttempts[0], maxOverflowCompactionAttempts);
+
+                                // 发送通知给用户
+                                bus.publishOutbound(new OutboundMessage(msg.getChannel(), msg.getChatId(), notice, List.of(), Map.of()));
 
                                 compactMessages(messages).thenAccept(compacted -> {
                                     if (compacted) {
                                         log.info("自动压缩成功，正在重试...");
+                                        // 发送通知给用户
+                                        bus.publishOutbound(new OutboundMessage(msg.getChannel(), msg.getChatId(), "上下文压缩成功, 尝试重试中!", List.of(), Map.of()));
                                         executor.execute(this);
                                     } else {
                                         log.warn("自动压缩失败");
@@ -934,6 +942,10 @@ public class AgentLoop {
                                     }
                                 }).exceptionally(compactEx -> {
                                     log.warn("自动压缩出错: {}", compactEx.toString());
+
+                                    // 发送通知给用户
+                                    bus.publishOutbound(new OutboundMessage(msg.getChannel(), msg.getChatId(), "上下文压缩失败, 请重新执行命令!", List.of(), Map.of()));
+
                                     st.done.set(true);
                                     out.complete(new RunResult(
                                             ContextOverflowDetector.formatOverflowError(),
@@ -969,7 +981,7 @@ public class AgentLoop {
                         return;
                     }
 
-                    if (completeIfStopped(sessionKey, st, out, toolsUsed, messages, usageAcc)) {
+                    if (completeIfStopped(msg.getSessionKey(), st, out, toolsUsed, messages, usageAcc)) {
                         return;
                     }
 
@@ -1006,13 +1018,13 @@ public class AgentLoop {
                         messages.clear();
                         messages.addAll(updated);
 
-                        executeToolCallsSequential(sessionKey, resp.getToolCalls(), toolsUsed, messages, tools)
+                        executeToolCallsSequential(msg.getSessionKey(), resp.getToolCalls(), toolsUsed, messages, tools)
                                 .whenComplete((v, ex2) -> {
                                     if (st.done.get()) {
                                         return;
                                     }
 
-                                    if (completeIfStopped(sessionKey, st, out, toolsUsed, messages, usageAcc)) {
+                                    if (completeIfStopped(msg.getSessionKey(), st, out, toolsUsed, messages, usageAcc)) {
                                         return;
                                     }
 
@@ -1021,7 +1033,7 @@ public class AgentLoop {
                                                 ? ex2.getCause()
                                                 : ex2;
 
-                                        if (root2 instanceof CancellationException || isStopRequested(sessionKey)) {
+                                        if (root2 instanceof CancellationException || isStopRequested(msg.getSessionKey())) {
                                             if (st.done.compareAndSet(false, true)) {
                                                 out.complete(new RunResult("已停止。", toolsUsed, messages, usageAcc.getTotal()));
                                             }
