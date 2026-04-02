@@ -82,8 +82,6 @@ public class MemoryStore {
     /** 记忆搜索工具（支持 memory 目录下多文件） */
     private MemorySearch searchTool;
 
-    private final ContextBuilder contextBuilder;
-
     public MemoryStore(Path workspace, ContextBuilder contextBuilder) {
         this.workspaceDir = Objects.requireNonNull(workspace, "workspace");
         // 确保 memory 目录存在
@@ -94,7 +92,6 @@ public class MemoryStore {
         this.episodicDir = Helpers.ensureDir(memoryDir.resolve("episodic"));
         Helpers.ensureDir(episodicDir.resolve(String.valueOf(LocalDate.now().getYear())));
         this.searchTool = null;
-        this.contextBuilder = contextBuilder;
     }
 
     // ==================== 每日文件管理 ====================
@@ -305,6 +302,7 @@ public class MemoryStore {
      * @param temperature  温度
      * @param archiveAll   是否归档全部
      * @param memoryWindow 记忆窗口
+     * @param consolidateThreshold 上下文压缩触发阈值（默认 0.95）
      * @return 成功返回 true
      */
     public CompletableFuture<Boolean> consolidate(
@@ -314,20 +312,49 @@ public class MemoryStore {
             int contextWindow,
             double temperature,
             boolean archiveAll,
-            int memoryWindow
+            int memoryWindow,
+            double consolidateThreshold
     ) {
         Objects.requireNonNull(session, "session");
         Objects.requireNonNull(provider, "provider");
         Objects.requireNonNull(model, "model");
 
         final List<Map<String, Object>> messages = session.getMessages();
-        final int keepCount = archiveAll ? 0 : memoryWindow / 2;
 
-        // 消息不足以压缩
-        if (messages.size() <= keepCount) {
-            log.info("消息不足以压缩，跳过");
+        // 触发阈值判断：
+        // 1. 消息列表数量阈值：memoryWindow * 0.9
+        // 2. 上下文 token 阈值：contextWindow * consolidateThreshold
+        final int keepCount = archiveAll ? 0 : (int) (memoryWindow * 0.9);
+
+        // 估算当前上下文 token 数
+        int estimatedChars = context.ContextPruner.estimateContextChars(messages);
+        int estimatedTokens = (int) Math.floor(estimatedChars / context.ContextPruningSettings.CHARS_PER_TOKEN_ESTIMATE);
+        double contextRatio = contextWindow > 0 ? (double) estimatedTokens / contextWindow : 0;
+
+        // 判断是否需要触发压缩
+        boolean needConsolidate = false;
+        String triggerReason = null;
+
+        // 条件 1：消息数量超过阈值
+        if (messages.size() > keepCount) {
+            needConsolidate = true;
+            triggerReason = String.format("消息数量 %d > keepCount %d", messages.size(), keepCount);
+        }
+
+        // 条件 2：上下文使用率超过阈值
+        if (contextRatio > consolidateThreshold) {
+            needConsolidate = true;
+            triggerReason = String.format("上下文使用率 %.1f%% > %.0f%% (估算 %d / %d tokens)",
+                    contextRatio * 100, consolidateThreshold * 100, estimatedTokens, contextWindow);
+        }
+
+        if (!needConsolidate) {
+            log.debug("无需压缩：消息数 {} <= keepCount {}, 上下文使用率 {}%",
+                    messages.size(), keepCount, String.format("%.1f", contextRatio * 100));
             return CompletableFuture.completedFuture(true);
         }
+
+        log.info("触发记忆压缩：{}", triggerReason);
 
         // 没有新增可压缩内容
         if (session.getLastConsolidated() >= messages.size() - keepCount) {
@@ -336,35 +363,26 @@ public class MemoryStore {
         }
 
         // 待压缩消息
-        int from = session.getLastConsolidated();
-        int toExclusive = messages.size() - keepCount;
-        List<Map<String, Object>> toConsolidate = new ArrayList<>(messages.subList(from, toExclusive));
+        List<Map<String, Object>> toConsolidate = new ArrayList<>(messages);
 
         if (toConsolidate.isEmpty()) {
             return CompletableFuture.completedFuture(true);
         }
 
-        log.info("记忆压缩：压缩 {} 条消息（索引 {} 到 {}）", toConsolidate.size(), from, toExclusive - 1);
-
-        // 修复孤立工具调用配对
-        var repairResult = MemoryCompaction.repairToolUseResultPairing(toConsolidate);
-        List<Map<String, Object>> repairedMessages = repairResult.messages;
-        if (repairResult.droppedOrphanCount > 0) {
-            log.info("修复了 {} 个孤立的 tool_result", repairResult.droppedOrphanCount);
-        }
+        log.info("记忆压缩：压缩 {} 条消息", toConsolidate.size());
 
         // 读取当前 MEMORY.md
         String currentMemory = readLongTerm();
 
         // 阶段 1：调用 prune_messages
-        PruneResult pruneResult = callPruneMessages(provider, model, contextWindow, temperature, repairedMessages);
+        PruneResult pruneResult = callPruneMessages(provider, model, contextWindow, temperature, messages);
         if (pruneResult == null) {
             log.warn("prune_messages 返回空结果，使用传统压缩");
-            return fallbackConsolidate(session, repairedMessages, provider, model, contextWindow, temperature, archiveAll, keepCount, currentMemory);
+            return fallbackConsolidate(session, messages, provider, model, contextWindow, temperature, archiveAll, keepCount, currentMemory);
         }
 
         // 执行消息删除
-        List<Map<String, Object>> importantMessages = executePrune(session, pruneResult, from, repairedMessages);
+        List<Map<String, Object>> importantMessages = executePrune(session, pruneResult, 0, messages);
 
         // 阶段 2：调用 update_memory
         return callUpdateMemory(provider, model, contextWindow, temperature, currentMemory, importantMessages)
@@ -397,7 +415,7 @@ public class MemoryStore {
             sb.append(msg.getOrDefault("role", "?")).append(": ");
             Object content = msg.get("content");
             if (content instanceof String s) {
-                sb.append(truncate(s, 200));
+                sb.append(truncate(s, 300));
             } else {
                 sb.append("[复杂内容]");
             }

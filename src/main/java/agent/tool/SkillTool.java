@@ -38,10 +38,11 @@ public class SkillTool extends Tool {
                     1.load - 加载指定技能（默认动作）。
                     2.list - 列出指定路径下的所有技能。
                     3.unload - 卸载指定名称的技能。
+                    4.reload - 强制重新加载已加载的技能（用于上下文裁剪后恢复完整技能内容）。
 
                     参数说明：
-                    - action：动作类型，可选 load、list 或 unload，默认为 load。
-                    - name：技能名称，在 load 或 unload 时使用。
+                    - action：动作类型，可选 load、list、unload 或 reload。默认 load。
+                    - name：技能名称，在 load、unload 或 reload 时使用。
                     - path：技能目录路径，在 list 时使用；如果为空，则列出当前工作目录所有技能。
 
                     重要提示：
@@ -49,7 +50,7 @@ public class SkillTool extends Tool {
                     - **阻塞性要求：**当用户请求匹配某个技能时，必须先调用相关技能工具，然后再生成其他响应。这是为了确保技能优先执行。
                     - **避免无效操作：**不要仅仅提到技能而不实际调用此工具，也不要调用已在运行中的技能。
                     - **技能加载状态：**如果技能名称已在用户说明中指定（格式：用户已指定使用的技能列表: xxx,xxx），则说明技能已加载，无需再次 load。具体技能说明在对话记录上下文中存在；
-                    - 若技能说明不在当前对话上下文中（可能因上下文裁剪丢失），需重新加载。
+                    - 若技能说明不在当前对话上下文中（可能因上下文裁剪丢失），需使用 reload 动作重新加载。
                 """;
     }
 
@@ -59,11 +60,11 @@ public class SkillTool extends Tool {
 
         Map<String, Object> action = new LinkedHashMap<>();
         action.put("type", "string");
-        action.put("description", "操作类型: load | list | unload。默认 load");
+        action.put("description", "操作类型: load | list | unload | reload。默认 load");
 
         Map<String, Object> name = new LinkedHashMap<>();
         name.put("type", "string");
-        name.put("description", "技能名称。load / unload 时使用");
+        name.put("description", "技能名称。load / unload / reload 时使用");
 
         Map<String, Object> path = new LinkedHashMap<>();
         path.put("type", "string");
@@ -97,8 +98,9 @@ public class SkillTool extends Tool {
             case "load" -> executeLoad(params);
             case "list" -> executeList(params);
             case "unload" -> executeUnload(params);
+            case "reload" -> executeReload(params);
             default -> CompletableFuture.completedFuture(
-                    "Error: unsupported action '" + action + "', expected one of: load, list, unload"
+                    "Error: unsupported action '" + action + "', expected one of: load, list, unload, reload"
             );
         };
     }
@@ -151,6 +153,30 @@ public class SkillTool extends Tool {
 
         return CompletableFuture.completedFuture(
                 commandQueueManager.unloadUserSkill(name)
+        );
+    }
+
+    /**
+     * 强制重新加载已加载的技能
+     * 用于上下文裁剪后恢复完整技能内容
+     */
+    private CompletableFuture<String> executeReload(Map<String, Object> params) {
+        String name = getString(params, "name");
+
+        if (name == null || name.isBlank()) {
+            return CompletableFuture.completedFuture("Error: skill name required for action=reload");
+        }
+
+        // 从 loadSkills 中移除，绕过 isLoaded 检查
+        // 注意：不从 userLoadedSkills 移除，用户仍然在使用这个技能
+        commandQueueManager.getLoadSkills().remove(name);
+
+        // 重新加载
+        SkillCommand skillCommand = new SkillCommand(name, name, skillsLoader);
+        commandQueueManager.addSkillCommandByTool(skillCommand);
+
+        return CompletableFuture.completedFuture(
+                "[技能重新加载完成]\n" + skillCommand.getOutput()
         );
     }
 

@@ -34,6 +34,18 @@ public class AgentDefaults {
      */
     private int skillMaxLoad = 5;
 
+    /**
+     * 上下文压缩触发阈值（默认 0.95）
+     * 当上下文使用率超过此阈值时，阻塞执行 consolidate 压缩
+     */
+    private double consolidateThreshold = 0.95;
+
+    /**
+     * 软裁剪触发阈值（默认 0.7）
+     * 当上下文使用率超过此阈值时，执行 ContextPruner 软裁剪
+     */
+    private double softTrimThreshold = 0.7;
+
     private String reasoningEffort = null;
 
 

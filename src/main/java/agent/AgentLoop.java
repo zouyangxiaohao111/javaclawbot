@@ -228,6 +228,32 @@ public class AgentLoop {
         return runtimeSnapshot().memoryWindow();
     }
 
+    private double currentConsolidateThreshold() {
+        if (runtimeSettings != null) {
+            return runtimeSettings.getCurrentConfig()
+                    .getAgents().getDefaults().getConsolidateThreshold();
+        }
+        return 0.95; // 默认值
+    }
+
+    private double currentSoftTrimThreshold() {
+        if (runtimeSettings != null) {
+            return runtimeSettings.getCurrentConfig()
+                    .getAgents().getDefaults().getSoftTrimThreshold();
+        }
+        return 0.7; // 默认值
+    }
+
+    /**
+     * 从配置创建 ContextPruningSettings
+     */
+    private ContextPruningSettings createPruningSettings() {
+        ContextPruningSettings settings = new ContextPruningSettings();
+        settings.setSoftTrimRatio(currentSoftTrimThreshold());
+        // 其他设置保持默认值
+        return settings;
+    }
+
     private int currentContextWindow() {
         return runtimeSnapshot().contentWindow();
     }
@@ -806,7 +832,8 @@ public class AgentLoop {
 
         UsageAccumulator usageAcc = usageTrackers.computeIfAbsent(msg.getSessionKey(), k -> new UsageAccumulator());
 
-        ContextPruningSettings pruningSettings = ContextPruningSettings.DEFAULT;
+        // 从配置创建 ContextPruningSettings
+        ContextPruningSettings pruningSettings = createPruningSettings();
         int contextWindow = ContextWindowDiscovery.resolveContextTokensForModel(
                 null, model, null, this.contextWindow, runtimeSettings.getCurrentConfig());
 
@@ -853,7 +880,48 @@ public class AgentLoop {
                     return;
                 }
 
-                // 执行上下文修剪
+                // 检查是否需要执行硬压缩（阻塞 + 通知用户）
+                int estimatedChars = ContextPruner.estimateContextChars(messages);
+                int estimatedTokens = (int) Math.floor(estimatedChars / ContextPruningSettings.CHARS_PER_TOKEN_ESTIMATE);
+                double contextRatio = contextWindow > 0 ? (double) estimatedTokens / contextWindow : 0;
+                double consolidateThreshold = currentConsolidateThreshold();
+
+                if (contextRatio > consolidateThreshold) {
+                    // 通知用户正在压缩
+                    log.info("上下文使用率 {}% > 阈值 {}%，触发阻塞压缩",
+                            String.format("%.1f", contextRatio * 100),
+                            String.format("%.0f", consolidateThreshold * 100));
+
+                    bus.publishOutbound(new OutboundMessage(
+                            msg.getChannel(),
+                            msg.getChatId(),
+                            "⏳ 上下文已满，正在压缩记忆...",
+                            List.of(),
+                            Map.of()
+                    ));
+
+                    // 阻塞等待压缩完成
+                    Session session = sessions.getOrCreate(msg.getSessionKey());
+                    boolean consolidateSuccess = consolidateMemory(session, false)
+                            .toCompletableFuture().join();
+
+                    if (consolidateSuccess) {
+                        // 压缩成功，更新 messages
+                        messages.clear();
+                        messages.addAll(session.getHistory(currentMemoryWindow()));
+                        log.info("上下文压缩完成，继续处理");
+                    } else {
+                        log.warn("上下文压缩失败，继续处理（可能导致上下文溢出）");
+                    }
+
+                    // 重新计算上下文使用率
+                    estimatedChars = ContextPruner.estimateContextChars(messages);
+                    estimatedTokens = (int) Math.floor(estimatedChars / ContextPruningSettings.CHARS_PER_TOKEN_ESTIMATE);
+                    contextRatio = contextWindow > 0 ? (double) estimatedTokens / contextWindow : 0;
+                    log.info("压缩后上下文使用率: {}%", String.format("%.1f", contextRatio * 100));
+                }
+
+                // 执行上下文修剪（软裁剪，只裁剪过大的内容）
                 List<Map<String, Object>> prunedMessages = ContextPruner.pruneContextMessages(
                         messages, pruningSettings, contextWindow,
                         // 不修剪 skill 工具的结果，因为其中包含技能内容，裁剪后 LLM 不知道该技能
@@ -1276,7 +1344,8 @@ public class AgentLoop {
                 currentContextWindow(),
                 0.5,
                 archiveAll,
-                currentMemoryWindow()
+                currentMemoryWindow(),
+                currentConsolidateThreshold()
         );
     }
 

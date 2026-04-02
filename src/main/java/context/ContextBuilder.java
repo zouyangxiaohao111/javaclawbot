@@ -63,7 +63,7 @@ public class ContextBuilder {
      */
     public ContextBuilder(Path workspace, BootstrapConfig bootstrapConfig, java.util.function.Consumer<String> warnHandler) {
         this.workspace = Objects.requireNonNull(workspace, "workspace");
-        this.memory = new MemoryStore(workspace);
+        this.memory = new MemoryStore(workspace, this);
         this.skills = new SkillsLoader(workspace);
         this.bootstrapConfig = bootstrapConfig != null ? bootstrapConfig : new BootstrapConfig();
         this.bootstrapLoader = new BootstrapLoader(workspace, this.bootstrapConfig, warnHandler);
