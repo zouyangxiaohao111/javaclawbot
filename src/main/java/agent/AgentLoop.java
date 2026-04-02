@@ -594,6 +594,7 @@ public class AgentLoop {
                 ToolView requestTools = buildMemoryRequestTools(channel, chatId, extractMessageId(msg.getMetadata()));
 
                 // 进入循环
+                msg.setContent("");
                 OutboundMessage join = runAgentLoop(msg, initial, requestTools, callback).thenApply(rr -> new OutboundMessage(
                         channel,
                         chatId,
@@ -622,6 +623,7 @@ public class AgentLoop {
                 // 构建记忆相关的工具
                 ToolView requestTools = buildContextCompressRequestTools(sessionKy, channel, chatId, extractMessageId(msg.getMetadata()));
 
+                msg.setContent("");
                 OutboundMessage join = runAgentLoop(msg, initial, requestTools, callback).thenApply(rr -> new OutboundMessage(
                         channel,
                         chatId,
@@ -973,11 +975,17 @@ public class AgentLoop {
                 // 如果正在执行上下文压缩,不需要再次校验是否上下文压缩
                 val metadata = msg.getMetadata();
                 String compressKey;
+                String senderId;
+                String userMsg;
                 if (metadata == null) {
                     compressKey = "";
+                    senderId = msg.getSenderId();
+                    userMsg = msg.getContent();
                 }else {
                     // 注意：这里用的是 sessionKy（与 createSystemMessage 保持一致）
                     compressKey = String.valueOf(metadata.getOrDefault("sessionKy", ""));
+                    senderId = String.valueOf(metadata.getOrDefault("senderId", msg.getSenderId()));
+                    userMsg = String.valueOf(metadata.getOrDefault("userMsg", msg.getContent()));
                 }
 
                 if (!isCompress.contains(compressKey)) {
@@ -997,7 +1005,7 @@ public class AgentLoop {
                         isCompress.add(msg.getSessionKey());
                         compressErrorCount.compute(msg.getSessionKey(), (k, v) -> (v == null) ? 1 : v + 1);
                         // 执行上下文压缩（压缩完成后会重新发送用户消息）
-                        executeContextConsolidate(msg.getSessionKey(), msg.getChannel(), msg.getChatId(), msg.getContent(), msg.getSenderId());
+                        executeContextConsolidate(msg.getSessionKey(), msg.getChannel(), msg.getChatId(), userMsg, senderId);
 
                         // 完成当前请求，压缩完成后会重新处理用户消息
                         st.done.set(true);
@@ -1079,7 +1087,7 @@ public class AgentLoop {
                                 bus.publishOutbound(new OutboundMessage(msg.getChannel(), msg.getChatId(), notice, List.of(), Map.of()));
 
                                 // 执行上下文压缩
-                                executeContextConsolidate(msg.getSessionKey(), msg.getChannel(), msg.getChatId(),  msg.getContent(), msg.getSenderId());
+                                executeContextConsolidate(msg.getSessionKey(), msg.getChannel(), msg.getChatId(),  userMsg, senderId);
 
                                 // 完成当前请求，压缩完成后会重新处理用户消息
                                 st.done.set(true);
@@ -1213,9 +1221,9 @@ public class AgentLoop {
                         // 压缩一定有这个值
                         String channel = String.valueOf(metadata.get("channel"));
                         String chatId = String.valueOf(metadata.get("chatId"));
-                        String senderId = String.valueOf(metadata.get("senderId"));
+
                         if (metadata != null && metadata.get("userMsg") != null) {
-                            bus.publishInbound(new InboundMessage(channel, senderId, chatId, String.valueOf(metadata.get("userMsg")), List.of(), Map.of())).toCompletableFuture().join();
+                            bus.publishInbound(new InboundMessage(channel, senderId, chatId, userMsg, List.of(), Map.of())).toCompletableFuture().join();
                             return;
                         }
 
