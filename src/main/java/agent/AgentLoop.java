@@ -1016,7 +1016,6 @@ public class AgentLoop {
                 }
 
 
-
                 // 检查是否需要执行硬压缩（阻塞 + 通知用户）
                 int estimatedChars = ContextPruner.estimateContextChars(messages);
                 // 当前上下文比例
@@ -1319,6 +1318,16 @@ public class AgentLoop {
      */
     private void saveTurn(Session session, List<Map<String, Object>> messages, int skip) {
 
+        // 找到最后一个用户消息的索引，之后的工具结果（当前轮次）不做暴力截断
+        int lastUserIdx = -1;
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            Map<String, Object> m = messages.get(i);
+            if (m != null && "user".equals(m.get("role"))) {
+                lastUserIdx = i;
+                break;
+            }
+        }
+
         // 从 skip 位置开始遍历，只处理新增的消息
         List<Map<String, Object>> newMessages = new ArrayList<>();
         for (int i = skip; i < messages.size(); i++) {
@@ -1355,9 +1364,12 @@ public class AgentLoop {
 
             // ── Step 3: 截断过长的 tool 返回结果 ──
             // tool 消息的 content 是工具执行的返回值，可能非常长（比如读取了一个大文件）
-            // 超过 TOOL_RESULT_MAX_CHARS 的部分截断，替换为 "... (truncated)"
+            // 只对最后一个用户消息之前的工具结果做截断，当前轮次的工具结果保留完整
             if ("tool".equals(String.valueOf(role)) && content instanceof String s && s.length() > TOOL_RESULT_MAX_CHARS) {
-                entry.put("content", s.substring(0, TOOL_RESULT_MAX_CHARS) + "\n... (truncated)");
+                if (lastUserIdx >= 0 && i < lastUserIdx) {
+                    entry.put("content", s.substring(0, TOOL_RESULT_MAX_CHARS) + "\n... (truncated)");
+                }
+                // 当前轮次（最后一个用户消息之后）的工具结果不做截断
             }
 
             // ── Step 4: 将 user 消息中的 base64 图片替换为文本占位符 ──

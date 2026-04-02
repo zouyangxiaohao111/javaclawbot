@@ -51,8 +51,9 @@ public class ContextPruner {
             return new ArrayList<>(messages);
         }
 
-        // 找到助手消息的截止索引
-        int cutoffIndex = findAssistantCutoffIndex(messages, settings.getKeepLastAssistants());
+        // 找到最后一个用户消息的索引，只裁剪该消息之前的工具结果
+        // （之后的工具结果属于当前轮次，不应裁剪）
+        int cutoffIndex = findLastUserIndex(messages);
         if (cutoffIndex == -1) {
             return new ArrayList<>(messages);
         }
@@ -220,6 +221,19 @@ public class ContextPruner {
 
             Object role = msg.get("role");
             if ("user".equals(role)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * 找到最后一个用户消息的索引
+     */
+    private static int findLastUserIndex(List<Map<String, Object>> messages) {
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            Map<String, Object> msg = messages.get(i);
+            if (msg != null && "user".equals(msg.get("role"))) {
                 return i;
             }
         }

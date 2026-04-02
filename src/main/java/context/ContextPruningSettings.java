@@ -123,9 +123,9 @@ public class ContextPruningSettings {
      * 软修剪配置
      */
     public static class SoftTrimConfig {
-        private int maxChars = 2_000;
-        private int headChars = 300;
-        private int tailChars = 200;
+        private int maxChars = 5_000;
+        private int headChars = 200;
+        private int tailChars = 100;
 
         public int getMaxChars() {
             return maxChars;
@@ -157,7 +157,7 @@ public class ContextPruningSettings {
      */
     public static class HardClearConfig {
         private boolean enabled = true;
-        private String placeholder = "[Old tool result content cleared]";
+        private String placeholder = "[tool result content cleared]";
 
         public boolean isEnabled() {
             return enabled;
@@ -174,7 +174,7 @@ public class ContextPruningSettings {
         public void setPlaceholder(String placeholder) {
             this.placeholder = placeholder != null && !placeholder.isBlank() 
                     ? placeholder.trim() 
-                    : "[Old tool result content cleared]";
+                    : "[tool result content cleared]";
         }
     }
 }
