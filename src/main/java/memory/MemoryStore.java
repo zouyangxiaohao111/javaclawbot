@@ -456,9 +456,9 @@ public class MemoryStore {
 你是一个会话管理代理，负责分析对话并识别可以删除的消息。
 
 ## 背景
-- memory/YYYY-MM-DD.md 已保存完整原始对话（作为历史档案）
+- memory/YYYY-MM-DD.md 已保存完整原始对话（作为历史档案,不能读取,非常重要 不能读取!）
 - Session 只需保留"活跃窗口"内的消息
-- 你的任务是识别可以安全删除的消息
+- 你的任务是识别可以安全删除、修剪的消息
 
 ## 必须保留的消息（不要放入 dropped_indices）
 1. **Skill 使用记录**：包含 tool_calls 的消息
@@ -473,15 +473,24 @@ public class MemoryStore {
 3. **冗余上下文**：已被总结的详细过程描述
 4. **过长输出**：工具结果中过长的部分
 
+## 可以裁剪的消息
+1. 过于庞大的工具输出
+2. 当前最后一个user 消息 距离过长并且无实际指导意义的输出
 ## 输出要求
 调用 prune_messages 工具，提供：
 - dropped_indices：可以删除的消息索引
 - important_indices：特别重要的消息索引
+- sub_indices：需要裁剪的消息索引
 - patterns_detected：检测到的可复用模式（可选）
 - reasoning：简要说明删除理由
 
 ## 额外说明
-用户对话记录已在对话上下文中提供 以 user/assistant 对话形式提供给你了
+当前用户工作空间,workspace: {workspace}, 活跃会话消息目录: {workspace}/session 
+```text
+  {工作空间}/sessions/
+  ├── sessions.json   # 当前活跃会话对应的session_id映射
+  ├── {session_id}.jsonl        # 对应的活跃会话数据
+```
 """;
     }
 

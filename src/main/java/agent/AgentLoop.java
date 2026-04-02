@@ -532,6 +532,9 @@ public class AgentLoop {
                 sessionKey,
                 () -> {
                     try {
+                        // 入口处检测是否需要上下文压缩
+                        checkAndExecuteContextCompress(msg);
+
                         OutboundMessage resp = processMessage(msg, null, null).toCompletableFuture().get();
 
                         if (resp != null) {
@@ -569,71 +572,83 @@ public class AgentLoop {
         );
     }
 
+    /**
+     * 入口处检测并执行上下文压缩
+     */
+    private void checkAndExecuteContextCompress(InboundMessage msg) {
+        // 跳过系统消息和命令
+        if ("system".equalsIgnoreCase(msg.getChannel())) {
+            return;
+        }
+
+        String sessionKey = msg.getSessionKey();
+        Session session = sessions.getOrCreate(sessionKey);
+        List<Map<String, Object>> history = session.getHistory();
+
+        // 执行上下文软裁剪
+        ContextPruningSettings pruningSettings = createPruningSettings();
+        ContextPruner.pruneContextMessages(history, pruningSettings, contextWindow,
+                // 不修剪 skill 工具的结果，因为其中包含技能内容，裁剪后 LLM 不知道该技能
+                toolName -> !"skill".equalsIgnoreCase(toolName));
+
+        int estimatedChars = ContextPruner.estimateContextChars(history);
+        double contextRatio = currentContextWindowChars() > 0
+                ? (double) estimatedChars / currentContextWindowChars() : 0;
+        double threshold = currentConsolidateThreshold();
+
+        if (contextRatio > threshold) {
+            log.info("入口检测：上下文使用率 {}% > 阈值 {}%，执行压缩",
+                    String.format("%.1f", contextRatio * 100),
+                    String.format("%.0f", threshold * 100));
+
+            // 通知用户
+            bus.publishOutbound(new OutboundMessage(
+                    msg.getChannel(),
+                    msg.getChatId(),
+                    "⏳ 上下文已满，正在自动压缩...",
+                    List.of(),
+                    Map.of()
+            )).toCompletableFuture().join();
+
+            // 执行上下文压缩
+            executeContextCompress(sessionKey, msg.getChannel(), msg.getChatId());
+
+            log.info("上下文压缩完成");
+        }
+    }
+
+    /**
+     * 执行上下文压缩（只压缩消息，不整理记忆）
+     */
+    private void executeContextCompress(String sessionKey, String channel, String chatId) {
+        Session session = sessions.getOrCreate(sessionKey);
+
+        // 构建压缩消息
+        List<Map<String, Object>> initial = context.buildContextCompressMessages(
+                List.of(),
+                MemoryStore.PRUNE_SYSTEM_PROMPT,
+                null, channel, chatId
+        );
+        ToolView tools = buildContextCompressRequestTools(sessionKey, channel, chatId, null);
+
+        // 创建临时消息用于 runAgentLoop
+        InboundMessage compressMsg = new InboundMessage();
+        compressMsg.setChannel(channel);
+        compressMsg.setContent("");
+        compressMsg.setSessionKeyOverride(sessionKey);
+
+        // 同步执行
+        runAgentLoop(compressMsg, initial, tools, null).toCompletableFuture().join();
+
+        // 保存信息
+        saveTurn(session, session.getHistory(), 2);
+        sessions.save(session);
+    }
+
     private CompletionStage<OutboundMessage> processMessage(InboundMessage msg, String sessionKeyOverride, ProgressCallback onProgress) {
         if ("system".equalsIgnoreCase(msg.getChannel())) {
             // 新任务开始前清理 stop 标记
             clearStopRequested(msg.getSessionKey());
-
-            // 如果为记忆压缩
-            String cmd = msg.getContent().trim();
-
-            // 处理系统命令
-            if (cmd.equalsIgnoreCase("/memory")) {
-                ProgressCallback callback = getBusProgressCallback(msg, onProgress);
-                Map<String, Object> metadata = msg.getMetadata();
-                String prompt = (String) metadata.get("prompt");
-                String channel = (String) metadata.get("channel");
-                String chatId = (String) metadata.get("chatId");
-                String sessionKy = (String) metadata.get("sessionKy");
-
-                List<Map<String, Object>> initial = context.buildMemoryMessages(
-                        List.of(), prompt.replace("{sessionKey}", sessionKy), msg.getMedia(),  channel, chatId
-                );
-
-                // 构建记忆相关的工具
-                ToolView requestTools = buildMemoryRequestTools(channel, chatId, extractMessageId(msg.getMetadata()));
-
-                // 进入循环
-                msg.setContent("");
-                OutboundMessage join = runAgentLoop(msg, initial, requestTools, callback).thenApply(rr -> new OutboundMessage(
-                        channel,
-                        chatId,
-                        rr.finalContent != null ? rr.finalContent : "记忆整理已完成。",
-                        List.of(),
-                        Map.of()
-                )).toCompletableFuture().join();
-                return CompletableFuture.completedFuture(join);
-
-            }
-            // 上下文压缩
-            if (cmd.equalsIgnoreCase("/context-compress")) {
-                ProgressCallback callback = getBusProgressCallback(msg, onProgress);
-                Map<String, Object> metadata = msg.getMetadata();
-                String prompt = (String) metadata.get("prompt");
-                String channel = (String) metadata.get("channel");
-                String chatId = (String) metadata.get("chatId");
-                String sessionKy = (String) metadata.get("sessionKy");
-
-                Session session = sessions.getOrCreate(sessionKy);
-                List<Map<String, Object>> history = session.getHistory();
-                List<Map<String, Object>> initial = context.buildMemoryMessages(
-                        history, prompt, msg.getMedia(),  channel, chatId
-                );
-
-                // 构建记忆相关的工具
-                ToolView requestTools = buildContextCompressRequestTools(sessionKy, channel, chatId, extractMessageId(msg.getMetadata()));
-
-                msg.setContent("");
-                OutboundMessage join = runAgentLoop(msg, initial, requestTools, callback).thenApply(rr -> new OutboundMessage(
-                        channel,
-                        chatId,
-                        rr.finalContent != null ? rr.finalContent : "上下文压缩完成。",
-                        List.of(),
-                        Map.of()
-                )).toCompletableFuture().join();
-                return CompletableFuture.completedFuture(join);
-            }
-
 
             String chat = msg.getChatId();
             String channel = (chat != null && chat.contains(":")) ? chat.split(":", 2)[0] : "cli";
@@ -685,17 +700,25 @@ public class AgentLoop {
 
 
         if ("/new".equalsIgnoreCase(cmd)) {
-            String output = "历史会话完成压缩记忆, 新会话已开始";
+            String output = "新会话已开始";
             commandManager.addLocalCommand(new LocalCommand(cmd, output));
             // 发给用户
             bus.publishOutbound(new OutboundMessage(msg.getChannel(), msg.getChatId(), "历史会话正在压缩和记忆,请稍等片刻,等待压缩完成!完成后会通知您 😊",
                     List.of(),
-                    Map.of()));
+                    Map.of()
+            ));
             return handleNewCommand(msg, session);
         }
 
+        // 触发记忆命令
+        if ("/memory".equalsIgnoreCase(cmd)) {
+            String output = "记忆整理命令已触发";
+            commandManager.addLocalCommand(new LocalCommand(cmd, output));
+            return handleMemoryCommand(msg, session);
+        }
+
         if ("/help".equalsIgnoreCase(cmd)) {
-            String output = "javaclawbot 命令:\n/new — 开始新对话\n/stop — 停止当前任务\n/help — 显示可用命令\n/project <path> — 设置项目路径（开发者模式读取 CODE-AGENT.md/CLAUDE.md）\n/project clear — 清除项目路径";
+            String output = "javaclawbot 命令:\n/new — 开始新对话\n/memory — 整理当前对话记忆\n/stop — 停止当前任务\n/help — 显示可用命令\n/project <path> — 设置项目路径（开发者模式读取 CODE-AGENT.md/CLAUDE.md）\n/project clear — 清除项目路径";
             commandManager.addLocalCommand(new LocalCommand(cmd, output));
             return CompletableFuture.completedFuture(new OutboundMessage(
                     msg.getChannel(),
@@ -735,8 +758,6 @@ public class AgentLoop {
             return CompletableFuture.completedFuture(null);
         }
 
-        int useMemoryWindow = currentMemoryWindow();
-
         ToolView requestTools = buildRequestToolsAndSetContext(
                 sessionKey, msg.getChannel(),
                 msg.getChatId(),
@@ -766,6 +787,7 @@ public class AgentLoop {
 
             // 尝试压缩和保存session
             saveTurn(session, rr.messages, 2 + history.size());
+            sessions.save(session);
 
             var msgTool = requestTools.get("message");
             if (msgTool instanceof MessageTool m && m.isSentInTurn()) {
@@ -780,6 +802,40 @@ public class AgentLoop {
                     msg.getMetadata() != null ? msg.getMetadata() : Map.of()
             );
         });
+    }
+
+    /**
+     * 处理 /memory 命令：用户手动触发记忆整理
+     */
+    private CompletionStage<OutboundMessage> handleMemoryCommand(InboundMessage msg, Session session) {
+        String channel = msg.getChannel();
+        String chatId = msg.getChatId();
+        String sessionKey = session.getKey();
+
+        // 通知用户
+        bus.publishOutbound(new OutboundMessage(
+                channel, chatId, "⏳ 正在整理记忆...", List.of(), Map.of()
+        ));
+
+        try {
+            // 构建记忆整理消息
+            List<Map<String, Object>> initial = context.buildMemoryMessages(
+                    List.of(), MemoryStore.UPDATE_MEMORY_SYSTEM_PROMPT.replaceAll("\\{workspace}", workspace.toString()), null, channel, chatId
+            );
+            ToolView tools = buildMemoryRequestTools(channel, chatId, null);
+
+            // 同步执行记忆整理, memory命令执行完成后,清理session中上下文
+            runAgentLoop(msg, initial, tools, null).toCompletableFuture().join();
+
+            return CompletableFuture.completedFuture(new OutboundMessage(
+                    channel, chatId, "✅ 记忆整理完成", List.of(), Map.of()
+            ));
+        } catch (Exception e) {
+            log.warn("记忆整理失败", e);
+            return CompletableFuture.completedFuture(new OutboundMessage(
+                    channel, chatId, "❌ 记忆整理失败，请重试", List.of(), Map.of()
+            ));
+        }
     }
 
     @NotNull
@@ -809,24 +865,21 @@ public class AgentLoop {
 
         // 直接在当前线程执行记忆整理（绕过队列，避免死锁）
         try {
-            InboundMessage memoryMsg = createSystemMessage(sessionKy, "auto_memory", channel, chatId, "/memory", MemoryStore.UPDATE_MEMORY_SYSTEM_PROMPT);
-            List<Map<String, Object>> initial = context.buildMemoryMessages(List.of()
-                    , MemoryStore.UPDATE_MEMORY_SYSTEM_PROMPT.replace("{sessionKy}", sessionKy)
-                    , null, channel, chatId);
-            ToolView requestTools = buildMemoryRequestTools(channel, chatId, null);
+            // 构建记忆整理消息
+            List<Map<String, Object>> initial = context.buildMemoryMessages(
+                    List.of(), MemoryStore.UPDATE_MEMORY_SYSTEM_PROMPT.replaceAll("\\{workspace}", workspace.toString()), null, channel, chatId
+            );
+            ToolView tools = buildMemoryRequestTools(channel, chatId, null);
 
-            // 同步执行记忆整理
-            runAgentLoop(memoryMsg, initial, requestTools, null).toCompletableFuture().join();
+            // 同步执行记忆整理, memory命令执行完成后,清理session中上下文
+            runAgentLoop(msg, initial, tools, null).toCompletableFuture().join();
         } catch (Exception e) {
-            log.warn("记忆归档失败", e);
+            log.warn("记忆整理失败", e);
             return CompletableFuture.completedFuture(new OutboundMessage(
-                    channel,
-                    chatId,
-                    "记忆归档失败，会话未清除。请重试。",
-                    List.of(),
-                    Map.of()
+                    channel, chatId, "❌ 记忆整理失败，请重试", List.of(), Map.of()
             ));
         }
+
 
         // 保存旧会话并创建新会话
         sessions.save(session);
@@ -903,16 +956,6 @@ public class AgentLoop {
 
     }
 
-    /**
-     * 是否正在上下文压缩
-     */
-    private volatile Set<String> isCompress = new ConcurrentHashSet<>();
-
-    /**
-     * 同一次上下文压缩次数
-     */
-    private volatile Map<String, Integer> compressErrorCount = new ConcurrentHashMap<>();
-
     private CompletionStage<RunResult> runAgentLoop(
             InboundMessage msg,
             List<Map<String, Object>> initialMessages,
@@ -972,63 +1015,31 @@ public class AgentLoop {
                     return;
                 }
 
-                // 如果正在执行上下文压缩,不需要再次校验是否上下文压缩
-                val metadata = msg.getMetadata();
-                String compressKey;
-                String senderId;
-                String userMsg;
-                if (metadata == null) {
-                    compressKey = "";
-                    senderId = msg.getSenderId();
-                    userMsg = msg.getContent();
-                }else {
-                    // 注意：这里用的是 sessionKy（与 createSystemMessage 保持一致）
-                    compressKey = String.valueOf(metadata.getOrDefault("sessionKy", ""));
-                    senderId = String.valueOf(metadata.getOrDefault("senderId", msg.getSenderId()));
-                    userMsg = String.valueOf(metadata.getOrDefault("userMsg", msg.getContent()));
+
+
+                // 检查是否需要执行硬压缩（阻塞 + 通知用户）
+                int estimatedChars = ContextPruner.estimateContextChars(messages);
+                // 当前上下文比例
+                double contextRatio = contextWindow > 0 ? (double)  estimatedChars / currentContextWindowChars() : 0;
+                double consolidateThreshold = currentConsolidateThreshold();
+
+                if (contextRatio > consolidateThreshold) {
+                    // 通知用户正在压缩
+                    log.info("上下文使用率 {}% > 阈值 {}%，将在下一次对话进行压缩",
+                            String.format("%.1f", contextRatio * 100),
+                            String.format("%.0f", consolidateThreshold * 100));
                 }
-
-                if (!isCompress.contains(compressKey)) {
-                    // 检查是否需要执行硬压缩（阻塞 + 通知用户）
-                    int estimatedChars = ContextPruner.estimateContextChars(messages);
-                    // 当前上下文比例
-                    double contextRatio = contextWindow > 0 ? (double)  estimatedChars / currentContextWindowChars() : 0;
-                    double consolidateThreshold = currentConsolidateThreshold();
-
-                    if (contextRatio > consolidateThreshold) {
-                        // 通知用户正在压缩
-                        log.info("上下文使用率 {}% > 阈值 {}%，触发阻塞压缩",
-                                String.format("%.1f", contextRatio * 100),
-                                String.format("%.0f", consolidateThreshold * 100));
-
-                        // 代表需要上下文压缩
-                        isCompress.add(msg.getSessionKey());
-                        compressErrorCount.compute(msg.getSessionKey(), (k, v) -> (v == null) ? 1 : v + 1);
-                        // 执行上下文压缩（压缩完成后会重新发送用户消息）
-                        executeContextConsolidate(msg.getSessionKey(), msg.getChannel(), msg.getChatId(), userMsg, senderId);
-
-                        // 完成当前请求，压缩完成后会重新处理用户消息
-                        st.done.set(true);
-                        out.complete(new RunResult(
-                                "⏳上下文已满， 正在压缩中，完成后将继续处理您的请求...",
-                                toolsUsed,
-                                messages,
-                                usageAcc.getTotal()
-                        ));
-                        return;
-                    }
-                    // 执行上下文修剪（软裁剪，只裁剪过大的内容）
-                    List<Map<String, Object>> prunedMessages = ContextPruner.pruneContextMessages(
-                            messages, pruningSettings, contextWindow,
-                            // 不修剪 skill 工具的结果，因为其中包含技能内容，裁剪后 LLM 不知道该技能
-                            toolName -> !"skill".equalsIgnoreCase(toolName)
-                    );
-                    int beforeChars = ContextPruner.estimateContextChars(messages);
-                    int afterChars = ContextPruner.estimateContextChars(prunedMessages);
-                    log.info("上下文已修剪: {} 字符 -> {} 字符", beforeChars, afterChars);
-                    messages.clear();
-                    messages.addAll(prunedMessages);
-                }
+                // 执行上下文修剪（软裁剪，只裁剪过大的内容）
+                List<Map<String, Object>> prunedMessages = ContextPruner.pruneContextMessages(
+                        messages, pruningSettings, contextWindow,
+                        // 不修剪 skill 工具的结果，因为其中包含技能内容，裁剪后 LLM 不知道该技能
+                        toolName -> !"skill".equalsIgnoreCase(toolName)
+                );
+                int beforeChars = ContextPruner.estimateContextChars(messages);
+                int afterChars = ContextPruner.estimateContextChars(prunedMessages);
+                log.info("上下文已修剪: {} 字符 -> {} 字符", beforeChars, afterChars);
+                messages.clear();
+                messages.addAll(prunedMessages);
 
                 // 是否停止
                 if (completeIfStopped(msg.getSessionKey(), st, out, toolsUsed, messages, usageAcc)) {
@@ -1075,43 +1086,6 @@ public class AgentLoop {
 
                         if (ContextOverflowDetector.isLikelyContextOverflowError(errorMsg)) {
                             log.warn("检测到上下文溢出: {}", errorMsg);
-
-                            // 如果未执行上下文压缩
-                            if (!isCompress.contains(compressKey)) {
-                                isCompress.add(msg.getSessionKey());
-                                compressErrorCount.compute(msg.getSessionKey(), (k, v) -> (v == null) ? 1 : v + 1);
-                                Integer compressCount = compressErrorCount.get(msg.getSessionKey());
-                                String notice = "上下文溢出，尝试自动记忆和剪切 (第 %s/%s 次)".formatted(compressErrorCount.get(msg.getSessionKey()), maxOverflowCompactionAttempts);
-                                log.info("尝试自动压缩 (第 {}/{} 次)", compressCount, maxOverflowCompactionAttempts);
-
-                                bus.publishOutbound(new OutboundMessage(msg.getChannel(), msg.getChatId(), notice, List.of(), Map.of()));
-
-                                // 执行上下文压缩
-                                executeContextConsolidate(msg.getSessionKey(), msg.getChannel(), msg.getChatId(),  userMsg, senderId);
-
-                                // 完成当前请求，压缩完成后会重新处理用户消息
-                                st.done.set(true);
-                                out.complete(new RunResult(
-                                        "⏳ 上下文压缩中，完成后将继续处理您的请求...",
-                                        toolsUsed,
-                                        messages,
-                                        usageAcc.getTotal()
-                                ));
-                                return;
-                            }else {
-                                // 如果正在执行上下文压缩
-                                Integer compressCount = compressErrorCount.get(compressKey);
-                                // 自动加一
-                                compressErrorCount.compute(compressKey, (k, v) -> v + 1);
-                                if (compressCount <= maxOverflowCompactionAttempts) {
-                                    String notice = "上下文溢出，尝试自动记忆和剪切 (第 %s/%s 次)".formatted(compressErrorCount.get(compressKey), maxOverflowCompactionAttempts);
-                                    log.info("尝试自动压缩 (第 {}/{} 次)", compressCount, maxOverflowCompactionAttempts);
-                                    bus.publishOutbound(new OutboundMessage(msg.getChannel(), msg.getChatId(), notice, List.of(), Map.of()));
-                                    executor.execute(this);
-                                    return;
-                                }
-                            }
-
                             st.done.set(true);
                             out.complete(new RunResult(
                                     ContextOverflowDetector.formatOverflowError(),
@@ -1213,21 +1187,6 @@ public class AgentLoop {
                     }
 
                     // =================== 以下代表执行成功 ===================
-                    if (isCompress.contains(compressKey)) {
-                        // 代表压缩成功
-                        isCompress.remove(compressKey);
-                        compressErrorCount.remove(compressKey);
-
-                        // 压缩一定有这个值
-                        String channel = String.valueOf(metadata.get("channel"));
-                        String chatId = String.valueOf(metadata.get("chatId"));
-
-                        if (metadata != null && metadata.get("userMsg") != null) {
-                            bus.publishInbound(new InboundMessage(channel, senderId, chatId, userMsg, List.of(), Map.of())).toCompletableFuture().join();
-                            return;
-                        }
-
-                    }
 
                     log.info("思考: \n{}", resp.getReasoningContent());
                     // 移除思考标签

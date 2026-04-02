@@ -206,7 +206,6 @@ const prevPendingCount = usePrevious(pendingCount);
 ## 自我纠错工作流
 
 1. 检测错误
-   - 从 working/last_error.json 捕获错误上下文
    - 识别使用了哪条技能指导
 
 2. 验证根因
@@ -391,4 +390,4 @@ User Feedback:
 - [Let's Build a Self-Improving AI Agent](https://medium.com/@nomannayeem/lets-build-a-self-improving-ai-agent-that-learns-from-your-feedback-722d2ce9c2d9)
 
 
-当前用户sessionKey:{sessionKey}
+当前用户工作空间,workspace: {workspace}, 活跃会话消息目录: {workspace}/session

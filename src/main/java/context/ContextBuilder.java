@@ -292,6 +292,60 @@ public class ContextBuilder {
     }
 
 
+
+
+    /**
+     * 构建本次调用的大模型消息列表：
+     * system + 历史 + 运行时元信息 + 用户输入（可带图片）
+     *
+     * @param history        历史消息（OpenAI 兼容结构：role/content/等）
+     * @param currentMessage 当前用户文本
+     * @param media          本地图片路径列表（仅处理 image/*）
+     * @param channel        渠道名
+     * @param chatId         会话标识
+     * @return 消息列表（每个元素是 Map，对齐 OpenAI 消息结构）
+     */
+    public List<Map<String, Object>> buildContextCompressMessages(List<Map<String, Object>> history,
+                                                         String currentMessage,
+                                                         List<String> media,
+                                                         String channel,
+                                                         String chatId) {
+        List<Map<String, Object>> out = new ArrayList<>();
+
+        // 构建系统提示词
+        String systemPrompt = buildSystemPrompt();
+
+        // 运行环境
+        String runtimeContext = buildRuntimeContext(channel, chatId);
+        out.add(mapOf(
+                "role", "system",
+                "content", systemPrompt  + runtimeContext
+        ));
+
+        List<Map<String, Object>> userBlocks = new ArrayList<>();
+
+        // 构建第2条用户消息, 该消息为常驻技能
+        userBlocks.add(Map.of("type", "text", "text", loadResidentSkill()));
+
+        // 构建第4条用户消息, 该消息为本地命令描述
+        userBlocks.add(Map.of("type", "text", "text", buildLocalCommandDesc()));
+        out.add(mapOf(
+                "role", "user",
+                "content", userBlocks
+        ));
+
+        // 添加历史
+        if (CollUtil.isNotEmpty(history)) {
+            out.addAll(history);
+        }
+
+        // 当前用户内容（文本 + 可选图片）
+        // 是否需要引导，设置引导用户
+        buildUserContent(currentMessage, media);
+        return out;
+    }
+
+
     /**
      * 构建本次调用的大模型消息列表：
      * system + 历史 + 运行时元信息 + 用户输入（可带图片）
