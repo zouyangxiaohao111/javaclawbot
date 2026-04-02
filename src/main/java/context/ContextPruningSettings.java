@@ -123,9 +123,9 @@ public class ContextPruningSettings {
      * 软修剪配置
      */
     public static class SoftTrimConfig {
-        private int maxChars = 4_000;
-        private int headChars = 1_500;
-        private int tailChars = 1_500;
+        private int maxChars = 2_000;
+        private int headChars = 300;
+        private int tailChars = 200;
 
         public int getMaxChars() {
             return maxChars;
