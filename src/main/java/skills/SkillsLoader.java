@@ -67,25 +67,47 @@ public class SkillsLoader {
      */
     public List<Map<String, String>> listSkills(Path skillPath) {
         List<Map<String, String>> skills = new ArrayList<>();
+        listSkillsRecursive(skillPath, skills, new HashSet<>());
+        return skills;
+    }
 
-        // 工作区技能（优先级最高）
-        if (Files.exists(skillPath) && Files.isDirectory(skillPath)) {
-            try (DirectoryStream<Path> ds = Files.newDirectoryStream(workspaceSkills)) {
+    private void listSkillsRecursive(Path skillPath,
+                                     List<Map<String, String>> skills,
+                                     Set<Path> visited) {
+        if (skillPath == null) {
+            return;
+        }
+
+        try {
+            Path realPath = skillPath.toRealPath();
+
+            // 防止循环递归（符号链接 / junction / 重复路径）
+            if (!visited.add(realPath)) {
+                return;
+            }
+
+            if (!Files.exists(realPath) || !Files.isDirectory(realPath)) {
+                return;
+            }
+
+            try (DirectoryStream<Path> ds = Files.newDirectoryStream(realPath)) {
                 for (Path skillDir : ds) {
-                    if (Files.isDirectory(skillDir)) {
-                        Path skillFile = skillDir.resolve("SKILL.md");
-                        if (Files.exists(skillFile) && Files.isRegularFile(skillFile)) {
-                            skills.add(skillInfo(skillDir.getFileName().toString(), skillFile, "workspace"));
-                        }else {
-                            skills.addAll(listSkills(skillDir));
-                        }
+                    if (!Files.isDirectory(skillDir)) {
+                        continue;
+                    }
+
+                    Path skillFile = skillDir.resolve("SKILL.md");
+
+                    if (Files.exists(skillFile) && Files.isRegularFile(skillFile)) {
+                        skills.add(skillInfo(skillDir.getFileName().toString(), skillFile, "workspace"));
+                    } else {
+                        listSkillsRecursive(skillDir, skills, visited);
                     }
                 }
-            } catch (IOException ignored) {
-                // 列表获取失败时保持“尽力而为”的行为
             }
+        } catch (IOException ignored) {
+            // 保持尽力而为
         }
-        return skills;
     }
 
 

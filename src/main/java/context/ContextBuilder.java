@@ -377,7 +377,10 @@ public class ContextBuilder {
         List<Map<String, Object>> userBlocks = new ArrayList<>();
 
         // 构建第2条用户消息, 该消息为常驻技能
-        userBlocks.add(Map.of("type", "text", "text", loadResidentSkill()));
+        String loaded = loadResidentSkill();
+        if (StrUtil.isNotBlank(loaded)) {
+            userBlocks.add(Map.of("type", "text", "text", loaded));
+        }
 
         // 构建第4条用户消息, 该消息为本地命令描述
         userBlocks.add(Map.of("type", "text", "text", buildLocalCommandDesc()));
@@ -392,7 +395,7 @@ public class ContextBuilder {
         }
         out.add(mapOf(
                 "role", "user",
-                "content", "开始执行"
+                "content", "开始读取当前活跃会话记录,依次为由进行 记忆和自我进化"
         ));
         return out;
     }
@@ -492,16 +495,18 @@ public class ContextBuilder {
      */
     private String loadResidentSkill() {
         List<String> alwaysSkills = skills.getAlwaysSkills();
+        StringBuilder sb = new StringBuilder();
         if (alwaysSkills.isEmpty()) {
-            return "";
+            sb.append("");
+        }else {
+            // 加载技能
+            List<ContentBlock> contentBlocks = commandQueueManager.triggerResidentSKillOutput(alwaysSkills);
+            for (ContentBlock cb : contentBlocks) {
+                sb.append(cb.getText()).append("\n");
+            }
         }
 
-        // 加载技能
-        List<ContentBlock> contentBlocks = commandQueueManager.triggerResidentSKillOutput(alwaysSkills);
-        StringBuilder sb = new StringBuilder();
-        for (ContentBlock cb : contentBlocks) {
-            sb.append(cb.getText()).append("\n");
-        }
+
         return "以下为常驻技能,涉及这些技能不需要使用skill加载: <resident-skill>"+ sb + "</resident-skill>";
     }
 

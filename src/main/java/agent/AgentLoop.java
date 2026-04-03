@@ -875,7 +875,7 @@ public class AgentLoop {
         try {
             // 构建记忆整理消息
             List<Map<String, Object>> initial = context.buildMemoryMessages(
-                    List.of(), MemoryStore.UPDATE_MEMORY_SYSTEM_PROMPT.replaceAll("\\{workspace}", workspace.toString()), null, channel, chatId
+                    List.of(), MemoryStore.UPDATE_MEMORY_SYSTEM_PROMPT.replaceAll("\\{workspace}", workspace.toString().replaceAll("\\\\", "/")), null, channel, chatId
             );
             ToolView tools = buildMemoryRequestTools(channel, chatId, null);
 
