@@ -11,6 +11,7 @@ import agent.tool.file.*;
 import agent.tool.mcp.McpManager;
 import agent.tool.message.MessageTool;
 import agent.tool.message.PruneMessagesTool;
+import agent.tool.shell.ExecTool;
 import agent.tool.skill.SkillTool;
 import agent.tool.web.WebFetchTool;
 import agent.tool.web.WebSearchTool;

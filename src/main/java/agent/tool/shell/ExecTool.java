@@ -1,4 +1,6 @@
-package agent.tool;
+package agent.tool.shell;
+
+import agent.tool.Tool;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -6,14 +8,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.time.Duration;
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
-import java.util.Objects;
+import java.util.*;
 import java.util.concurrent.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -39,9 +35,12 @@ import java.util.regex.Pattern;
 public class ExecTool extends Tool {
 
     /**
-     * Output max length (chars), aligned with Claude Code BashTool.maxResultSizeChars = 30_000
+     * Output max length (chars), aligned with Claude Code BashTool.maxResultSizeChars = 30_000.
+     * Now delegates to OutputLimits.getMaxOutputLength() for env var override support.
      */
-    private static final int MAX_OUTPUT_LEN = 30_000;
+    private static int getMaxOutputLen() {
+        return OutputLimits.getMaxOutputLength();
+    }
 
     /**
      * Default timeout in milliseconds (aligned with Claude Code getDefaultTimeoutMs).
@@ -196,7 +195,7 @@ public class ExecTool extends Tool {
      */
     @Override
     public int maxResultSizeChars() {
-        return 30_000;
+        return 15_000;
     }
 
     /**
@@ -359,9 +358,22 @@ public class ExecTool extends Tool {
         // Detect javac command and auto-inject -encoding UTF-8
         command = injectJavacEncoding(command);
 
-        List<String> cmd = isWindows
-                ? List.of("cmd.exe", "/c", "chcp 65001 >nul && " + command)
-                : List.of("/bin/sh", "-c", command);
+        // --- Use Shell module for dynamic shell detection ---
+        // Original: Claude Code uses findSuitableShell() to detect bash/zsh
+        // Falls back to /bin/sh or cmd.exe if Shell module is unavailable
+        List<String> cmd;
+        try {
+            String shellPath = Shell.findSuitableShell();
+            cmd = new ArrayList<>();
+            cmd.add(shellPath);
+            cmd.add("-c");
+            cmd.add(command);
+        } catch (Exception e) {
+            // Fallback: use hardcoded shell paths
+            cmd = isWindows
+                    ? List.of("cmd.exe", "/c", "chcp 65001 >nul && " + command)
+                    : List.of("/bin/sh", "-c", command);
+        }
 
         ProcessBuilder pb = new ProcessBuilder(cmd);
         pb.directory(new File(cwd));
@@ -440,9 +452,10 @@ public class ExecTool extends Tool {
 
             // Truncate oversized output
             // Aligned with Claude Code: keep beginning, truncate end, show removed size
-            if (result.length() > MAX_OUTPUT_LEN) {
-                int removedKb = (result.length() - MAX_OUTPUT_LEN) / 1024;
-                result = result.substring(0, MAX_OUTPUT_LEN)
+            int maxOutputLen = getMaxOutputLen();
+            if (result.length() > maxOutputLen) {
+                int removedKb = (result.length() - maxOutputLen) / 1024;
+                result = result.substring(0, maxOutputLen)
                         + "\n... [output truncated - " + removedKb + "KB removed]";
             }
 

@@ -3,6 +3,7 @@ package agent.subagent;
 import agent.ProgressCallback;
 import agent.tool.*;
 import agent.tool.file.*;
+import agent.tool.shell.ExecTool;
 import agent.tool.web.WebFetchTool;
 import agent.tool.web.WebSearchTool;
 import bus.MessageBus;
