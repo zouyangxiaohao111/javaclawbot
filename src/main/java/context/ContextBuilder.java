@@ -395,7 +395,7 @@ public class ContextBuilder {
         }
         out.add(mapOf(
                 "role", "user",
-                "content", "开始读取当前活跃会话记录,依次为由进行 记忆和自我进化"
+                "content", "开始读取当前活跃会话记录,依次为由进行 记忆和自我进化, 完成后发送报告给用户"
         ));
         return out;
     }
