@@ -59,13 +59,6 @@ public final class Shell {
      */
     private static final int STALL_TAIL_BYTES = 1024;
 
-    // ========================================================================
-    // Stall watchdog constants — aligned with CC's LocalShellTask.tsx
-    // ========================================================================
-
-    private static final int STALL_CHECK_INTERVAL_MS = 5_000;
-    private static final int STALL_THRESHOLD_MS = 45_000;
-    private static final int STALL_TAIL_BYTES = 1024;
 
     /**
      * Patterns that suggest a command is blocked waiting for keyboard input.
@@ -741,27 +734,6 @@ public final class Shell {
         }
     }
 
-    // ========================================================================
-    // Stall watchdog — detect interactive prompts in background tasks
-    // ========================================================================
-
-    /**
-     * Patterns that suggest a command is blocked waiting for interactive input.
-     *
-     * Aligned with CC's LocalShellTask.tsx PROMPT_PATTERNS.
-     * Used to gate the stall notification — we stay silent on commands that
-     * are merely slow and only notify when the tail looks like an interactive prompt.
-     */
-    private static final java.util.regex.Pattern[] PROMPT_PATTERNS = {
-            java.util.regex.Pattern.compile("(?i)\\(y/n\\)"),
-            java.util.regex.Pattern.compile("(?i)\\[y/n\\]"),
-            java.util.regex.Pattern.compile("(?i)\\(yes/no\\)"),
-            java.util.regex.Pattern.compile("(?i)\\b(?:Do you|Would you|Shall I|Are you sure|Ready to)\\b.*\\?\\s*$"),
-            java.util.regex.Pattern.compile("(?i)Press (?:any key|Enter)"),
-            java.util.regex.Pattern.compile("(?i)Continue\\?"),
-            java.util.regex.Pattern.compile("(?i)Overwrite\\?")
-    };
-
     /**
      * Check if the tail of output looks like an interactive prompt.
      *
@@ -800,7 +772,8 @@ public final class Shell {
             return t;
         });
 
-        ScheduledFuture<?> future = scheduler.scheduleAtFixedRate(() -> {
+        final ScheduledFuture<?>[] futureHolder = new ScheduledFuture<?>[1];
+        futureHolder[0] = scheduler.scheduleAtFixedRate(() -> {
             if (cancelled[0] || task.completed()) return;
 
             try {
@@ -838,14 +811,14 @@ public final class Shell {
                         "Kill this task and re-run with piped input (e.g., `echo y | command`) " +
                         "or a non-interactive flag if one exists."
                 );
-                future.cancel(false);
+                if (futureHolder[0] != null) futureHolder[0].cancel(false);
                 scheduler.shutdown();
             } catch (Exception ignored) {}
         }, STALL_CHECK_INTERVAL_MS, STALL_CHECK_INTERVAL_MS, TimeUnit.MILLISECONDS);
 
         return () -> {
             cancelled[0] = true;
-            future.cancel(false);
+            if (futureHolder[0] != null) futureHolder[0].cancel(false);
             scheduler.shutdown();
         };
     }
