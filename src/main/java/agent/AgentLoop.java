@@ -199,18 +199,38 @@ public class AgentLoop {
 
         // 初始化 CLI Agent 命令处理器
         this.cliAgentHandler = new CliAgentCommandHandler(workspace);
-        this.cliAgentHandler.setSendToChannel((message, sessionKey) -> {
+        this.cliAgentHandler.setSendToChannelWithMeta((message, sessionKey, metadata) -> {
             // sessionKey 格式: "channel:chatId"
             String[] parts = sessionKey.split(":", 2);
             String channel = parts[0];
             String chatId = parts.length > 1 ? parts[1] : "";
+
+            // 发送到渠道
             bus.publishOutbound(new OutboundMessage(
                     channel,
                     chatId,
                     message,
                     List.of(),
-                    Map.of()
+                    metadata != null ? metadata : Map.of()
             ));
+
+            // 如果是 CLI 子代理输出, 记录到主代理对话历史
+            if (metadata != null && Boolean.TRUE.equals(metadata.get("cliAgentOutput"))) {
+                String project = (String) metadata.get("project");
+                // 格式: [CC/p1] 或 [OpenCode/p2]
+                String historyContent = message;  // 原始消息已经包含项目信息
+
+                // 记录到会话历史
+                Session session = sessions.getOrCreate(sessionKey);
+                if (session != null) {
+                    session.addMessage("assistant", historyContent, Map.of(
+                            "source", "cli_subagent",
+                            "project", project,
+                            "agent_type", project != null && project.contains("opencode") ? "opencode" : "claude"
+                    ));
+                    log.debug("Recorded CLI subagent output to session history: project={}, chars={}", project, historyContent.length());
+                }
+            }
         });
 
         // 注册工具
@@ -472,6 +492,14 @@ public class AgentLoop {
             log.info("AgentLoop收到消息:{}", content);
             // 新任务开始前清理 stop 标记
             clearStopRequested(msg.getSessionKey());            // CLI Agent 命令处理 (在普通消息之前)
+
+            // 系统主代理停止
+            if ("/stop".equalsIgnoreCase(content.trim())) {
+                handleStop(msg).toCompletableFuture().join();
+                return CompletableFuture.completedFuture(null);
+            }
+
+            // 处理额外终端命令
             if (content.startsWith("/") && cliAgentHandler.handleCommand(msg, content)) {
                 continue;
             }
@@ -774,7 +802,24 @@ public class AgentLoop {
         }
 
         if ("/help".equalsIgnoreCase(cmd)) {
-            String output = "javaclawbot 命令:\n/new — 开始新对话\n/clear — 清空当前对话\n/memory — 整理当前对话记忆\n/stop — 停止当前任务\n/help — 显示可用命令\n/project <path> — 设置项目路径（开发者模式读取 CODE-AGENT.md/CLAUDE.md）\n/project clear — 清除项目路径";
+            String output = "🐱 javaclawbot 命令:\n\n" +
+                    "对话管理:\n" +
+                    "  /new — 开始新对话\n" +
+                    "  /clear — 清空当前对话\n" +
+                    "  /memory — 整理当前对话记忆\n" +
+                    "  /stop — 停止当前任务\n" +
+                    "  /help — 显示可用命令\n\n" +
+                    "项目绑定:\n" +
+                    "  /bind <名称>=<路径> [--main] — 绑定项目\n" +
+                    "  /bind --main <路径> — 直接设为主代理项目\n" +
+                    "  /unbind <名称> — 解绑项目\n" +
+                    "  /projects — 列出所有项目\n\n" +
+                    "CLI Agent:\n" +
+                    "  /cc <项目> <提示词> — 使用 Claude Code\n" +
+                    "  /oc <项目> <提示词> — 使用 OpenCode\n" +
+                    "  /status [项目] — 查看状态\n" +
+                    "  /stop <项目> [类型] — 停止 Agent\n" +
+                    "  /stopall — 停止所有 CLI Agent";
             commandManager.addLocalCommand(new LocalCommand(cmd, output));
             return CompletableFuture.completedFuture(new OutboundMessage(
                     msg.getChannel(),
@@ -798,19 +843,8 @@ public class AgentLoop {
             ));
         }
 
-        // 处理 /project 前缀命令
-        if (cmd.trim().startsWith("/project")) {
-            Object[] result = null;
-            try {
-                result = context.handleProjectPrefix(msg.getContent());
-            } catch (Exception e) {
-                log.error("项目路径处理异常", e);
-                bus.publishOutbound(new OutboundMessage(msg.getChannel(), msg.getChatId(), "抱歉，处理项目路径时出错。如果是window环境请这样使用: /project {项目路径} 不需要加引号", List.of(), Map.of()));
-                return CompletableFuture.completedFuture(null);
-            }
-            String output = (String) result[0];
-            commandManager.addLocalCommand(new LocalCommand(cmd, output));
-            bus.publishOutbound(new OutboundMessage(msg.getChannel(), msg.getChatId(), output, List.of(), Map.of()));
+        // CLI Agent 命令处理（在普通消息之前）
+        if (cmd.startsWith("/") && cliAgentHandler.handleCommand(msg, msg.getContent())) {
             return CompletableFuture.completedFuture(null);
         }
 

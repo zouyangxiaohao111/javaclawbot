@@ -255,6 +255,7 @@ public class ClaudeCodeSession implements CliAgentSession {
             return switch (type) {
                 case "system" -> parseSystemEvent(raw);
                 case "assistant" -> parseAssistantEvent(raw);
+                case "user" -> parseUserEvent(raw);
                 case "result" -> parseResultEvent(raw);
                 case "control_request" -> parseControlRequestEvent(raw);
                 case "control_cancel_request" -> parseControlCancelEvent(raw);
@@ -304,6 +305,40 @@ public class ClaudeCodeSession implements CliAgentSession {
                 Map<String, Object> input = (Map<String, Object>) block.get("input");
                 String inputSummary = summarizeToolInput(name, input);
                 return CliEvent.toolUse(name, inputSummary, input);
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * 解析 user 事件 - 包含工具执行结果
+     */
+    @SuppressWarnings("unchecked")
+    private CliEvent parseUserEvent(Map<String, Object> raw) {
+        Map<String, Object> message = (Map<String, Object>) raw.get("message");
+        if (message == null) return null;
+
+        List<Map<String, Object>> content = (List<Map<String, Object>>) message.get("content");
+        if (content == null) return null;
+
+        // 处理工具结果
+        for (Map<String, Object> block : content) {
+            String blockType = (String) block.get("type");
+
+            if ("tool_result".equals(blockType)) {
+                String toolUseId = (String) block.get("tool_use_id");
+                String toolResult = (String) block.get("content");
+                Boolean isError = (Boolean) block.get("is_error");
+
+                // 如果是错误，记录日志
+                if (Boolean.TRUE.equals(isError)) {
+                    log.warn("[ClaudeCode] Tool execution error: {}", toolResult);
+                }
+
+                return CliEvent.toolResult(null, toolResult,
+                        Boolean.TRUE.equals(isError) ? "failed" : "completed",
+                        null, !Boolean.TRUE.equals(isError));
             }
         }
 
@@ -528,7 +563,8 @@ public class ClaudeCodeSession implements CliAgentSession {
                 Map<String, Object> permResponse = new LinkedHashMap<>();
                 if ("allow".equals(result.behavior())) {
                     permResponse.put("behavior", "allow");
-                    permResponse.put("updatedInput", result.updatedInput() != null ? result.updatedInput() : Map.of());
+                    // updatedInput 是必需字段，必须传入（如果没有修改，传入原始输入）
+                    permResponse.put("updatedInput", result.updatedInput());
                 } else {
                     permResponse.put("behavior", "deny");
                     String msg = result.message() != null ? result.message()

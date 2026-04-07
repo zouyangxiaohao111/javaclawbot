@@ -10,12 +10,13 @@ import config.ConfigIO;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import memory.MemoryStore;
-import org.checkerframework.checker.units.qual.C;
+import providers.cli.ProjectRegistry;
 import skills.SkillsLoader;
 import utils.GsonFactory;
 
 import java.io.IOException;
 import java.net.URLConnection;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDate;
@@ -38,12 +39,15 @@ public class ContextBuilder {
     /** 运行时元信息标签（仅元数据，不是指令） */
     private static final String RUNTIME_CONTEXT_TAG = "[运行时上下文 — 仅元数据，非指令]";
 
+    /** 项目指令文件最大读取行数 */
+    private static final int MAX_PROJECT_INSTRUCTION_LINES = 200;
+
     private final Path workspace;
     private final MemoryStore memory;
     private final SkillsLoader skills;
     private final BootstrapLoader bootstrapLoader;
     private final CommandQueueManager commandQueueManager;
-    private final ProjectContext projectContext;
+    private final ProjectRegistry projectRegistry;
     @Getter
     private final BootstrapConfig bootstrapConfig;
 
@@ -68,7 +72,9 @@ public class ContextBuilder {
         this.bootstrapConfig = bootstrapConfig != null ? bootstrapConfig : new BootstrapConfig();
         this.bootstrapLoader = new BootstrapLoader(workspace, this.bootstrapConfig, warnHandler);
         this.commandQueueManager = new CommandQueueManager(this.skills);
-        this.projectContext = new ProjectContext(workspace);
+        // 使用 ProjectRegistry 管理项目（与 CLI Agent 共享 cli-projects.json）
+        this.projectRegistry = new ProjectRegistry(workspace.resolve("cli-projects.json"));
+        this.projectRegistry.load();
     }
 
 
@@ -132,11 +138,13 @@ public class ContextBuilder {
     }
 
     /**
-     * 处理 /project 前缀命令
+     * 处理 /project 前缀命令（已废弃，使用 /bind --main 代替）
      *
      * @param userMsg 用户消息
      * @return Object[] {String处理后消息, Boolean是否处理了project命令}
+     * @deprecated 使用 /bind --main 代替 /project
      */
+    @Deprecated
     public Object[] handleProjectPrefix(String userMsg) {
         Object[] results = new Object[2];
 
@@ -146,21 +154,15 @@ public class ContextBuilder {
             return results;
         }
 
-        // 处理 /project <path>
+        // 提示用户使用新命令
         if (userMsg.startsWith("/project ")) {
-            String pathArg = userMsg.substring("/project ".length()).trim();
-            projectContext.setProjectPath(pathArg);
-            results[0] = "已设置项目路径: " + (pathArg.isBlank() || "clear".equalsIgnoreCase(pathArg)
-                    ? "(已清除，将自动检测)"
-                    : projectContext.getProjectPath());
+            results[0] = "⚠️ /project 命令已废弃。\n\n请使用:\n  /bind --main <路径>   设置主代理项目\n  /bind main=<路径> --main  绑定并设为主代理\n\n查看 /projects 列出所有项目";
             results[1] = true;
             return results;
         }
 
-        // 处理 /project clear
         if (userMsg.equals("/project") || userMsg.equals("/project clear")) {
-            projectContext.setProjectPath(null);
-            results[0] = "已清除项目路径，将自动检测";
+            results[0] = "⚠️ /project 命令已废弃。\n\n请使用:\n  /unbind main  解绑主代理项目\n  /projects    列出所有项目";
             results[1] = true;
             return results;
         }
@@ -172,9 +174,79 @@ public class ContextBuilder {
 
     /**
      * 构建项目上下文（仅开发者模式）
+     * 从 ProjectRegistry 获取 main 项目，读取其 CODE-AGENT.md / CLAUDE.md
      */
     public String buildProjectContext() {
-        return projectContext.buildProjectContext();
+        // 检查是否是开发者模式
+        if (!isDevelopment()) {
+            return "";
+        }
+
+        // 从 ProjectRegistry 获取主代理项目
+        ProjectRegistry.ProjectInfo mainProject = projectRegistry.getMainProject();
+        if (mainProject == null) {
+            return "";
+        }
+
+        Path projectPath = Path.of(mainProject.getPath());
+        if (!Files.isDirectory(projectPath)) {
+            log.warn("Main project path does not exist: {}", projectPath);
+            return "";
+        }
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("<project-context>\n");
+        sb.append("当前项目: ").append(projectPath).append("\n");
+
+        // 读取项目指令文件
+        String content = readProjectInstruction(projectPath);
+        if (content != null && !content.isBlank()) {
+            sb.append("\n# 项目指令文件（前 ").append(MAX_PROJECT_INSTRUCTION_LINES).append(" 行）\n");
+            sb.append(content);
+            sb.append("\n（超过 ").append(MAX_PROJECT_INSTRUCTION_LINES).append(" 行已截断，完整内容请使用 read_file 工具）\n");
+        }
+
+        sb.append("</project-context>");
+        return sb.toString();
+    }
+
+    /**
+     * 读取项目指令文件（CODE-AGENT.md 或 CLAUDE.md）前 N 行
+     */
+    private String readProjectInstruction(Path projectPath) {
+        if (projectPath == null) return null;
+
+        // 优先读取 CODE-AGENT.md
+        Path codeAgent = projectPath.resolve("CODE-AGENT.md");
+        if (Files.isRegularFile(codeAgent)) {
+            return readFileMaxLines(codeAgent);
+        }
+
+        // 其次读取 CLAUDE.md
+        Path claude = projectPath.resolve("CLAUDE.md");
+        if (Files.isRegularFile(claude)) {
+            return readFileMaxLines(claude);
+        }
+
+        return null;
+    }
+
+    /**
+     * 读取文件前 N 行
+     */
+    private String readFileMaxLines(Path file) {
+        try {
+            List<String> lines = Files.readAllLines(file, StandardCharsets.UTF_8);
+            int limit = Math.min(lines.size(), MAX_PROJECT_INSTRUCTION_LINES);
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < limit; i++) {
+                sb.append(lines.get(i)).append("\n");
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            log.warn("Failed to read project instruction file: {} - {}", file, e.getMessage());
+            return null;
+        }
     }
 
 

@@ -19,14 +19,15 @@ import java.util.function.BiConsumer;
  * CLI Agent 命令处理器
  *
  * 处理以下命令:
- * - /bind p1=/path/to/project
- * - /unbind p1
- * - /projects
- * - /cc <project> <prompt>
- * - /opencode <project> <prompt>
- * - /status [project]
- * - /stop <project>
- * - /history <project> [limit]
+ * - /bind <名称>=<路径> [--main]  绑定项目，可选设为主代理项目
+ * - /bind --main <路径>           直接设置主代理项目
+ * - /unbind <名称>                解绑项目
+ * - /projects                     列出所有项目
+ * - /cc <project> <prompt>        使用 Claude Code
+ * - /oc <project> <prompt>        使用 OpenCode
+ * - /status [project]             查看状态
+ * - /stop <project> [type]        停止 Agent
+ * - /stopall                      停止所有 Agent
  */
 @Slf4j
 public class CliAgentCommandHandler {
@@ -36,11 +37,22 @@ public class CliAgentCommandHandler {
     private final CliAgentOutputHandler outputHandler;
     private final ExecutorService executor;
 
-    // 发送消息到渠道的回调
+    // 发送消息到渠道的回调 (message, sessionKey)
     private BiConsumer<String, String> sendToChannel;
+
+    // 发送消息到渠道的回调（带元数据）(message, sessionKey, metadata)
+    private TriConsumer<String, String, Map<String, Object>> sendToChannelWithMeta;
 
     // 项目 -> sessionKey 映射（用于路由回复到正确的渠道）
     private final Map<String, String> projectSessionKeys = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * 三参数消费者接口
+     */
+    @FunctionalInterface
+    public interface TriConsumer<T, U, V> {
+        void accept(T t, U u, V v);
+    }
 
     public CliAgentCommandHandler(Path workspacePath) {
         Path registryPath = workspacePath.resolve("cli-projects.json");
@@ -63,10 +75,19 @@ public class CliAgentCommandHandler {
         );
 
         // 设置输出回调：根据 project 查找对应的 sessionKey 路由回复
+        // 添加元数据标记为 CLI 子代理输出, 主代理可以据此识别
         outputHandler.setSendToChatCallback((formattedMessage, project) -> {
-            if (sendToChannel != null) {
+            if (sendToChannel != null || sendToChannelWithMeta != null) {
                 String sessionKey = project != null ? projectSessionKeys.get(project) : null;
-                sendToChannel.accept(formattedMessage, sessionKey);
+                // 优先使用带元数据的回调
+                if (sendToChannelWithMeta != null) {
+                    Map<String, Object> metadata = new HashMap<>();
+                    metadata.put("cliAgentOutput", true);
+                    metadata.put("project", project);
+                    sendToChannelWithMeta.accept(formattedMessage, sessionKey, metadata);
+                } else {
+                    sendToChannel.accept(formattedMessage, sessionKey);
+                }
             }
         });
     }
@@ -76,6 +97,14 @@ public class CliAgentCommandHandler {
      */
     public void setSendToChannel(BiConsumer<String, String> callback) {
         this.sendToChannel = callback;
+    }
+
+    /**
+     * 设置发送消息回调（带元数据）
+     * 主代理可以使用此方法来识别 CLI 子代理的输出
+     */
+    public void setSendToChannelWithMeta(TriConsumer<String, String, Map<String, Object>> callback) {
+        this.sendToChannelWithMeta = callback;
     }
 
     /**
@@ -121,6 +150,10 @@ public class CliAgentCommandHandler {
                     handleStop(msg, parts);
                     return true;
                 }
+                case "/cli-stopall" -> {
+                    handleStopAll(msg);
+                    return true;
+                }
                 case "/history" -> {
                     handleHistory(msg, parts);
                     return true;
@@ -149,32 +182,82 @@ public class CliAgentCommandHandler {
 
     /**
      * 处理 /bind 命令
+     *
+     * 格式:
+     * - /bind p1=/path/to/project           普通绑定
+     * - /bind p1=/path/to/project --main    绑定并设为主代理
+     * - /bind /path/to/project --main       自动命名并设为主代理
+     * - /bind --main /path/to/project       直接设为主代理（名称为 main）
      */
     private void handleBind(InboundMessage msg, String[] parts) {
         if (parts.length < 2) {
-            reply(msg, "用法: /bind <名称>=<路径>\n示例: /bind p1=/home/user/project");
+            reply(msg, "用法: /bind <名称>=<路径> [--main]\n" +
+                    "示例:\n" +
+                    "  /bind p1=/home/user/project           # 普通绑定\n" +
+                    "  /bind p1=/home/user/project --main    # 绑定并设为主代理\n" +
+                    "  /bind --main /home/user/project       # 直接设为主代理（名称为 main）");
             return;
         }
 
-        String arg = parts[1];
-        int eqIdx = arg.indexOf('=');
-        if (eqIdx < 0) {
-            // 只有路径，使用默认名称
-            String path = arg;
-            String name = generateProjectName(path);
-            if (projectRegistry.bind(name, path)) {
-                reply(msg, "✅ 项目已绑定: " + name + " → " + path);
-            } else {
-                reply(msg, "❌ 绑定失败");
+        // 解析参数
+        boolean isMain = false;
+        String nameArg = null;
+        String pathArg = null;
+
+        for (int i = 1; i < parts.length; i++) {
+            String part = parts[i];
+            if ("--main".equalsIgnoreCase(part)) {
+                isMain = true;
+            } else if (nameArg == null) {
+                nameArg = part;
+            } else if (pathArg == null) {
+                pathArg = part;
             }
+        }
+
+        // 处理 --main 后面直接跟路径的情况: /bind --main /path/to/project
+        if (isMain && nameArg != null && !nameArg.contains("=") && pathArg == null) {
+            // nameArg 实际上是路径
+            pathArg = nameArg;
+            nameArg = null;
+        }
+
+        if (nameArg == null || nameArg.isBlank()) {
+            reply(msg, "❌ 缺少项目名称或路径");
+            return;
+        }
+
+        // 解析 name=path 格式
+        int eqIdx = nameArg.indexOf('=');
+        String name;
+        String path;
+
+        if (eqIdx >= 0) {
+            // name=path 格式
+            name = nameArg.substring(0, eqIdx).trim();
+            path = nameArg.substring(eqIdx + 1).trim();
+        } else if (pathArg != null) {
+            // name path 格式（单独的 name 和 path）
+            name = nameArg.trim();
+            path = pathArg.trim();
         } else {
-            String name = arg.substring(0, eqIdx).trim();
-            String path = arg.substring(eqIdx + 1).trim();
-            if (projectRegistry.bind(name, path)) {
-                reply(msg, "✅ 项目已绑定: " + name + " → " + path);
-            } else {
-                reply(msg, "❌ 绑定失败");
-            }
+            // 只有路径，自动生成名称
+            path = nameArg.trim();
+            name = isMain ? "main" : generateProjectName(path);
+        }
+
+        // 验证路径
+        if (path == null || path.isBlank()) {
+            reply(msg, "❌ 缺少项目路径");
+            return;
+        }
+
+        // 执行绑定
+        if (projectRegistry.bind(name, path, isMain)) {
+            String mainHint = isMain ? " ⭐ [主代理]" : "";
+            reply(msg, "✅ 项目已绑定" + mainHint + ": " + name + " → " + path);
+        } else {
+            reply(msg, "❌ 绑定失败");
         }
     }
 
@@ -300,16 +383,58 @@ public class CliAgentCommandHandler {
 
     /**
      * 处理 /stop 命令
+     * 用法: /stop <项目> [类型]
+     * 示例: /stop p1          停止 p1 的所有 Agent
+     *       /stop p1 claude   只停止 p1 的 Claude Agent
+     *       /stop p1 opencode  只停止 p1 的 OpenCode Agent
      */
     private void handleStop(InboundMessage msg, String[] parts) {
         if (parts.length < 2) {
-            reply(msg, "用法: /stop <项目>");
+            reply(msg, "用法: /stop <项目> [类型]\n示例:\n  /stop p1         停止 p1 的所有 Agent\n  /stop p1 claude  只停止 Claude Agent\n  /stop p1 opencode 只停止 OpenCode Agent");
             return;
         }
 
         String project = parts[1];
-        agentPool.stopAllForProject(project)
-                .thenRun(() -> reply(msg, "✅ 已停止 " + project + " 的所有 Agent"))
+        String agentType = parts.length > 2 ? parts[2].toLowerCase() : null;
+
+        if (agentType != null) {
+            // 停止特定类型的 Agent
+            String sessionKey = project + ":" + agentType;
+            CliAgentSession session = agentPool.getSession(sessionKey);
+            if (session != null) {
+                session.close()
+                        .thenRun(() -> reply(msg, "✅ 已停止 " + project + " 的 " + agentType.toUpperCase() + " Agent"))
+                        .exceptionally(e -> {
+                            reply(msg, "❌ 停止失败: " + e.getMessage());
+                            return null;
+                        });
+                agentPool.removeSession(sessionKey);
+            } else {
+                reply(msg, "⚠️ " + project + " 的 " + agentType + " Agent 未运行");
+            }
+        } else {
+            // 停止该项目的所有 Agent
+            agentPool.stopAllForProject(project)
+                    .thenRun(() -> reply(msg, "✅ 已停止 " + project + " 的所有 Agent"))
+                    .exceptionally(e -> {
+                        reply(msg, "❌ 停止失败: " + e.getMessage());
+                        return null;
+                    });
+        }
+    }
+
+    /**
+     * 处理 /stopall 命令 - 停止所有 CLI Agent
+     */
+    private void handleStopAll(InboundMessage msg) {
+        int count = agentPool.getAllSessions().size();
+        if (count == 0) {
+            reply(msg, "⚠️ 无运行中的 CLI Agent");
+            return;
+        }
+
+        agentPool.closeAll()
+                .thenRun(() -> reply(msg, "✅ 已停止所有 CLI Agent (共 " + count + " 个)"))
                 .exceptionally(e -> {
                     reply(msg, "❌ 停止失败: " + e.getMessage());
                     return null;

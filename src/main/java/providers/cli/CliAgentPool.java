@@ -142,7 +142,12 @@ public class CliAgentPool {
 
         switch (decision.behavior()) {
             case "allow" -> {
-                session.respondPermission(event.requestId(), PermissionResult.allow(decision.updatedInput()));
+                // 如果 decision.updatedInput() 为 null，使用原始输入
+                // Claude Code 要求 updatedInput 必须存在
+                Map<String, Object> input = decision.updatedInput() != null
+                        ? decision.updatedInput()
+                        : event.toolInputRaw();
+                session.respondPermission(event.requestId(), PermissionResult.allow(input));
             }
             case "deny" -> {
                 session.respondPermission(event.requestId(), PermissionResult.deny(decision.message()));
@@ -232,6 +237,21 @@ public class CliAgentPool {
      */
     public Map<String, CliAgentSession> getAllSessions() {
         return Collections.unmodifiableMap(new LinkedHashMap<>(sessions));
+    }
+
+    /**
+     * 获取特定会话
+     */
+    public CliAgentSession getSession(String key) {
+        return sessions.get(key);
+    }
+
+    /**
+     * 移除会话
+     */
+    public void removeSession(String key) {
+        sessions.remove(key);
+        log.debug("Removed session: {}", key);
     }
 
     /**
