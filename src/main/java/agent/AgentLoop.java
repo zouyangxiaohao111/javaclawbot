@@ -499,10 +499,13 @@ public class AgentLoop {
                 return CompletableFuture.completedFuture(null);
             }
 
-            // 处理额外终端命令
-            if (content.startsWith("/") && cliAgentHandler.handleCommand(msg, content)) {
-                continue;
+            // 处理额外终端命令(开发者模式支持)
+            if (currentConfig().getAgents().getDefaults().isDevelopment()) {
+                if (content.startsWith("/") && cliAgentHandler.handleCommand(msg, content)) {
+                    continue;
+                }
             }
+
 
             CompletableFuture<Void> task = dispatch(msg);
             activeTasks.computeIfAbsent(msg.getSessionKey(), k -> new CopyOnWriteArrayList<>()).add(task);
