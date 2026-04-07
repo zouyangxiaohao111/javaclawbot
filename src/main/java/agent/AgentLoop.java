@@ -39,6 +39,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import providers.LLMProvider;
 import providers.ToolCallRequest;
+import providers.cli.CliAgentCommandHandler;
 import context.ContextPruner;
 import context.ContextPruningSettings;
 import session.Session;
@@ -100,9 +101,9 @@ public class AgentLoop {
      */
     private final McpManager mcpManager;
     /**
-     * 正在压缩的会话（保留用于防止并发压缩）
+     * CLI Agent 命令处理器
      */
-    private final Set<String> consolidating = ConcurrentHashMap.newKeySet();
+    private final CliAgentCommandHandler cliAgentHandler;
 
     private final ConcurrentHashMap<String, CopyOnWriteArrayList<CompletableFuture<?>>> activeTasks = new ConcurrentHashMap<>();
 
@@ -195,6 +196,23 @@ public class AgentLoop {
         );
         this.mcpServers = (mcpServers != null) ? mcpServers : Map.of();
         this.mcpManager = new McpManager(workspace, mcpServers, executor);
+
+        // 初始化 CLI Agent 命令处理器
+        this.cliAgentHandler = new CliAgentCommandHandler(workspace);
+        this.cliAgentHandler.setSendToChannel((message, sessionKey) -> {
+            // sessionKey 格式: "channel:chatId"
+            String[] parts = sessionKey.split(":", 2);
+            String channel = parts[0];
+            String chatId = parts.length > 1 ? parts[1] : "";
+            bus.publishOutbound(new OutboundMessage(
+                    channel,
+                    chatId,
+                    message,
+                    List.of(),
+                    Map.of()
+            ));
+        });
+
         // 注册工具
         this.sharedTools = new ToolRegistry();
 
@@ -452,13 +470,11 @@ public class AgentLoop {
 
             String content = msg.getContent() == null ? "" : msg.getContent().trim();
             log.info("AgentLoop收到消息:{}", content);
-            if ("/stop".equalsIgnoreCase(content)) {
-                handleStop(msg).toCompletableFuture().join();
+            // 新任务开始前清理 stop 标记
+            clearStopRequested(msg.getSessionKey());            // CLI Agent 命令处理 (在普通消息之前)
+            if (content.startsWith("/") && cliAgentHandler.handleCommand(msg, content)) {
                 continue;
             }
-
-            // 新任务开始前清理 stop 标记
-            clearStopRequested(msg.getSessionKey());
 
             CompletableFuture<Void> task = dispatch(msg);
             activeTasks.computeIfAbsent(msg.getSessionKey(), k -> new CopyOnWriteArrayList<>()).add(task);

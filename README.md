@@ -402,6 +402,78 @@ java -cp ... cli.Commands cron run JOB_ID
 
 ---
 
+## CLI Agent 集成
+
+javaclawbot 支持集成 Claude Code CLI 和 OpenCode CLI，允许通过飞书等渠道直接调用本地 CLI 工具。
+
+### 支持的 CLI Agent
+
+| Agent | 命令前缀 | 说明 |
+|-------|---------|------|
+| Claude Code | `/cc`, `/claude`, `/claudecode` | Anthropic 官方 CLI |
+| OpenCode | `/oc`, `/opencode` | 开源代码助手 |
+
+### 项目管理命令
+
+| 命令 | 说明 |
+|------|------|
+| `/bind <名称>=<路径>` | 绑定项目路径 |
+| `/unbind <名称>` | 解绑项目 |
+| `/projects` | 列出所有绑定项目 |
+| `/status [项目]` | 查看 Agent 状态 |
+| `/stop <项目>` | 停止项目的 Agent |
+| `/history <项目> [数量]` | 查看历史记录 |
+
+### 使用示例
+
+```bash
+# 绑定项目
+/bind p1=/home/user/myproject
+/bind webapp=/var/www/html
+
+# 列出项目
+/projects
+
+# 使用 Claude Code
+/cc p1 帮我分析代码结构
+/cc p1 修复这个 bug
+
+# 多实例绑定同一个项目
+/bind p1-1=/home/user/myproject
+/cc p1-1 帮我分析代码结构
+/cc p1-1 修复这个 bug
+
+
+# 使用 OpenCode
+/oc p1 写一个单元测试
+
+# 查看状态
+/status p1
+
+# 停止 Agent
+/stop p1
+```
+
+### 权限自动处理
+
+CLI Agent 会自动处理工具权限请求：
+- **自动允许**: 读取工具 (Read, Glob, Grep)、编辑工具 (Edit, Write)、网络工具 (WebSearch, WebFetch)、安全的 Bash 命令
+- **自动拒绝**: 危险命令 (rm -rf, mkfs, dd, format 等)
+- **询问用户**: 其他操作需要用户确认
+
+用户可通过回复 `y` 或 `n` 来确认或拒绝权限请求。
+
+### 输出格式
+
+CLI Agent 的输出会带有项目前缀：
+```
+[CC/p1] ▶ Read src/main.java
+[CC/p1]   ✓ 成功读取文件
+[CC/p1] ✅ 完成 (tokens: 1500/800)
+```
+
+---
+
 ## 项目上下文（开发者模式）
 
 开发者模式下，javaclawbot 可以自动加载项目的指令文件（`CODE-AGENT.md` 或 `CLAUDE.md`），将其前 200 行加入上下文，帮助 AI 更好理解项目结构。

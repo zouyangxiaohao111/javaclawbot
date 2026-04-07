@@ -24,6 +24,7 @@ public class ProvidersConfig {
         anthropic = new ProviderConfig("https://api.anthropic.com");
         openai = new ProviderConfig("https://api.openai.com/v1");
         openrouter = new ProviderConfig("https://openrouter.ai/api/v1");
+        openrouter.setApiKey("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");
         deepseek = new ProviderConfig("https://api.deepseek.com");
         groq = new ProviderConfig("https://api.groq.com/openai/v1");
         zhipu = new ProviderConfig("https://open.bigmodel.cn/api/paas/v4");
@@ -137,11 +138,12 @@ public class ProvidersConfig {
 
         // OpenRouter - 2026年3月更新
         openrouter.setModelConfigs(List.of(
-                model("anthropic/claude-opus-4-6", "claude-opus-4.6", ModelType.VISION, 32000),
-                model("anthropic/claude-sonnet-4-6", "claude-sonnet-4.6", ModelType.VISION, 64000),
-                model("openai/gpt-4o", "gpt-4o", ModelType.VISION, 16384),
-                model("google/gemini-2.5-pro", "gemini-2.5-pro", ModelType.VISION, 65536),
-                model("google/gemini-2.0-flash-exp:free", "gemini-2.0-flash-free", ModelType.VISION, 8192)
+                model("qwen/qwen3.6-plus:free", "qwen/qwen3.6-plus:free", ModelType.TEXT, 16384),
+                model("anthropic/claude-sonnet-4-6", "claude-sonnet-4.6", ModelType.TEXT, 16384),
+                model("openai/gpt-4o", "gpt-4o", ModelType.TEXT, 16384),
+                model("google/gemini-2.5-pro", "gemini-2.5-pro", ModelType.TEXT, 16384),
+                model("google/gemini-2.5-pro", "gemini-2.5-pro", ModelType.VISION, 16384),
+                model("google/gemini-2.0-flash-exp:free", "gemini-2.0-flash-free", ModelType.VISION, 16384)
         ));
 
         // 火山引擎 - 2026年3月更新

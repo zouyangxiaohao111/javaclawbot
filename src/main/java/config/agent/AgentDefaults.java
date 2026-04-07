@@ -15,13 +15,13 @@ import lombok.Data;
 @Data
 public class AgentDefaults {
     private String workspace = "~/.javaclawbot/workspace";
-    private String model = "glm-5";
-    private String provider = "dashscope";
-    private int maxTokens = 163840;
+    private String model = "qwen/qwen3.6-plus:free";
+    private String provider = "openroute";
+    private int maxTokens = 16384;
     /**
      * 上下文窗口token数量
      */
-    private int contextWindow = 32000;
+    private int contextWindow = 1_000_000;
     private double temperature = 0.1;
     /**
      * 是否开发者
