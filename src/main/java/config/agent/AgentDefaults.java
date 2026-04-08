@@ -15,9 +15,9 @@ import lombok.Data;
 @Data
 public class AgentDefaults {
     private String workspace = "~/.javaclawbot/workspace";
-    private String model = "qwen/qwen3.6-plus:free";
-    private String provider = "openroute";
-    private int maxTokens = 16384;
+    private String model = "qwen/qwen3.6-plus";
+    private String provider = "openrouter";
+    private int maxTokens = 8192;
     /**
      * 上下文窗口token数量
      */
