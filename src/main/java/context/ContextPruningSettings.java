@@ -42,6 +42,9 @@ public class ContextPruningSettings {
     /** 硬清除配置 */
     private HardClearConfig hardClear = new HardClearConfig();
 
+    /** 当前轮次保留最后的工具调用数量（当需要裁剪当前轮次时） */
+    private int keepLastToolsInTurn = 10;
+
     public String getMode() {
         return mode;
     }
@@ -117,6 +120,14 @@ public class ContextPruningSettings {
 
     public boolean isEnabled() {
         return "cache-ttl".equals(mode);
+    }
+
+    public int getKeepLastToolsInTurn() {
+        return keepLastToolsInTurn;
+    }
+
+    public void setKeepLastToolsInTurn(int keepLastToolsInTurn) {
+        this.keepLastToolsInTurn = Math.max(0, keepLastToolsInTurn);
     }
 
     /**

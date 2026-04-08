@@ -1,9 +1,12 @@
 package agent.tool.shell;
 
 import java.io.*;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * Atomic replication of Claude Code shell/bashProvider.ts.
@@ -23,6 +26,8 @@ import java.util.concurrent.*;
  *   && pwd -P >| <cwd_temp_file>
  */
 public final class BashProvider implements ShellProvider {
+
+    private static final Logger log = Logger.getLogger(BashProvider.class.getName());
 
     private final String shellPath;
     private volatile String currentSandboxTmpDir;
@@ -137,14 +142,9 @@ public final class BashProvider implements ShellProvider {
                 // Original: bashProvider.ts lines 124-127
                 String normalizedCommand = rewriteWindowsNullRedirect(command);
 
-                // Quote the command for eval
-                // Original: bashProvider.ts line 129
-                // Simplified quoting — original uses quoteShellCommand with stdin redirect detection
-                String quotedCommand = quoteForEval(normalizedCommand);
-
                 // Build command parts
                 // Original: bashProvider.ts lines 156-187
-                List<String> commandParts = new ArrayList<>();
+                StringBuilder scriptContent = new StringBuilder();
 
                 // 1. Source snapshot file (aliases, functions, shell options, PATH)
                 // Original: bashProvider.ts lines 161-167
@@ -152,44 +152,43 @@ public final class BashProvider implements ShellProvider {
                     String finalPath = isWindows()
                             ? windowsPathToPosixPath(snapshotFilePath)
                             : snapshotFilePath;
-                    commandParts.add("source " + quote(new String[]{finalPath}) + " 2>/dev/null || true");
+                    scriptContent.append("source ").append(quote(new String[]{finalPath})).append(" 2>/dev/null || true\n");
                 }
 
-                // 2. Session environment script (stub: skip)
-                // Original: bashProvider.ts lines 170-173
-                // String sessionEnvScript = getSessionEnvironmentScript();
-                // if (sessionEnvScript != null && !sessionEnvScript.isEmpty()) {
-                //     commandParts.add(sessionEnvScript);
-                // }
-
-                // 3. Disable extended glob patterns for security
+                // 2. Disable extended glob patterns for security
                 // Original: bashProvider.ts lines 176-179
                 String disableExtglobCmd = getDisableExtglobCommand(shellPath);
                 if (disableExtglobCmd != null) {
-                    commandParts.add(disableExtglobCmd);
+                    scriptContent.append(disableExtglobCmd).append("\n");
                 }
 
-                // 4. eval-wrap the command
-                // Original: bashProvider.ts line 184
-                // When sourcing a file with aliases, they won't be expanded in the same
-                // command line because the shell parses the entire line before execution.
-                // Using eval after sourcing causes a second parsing pass where aliases are available.
-                commandParts.add("eval " + quotedCommand);
+                // 3. The user command (no eval wrapping needed when using script file)
+                scriptContent.append(normalizedCommand).append("\n");
 
-                // 5. Track cwd via pwd -P
+                // 4. Track cwd via pwd -P
                 // Original: bashProvider.ts lines 185-186
-                commandParts.add("pwd -P >| " + quote(new String[]{shellCwdFilePath}));
+                scriptContent.append("pwd -P >| ").append(quote(new String[]{shellCwdFilePath})).append("\n");
 
-                String commandString = String.join(" && ", commandParts);
+                // 将脚本写入临时文件，避免 -c 参数中的引号转义问题
+                Path tempScript = Files.createTempFile("bash-cmd-", ".sh");
+                Files.writeString(tempScript, scriptContent.toString(), StandardCharsets.UTF_8);
 
-                // 6. Apply CLAUDE_CODE_SHELL_PREFIX if set
-                // Original: bashProvider.ts lines 189-195
-                String shellPrefix = System.getenv("CLAUDE_CODE_SHELL_PREFIX");
-                if (shellPrefix != null && !shellPrefix.isBlank()) {
-                    commandString = formatShellPrefixCommand(shellPrefix, commandString);
-                }
+                // 删除临时文件的钩子
+                tempScript.toFile().deleteOnExit();
 
-                return new ExecCommandResult(commandString, cwdFilePath);
+                // 返回脚本文件路径作为命令（使用 source 或直接执行）
+                String scriptPath = isWindows() ? windowsPathToPosixPath(tempScript.toString()) : tempScript.toString();
+
+                // 使用 source 执行脚本（而不是直接执行，这样可以保持环境变量）
+                String commandString = "source " + quote(new String[]{scriptPath});
+
+                // === DEBUG LOG ===
+                log.log(Level.FINE, "=== BashProvider Debug ===");
+                log.log(Level.FINE, "原始命令: {0}", command);
+                log.log(Level.FINE, "脚本内容:\n{0}", scriptContent);
+                log.log(Level.FINE, "命令字符串: {0}", commandString);
+
+                return new ExecCommandResult(commandString, cwdFilePath, tempScript);
 
             } catch (Exception e) {
                 throw new RuntimeException("Failed to build bash command", e);
@@ -334,12 +333,23 @@ public final class BashProvider implements ShellProvider {
      *
      * Original source: src/utils/bash/shellQuoting.ts → quoteShellCommand()
      *
-     * Wraps the command in single quotes for eval, with proper escaping.
+     * Uses $'...' syntax which:
+     * - Allows proper escaping of special characters
+     * - Preserves double quotes inside the command
+     * - Works correctly with eval
+     *
+     * The backslash escaping ensures:
+     * - Single quotes become \'
+     * - Backslashes become \\
+     * - Double quotes are preserved (no escaping needed inside $'...')
      */
     private static String quoteForEval(String command) {
-        // Simplified: wrap in single quotes for eval
-        // Original uses more sophisticated quoting with heredoc handling
-        return "'" + command.replace("'", "'\\''") + "'";
+        // Use $'...' syntax with proper backslash escaping
+        // This allows double quotes to be preserved inside the command
+        String escaped = command
+                .replace("\\", "\\\\")  // Escape backslashes first
+                .replace("'", "\\'");    // Escape single quotes
+        return "$'" + escaped + "'";
     }
 
     /**

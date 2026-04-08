@@ -1,5 +1,6 @@
 package agent.tool.shell;
 
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -43,8 +44,13 @@ public interface ShellProvider {
      *
      * @param commandString The full assembled command string to pass to the shell
      * @param cwdFilePath   The temp file path where pwd output is written for cwd tracking
+     * @param tempScriptFile Optional temp script file to clean up after execution
      */
-    record ExecCommandResult(String commandString, String cwdFilePath) {}
+    record ExecCommandResult(String commandString, String cwdFilePath, Path tempScriptFile) {
+        public ExecCommandResult(String commandString, String cwdFilePath) {
+            this(commandString, cwdFilePath, null);
+        }
+    }
 
     // ========================================================================
     // BuildExecCommandOpts — options for buildExecCommand()

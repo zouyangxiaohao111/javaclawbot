@@ -33,6 +33,8 @@ public class ContextPruner {
      */
     public static List<Map<String, Object>> pruneContextMessages(
             List<Map<String, Object>> messages,
+            double consolidateThreshold,
+            double softTrimRatio,
             ContextPruningSettings settings,
             int contextWindowTokens,
             Predicate<String> isToolPrunable
@@ -41,7 +43,7 @@ public class ContextPruner {
             return messages;
         }
 
-        if (!settings.isEnabled() || contextWindowTokens <= 0) {
+        if (contextWindowTokens <= 0) {
             return new ArrayList<>(messages);
         }
 
@@ -73,7 +75,7 @@ public class ContextPruner {
         double ratio = (double) totalChars / charWindow;
 
         // 如果低于软修剪阈值，不需要修剪
-        if (ratio < settings.getSoftTrimRatio()) {
+        if (ratio < softTrimRatio) {
             return new ArrayList<>(messages);
         }
 
@@ -103,48 +105,16 @@ public class ContextPruner {
             }
         }
 
-        // 检查是否需要硬清除
-        // by zcw 硬清除交给llm了 所以这里不需要了
-        /*ratio = (double) totalChars / charWindow;
-        if (ratio < settings.getHardClearRatio() || !settings.getHardClear().isEnabled()) {
-            return result;
+        // 检查是否仍然超过阈值
+        ratio = (double) estimateContextChars(result) / charWindow;
+
+        // 如果仍然超过阈值，需要裁剪当前轮次（最后一个用户消息之后）的工具调用
+        // 但保留最后 N 次工具调用
+
+        if (ratio >= consolidateThreshold) {
+            int prunedCurrentTurn = pruneCurrentTurnTools(result, cutoffIndex, settings, isToolPrunable);
+            log.debug("裁剪当前轮次工具：{} 个", prunedCurrentTurn);
         }
-
-        // 计算可修剪工具结果的字符数
-        int prunableToolChars = 0;
-        for (int i : prunableToolIndexes) {
-            Map<String, Object> msg = result.get(i);
-            if (msg == null) {
-                continue;
-            }
-            prunableToolChars += estimateMessageChars(msg);
-        }
-
-        // 如果可修剪字符数不足，不执行硬清除
-        if (prunableToolChars < settings.obtainMinPrunableToolCharsByContextWindow(charWindow)) {
-            return result;
-        }
-
-        // 执行硬清除
-        for (int i : prunableToolIndexes) {
-            if (ratio < settings.getHardClearRatio()) {
-                break;
-            }
-
-            Map<String, Object> msg = result.get(i);
-            if (msg == null) continue;
-
-            int beforeChars = estimateMessageChars(msg);
-
-            // 创建清除后的消息
-            Map<String, Object> cleared = new LinkedHashMap<>(msg);
-            cleared.put("content", settings.getHardClear().getPlaceholder());
-            result.set(i, cleared);
-
-            int afterChars = estimateMessageChars(cleared);
-            totalChars += afterChars - beforeChars;
-            ratio = (double) totalChars / charWindow;
-        }*/
 
         log.debug("上下文修剪完成：{} 条消息，修剪了 {} 个工具结果", 
                 result.size(), prunableToolIndexes.size());
@@ -184,6 +154,72 @@ public class ContextPruner {
         Map<String, Object> result = new LinkedHashMap<>(msg);
         result.put("content", trimmed + note);
         return result;
+    }
+
+    /**
+     * 裁剪当前轮次（最后一个用户消息之后）的工具调用
+     * 保留最后 keepLastToolsInTurn 次工具调用
+     *
+     * @param messages       消息列表（会被修改）
+     * @param lastUserIndex  最后一个用户消息的索引
+     * @param settings       修剪配置
+     * @param isToolPrunable 判断工具是否可修剪
+     * @return 被裁剪的工具数量
+     */
+    private static int pruneCurrentTurnTools(
+            List<Map<String, Object>> messages,
+            int lastUserIndex,
+            ContextPruningSettings settings,
+            Predicate<String> isToolPrunable
+    ) {
+        if (lastUserIndex < 0 || lastUserIndex >= messages.size() - 1) {
+            return 0; // 没有当前轮次的内容
+        }
+
+        int keepLast = settings.getKeepLastToolsInTurn();
+        if (keepLast <= 0) {
+            return 0; // 不保留任何工具，但这里我们不处理，因为可能会丢失重要信息
+        }
+
+        // 收集当前轮次（最后一个用户消息之后）的工具索引
+        List<Integer> currentTurnToolIndexes = new ArrayList<>();
+        for (int i = lastUserIndex + 1; i < messages.size(); i++) {
+            Map<String, Object> msg = messages.get(i);
+            if (msg == null) continue;
+
+            Object role = msg.get("role");
+            if (!"tool".equals(role)) continue;
+
+            String toolName = getToolName(msg);
+            if (!isToolPrunable.test(toolName)) continue;
+
+            currentTurnToolIndexes.add(i);
+        }
+
+        // 如果工具数量少于保留数量，不裁剪
+        if (currentTurnToolIndexes.size() <= keepLast) {
+            return 0;
+        }
+
+        // 计算需要裁剪的工具数量（跳过最后 keepLast 个）
+        int pruneCount = currentTurnToolIndexes.size() - keepLast;
+        int actuallyPruned = 0;
+
+        // 从前往后裁剪（保留最后 keepLast 个）
+        for (int i = 0; i < pruneCount; i++) {
+            int msgIndex = currentTurnToolIndexes.get(i);
+            Map<String, Object> msg = messages.get(msgIndex);
+            if (msg == null) continue;
+
+            // 尝试软修剪
+            Map<String, Object> trimmed = softTrimToolResult(msg, settings);
+            if (trimmed != null) {
+                messages.set(msgIndex, trimmed);
+                actuallyPruned++;
+            }
+        }
+
+        return actuallyPruned;
     }
 
     /**

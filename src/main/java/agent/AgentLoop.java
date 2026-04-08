@@ -498,23 +498,12 @@ public class AgentLoop {
             String content = msg.getContent() == null ? "" : msg.getContent().trim();
             log.info("AgentLoop收到消息:{}", content);
             // 新任务开始前清理 stop 标记
-            clearStopRequested(msg.getSessionKey());            // CLI Agent 命令处理 (在普通消息之前)
+            clearStopRequested(msg.getSessionKey());
 
             // 系统主代理停止
             if (handleSystemCommand(msg, content)) {
                 continue;
             }
-            /*if ("/stop".equalsIgnoreCase(content.trim())) {
-                handleStop(msg).toCompletableFuture().join();
-                continue;  // 只停止任务，继续循环等待下一条消息
-            }
-
-            // 处理额外终端命令(开发者模式支持)
-            if (currentConfig().getAgents().getDefaults().isDevelopment()) {
-                if (content.startsWith("/") && cliAgentHandler.handleCommand(msg, content)) {
-                    continue;
-                }
-            }*/
 
 
             CompletableFuture<Void> task = dispatch(msg);
@@ -551,13 +540,24 @@ public class AgentLoop {
             CompletableFuture<RunResult> out,
             List<String> toolsUsed,
             List<Map<String, Object>> messages,
-            UsageAccumulator usageAcc
+            UsageAccumulator usageAcc,
+            boolean saveToSession
     ) {
         if (!isStopRequested(sessionKey)) {
             return false;
         }
 
         if (st.done.compareAndSet(false, true)) {
+            // 停止时也保存已处理的消息到 session
+            if (saveToSession) {
+                var sess = sessions.getOrCreate(sessionKey);
+                List<Map<String, Object>> hist = sess.getHistory();
+                int startIdx = 2 + hist.size();
+                if (messages.size() > startIdx) {
+                    saveTurn(sess, new ArrayList<>(messages.subList(startIdx, messages.size())));
+                }
+            }
+
             out.complete(new RunResult(
                     "已停止。",
                     toolsUsed,
@@ -757,7 +757,7 @@ public class AgentLoop {
         compressMsg.setContent("");
         compressMsg.setSessionKeyOverride(sessionKey);
 
-        // 同步执行
+        // 同步执行（不需要保存到 session）
         runAgentLoop(compressMsg, initial
                 , tools, false
                 , (context, toolHit) -> bus.publishOutbound(new OutboundMessage(
@@ -767,7 +767,7 @@ public class AgentLoop {
                 , List.of()
                 , Map.of()
                 )
-        )).toCompletableFuture().join();
+        ), false).toCompletableFuture().join();
     }
 
     private CompletionStage<OutboundMessage> processMessage(InboundMessage msg, String sessionKeyOverride, ProgressCallback onProgress) {
@@ -789,8 +789,6 @@ public class AgentLoop {
             );
 
             return runAgentLoop(msg, initial, requestTools, true, onProgress).thenApply(rr -> {
-                saveTurn(session, rr.messages, 2 + history.size());
-                sessions.save(session);
                 return new OutboundMessage(
                         channel,
                         chatId,
@@ -827,7 +825,7 @@ public class AgentLoop {
 
         if ("/new".equalsIgnoreCase(cmd) || "/clear".equalsIgnoreCase(cmd)) {
             commandManager.addLocalCommand(new LocalCommand(cmd, "新会话已开始"));
-            sessions.save(session);
+            //sessions.save(session);
             Session newSession = sessions.createNew(session.getKey());
             return CompletableFuture.completedFuture(new OutboundMessage(
                     msg.getChannel(),
@@ -919,10 +917,6 @@ public class AgentLoop {
                     ? rr.finalContent
                     : "处理完成但没有响应内容。";
 
-            // 尝试压缩和保存session
-            saveTurn(session, rr.messages, 2 + history.size());
-            sessions.save(session);
-
             var msgTool = requestTools.get("message");
             if (msgTool instanceof MessageTool m && m.isSentInTurn()) {
                 return null;
@@ -965,14 +959,14 @@ public class AgentLoop {
             );
             ToolView tools = buildMemoryRequestTools(channel, chatId, null);
 
-            // 同步执行记忆整理, memory命令执行完成后,清理session中上下文
+            // 同步执行记忆整理, memory命令执行完成后,清理session中上下文（不需要保存到 session）
             runAgentLoop(msg, initial, tools, false, (context, toolHit) -> bus.publishOutbound(new OutboundMessage(
                     msg.getChannel()
                     , msg.getChatId()
                     , "(记忆处理进程) " + context
                     , List.of()
                     , Map.of()
-            ))).toCompletableFuture().join();
+            )), false).toCompletableFuture().join();
 
             return CompletableFuture.completedFuture(new OutboundMessage(
                     channel, chatId, "✅ 记忆整理完成", List.of(), Map.of()
@@ -1027,6 +1021,17 @@ public class AgentLoop {
             boolean isContextPress,
             ProgressCallback onProgress
     ) {
+        return runAgentLoop(msg, initialMessages, tools, isContextPress, onProgress, true);
+    }
+
+    private CompletionStage<RunResult> runAgentLoop(
+            InboundMessage msg,
+            List<Map<String, Object>> initialMessages,
+            ToolView tools,
+            boolean isContextPress,
+            ProgressCallback onProgress,
+            boolean saveToSession
+    ) {
         CompletableFuture<RunResult> out = new CompletableFuture<>();
         List<Map<String, Object>> messages = new ArrayList<>(initialMessages);
         List<String> toolsUsed = new ArrayList<>();
@@ -1047,7 +1052,7 @@ public class AgentLoop {
         // 添加原始日志
         memoryStore.appendToToday(GsonFactory.getGson().toJson(userMsg1));
 
-        if (completeIfStopped(msg.getSessionKey(), st, out, toolsUsed, messages, usageAcc)) {
+        if (completeIfStopped(msg.getSessionKey(), st, out, toolsUsed, messages, usageAcc, saveToSession)) {
             return out;
         }
 
@@ -1058,7 +1063,7 @@ public class AgentLoop {
                     return;
                 }
 
-                if (completeIfStopped(msg.getSessionKey(), st, out, toolsUsed, messages, usageAcc)) {
+                if (completeIfStopped(msg.getSessionKey(), st, out, toolsUsed, messages, usageAcc, saveToSession)) {
                     return;
                 }
 
@@ -1086,17 +1091,17 @@ public class AgentLoop {
                 // 当前上下文比例
                 double contextRatio = contextWindow > 0 ? (double) estimatedChars / currentContextWindowChars() : 0;
                 double consolidateThreshold = currentConsolidateThreshold();
-
                 if (contextRatio > consolidateThreshold) {
                     // 通知用户正在压缩
-                    log.info("上下文使用率 {}% > 阈值 {}%，将在下一次对话进行压缩",
+                    log.info("上下文使用率 {}% > 阈值 {}%",
                             String.format("%.1f", contextRatio * 100),
                             String.format("%.0f", consolidateThreshold * 100));
                 }
                 // 执行上下文修剪（软裁剪，只裁剪过大的内容）
                 if (isContextPress) {
+                    var session = sessions.getOrCreate(msg.getSessionKey());
                     List<Map<String, Object>> prunedMessages = ContextPruner.pruneContextMessages(
-                            messages, pruningSettings, contextWindow,
+                            messages, consolidateThreshold,  currentSoftTrimThreshold(), pruningSettings, contextWindow,
                             // 不修剪 skill 工具的结果，因为其中包含技能内容，裁剪后 LLM 不知道该技能
                             toolName -> !"skill".equalsIgnoreCase(toolName)
                     );
@@ -1105,10 +1110,15 @@ public class AgentLoop {
                     log.info("上下文已修剪: {} 字符 -> {} 字符", beforeChars, afterChars);
                     messages.clear();
                     messages.addAll(prunedMessages);
+                    // 修剪场景：过滤后替换 session 的消息列表
+                    // 跳过 system 和常驻技能/本地命令描述消息
+                    session.setMessages(filterSessionMessages(prunedMessages));
+                    session.setUpdatedAt(LocalDateTime.now());
+                    sessions.save(session);
                 }
 
                 // 是否停止
-                if (completeIfStopped(msg.getSessionKey(), st, out, toolsUsed, messages, usageAcc)) {
+                if (completeIfStopped(msg.getSessionKey(), st, out, toolsUsed, messages, usageAcc, saveToSession)) {
                     return;
                 }
 
@@ -1132,7 +1142,7 @@ public class AgentLoop {
                         return;
                     }
 
-                    if (completeIfStopped(msg.getSessionKey(), st, out, toolsUsed, messages, usageAcc)) {
+                    if (completeIfStopped(msg.getSessionKey(), st, out, toolsUsed, messages, usageAcc, saveToSession)) {
                         return;
                     }
 
@@ -1175,7 +1185,7 @@ public class AgentLoop {
                         return;
                     }
 
-                    if (completeIfStopped(msg.getSessionKey(), st, out, toolsUsed, messages, usageAcc)) {
+                    if (completeIfStopped(msg.getSessionKey(), st, out, toolsUsed, messages, usageAcc, saveToSession)) {
                         return;
                     }
 
@@ -1218,7 +1228,7 @@ public class AgentLoop {
                                         return;
                                     }
 
-                                    if (completeIfStopped(msg.getSessionKey(), st, out, toolsUsed, messages, usageAcc)) {
+                                    if (completeIfStopped(msg.getSessionKey(), st, out, toolsUsed, messages, usageAcc, saveToSession)) {
                                         return;
                                     }
 
@@ -1246,11 +1256,15 @@ public class AgentLoop {
 
                                         out.completeExceptionally(root2);
                                     } else {
-                                        // 保存至session中
-                                        var session = sessions.getOrCreate(msg.getSessionKey());
-                                        List<Map<String, Object>> history = session.getHistory();
-                                        saveTurn(session, messages, 2 + history.size());
-                                        sessions.save(session);
+                                        // 保存本轮新增的消息到 session（防止中断丢失）
+                                        if (saveToSession) {
+                                            var sess = sessions.getOrCreate(msg.getSessionKey());
+                                            List<Map<String, Object>> hist = sess.getHistory();
+                                            int startIdx = 2 + hist.size();
+                                            if (messages.size() > startIdx) {
+                                                saveTurn(sess, new ArrayList<>(messages.subList(startIdx, messages.size())));
+                                            }
+                                        }
 
                                         executor.execute(this);
                                     }
@@ -1283,6 +1297,16 @@ public class AgentLoop {
                     );
                     messages.clear();
                     messages.addAll(updated);
+
+                    // 保存本轮消息到 session
+                    if (saveToSession) {
+                        var sess = sessions.getOrCreate(msg.getSessionKey());
+                        List<Map<String, Object>> hist = sess.getHistory();
+                        int startIdx = 2 + hist.size();
+                        if (messages.size() > startIdx) {
+                            saveTurn(sess, new ArrayList<>(messages.subList(startIdx, messages.size())));
+                        }
+                    }
 
                     st.finalContent = clean;
                     st.done.set(true);
@@ -1463,116 +1487,110 @@ public class AgentLoop {
 
 
     /**
-     * saveTurn - 将本轮对话消息保存到 Session 中
+     * saveTurn - 将本轮新增的消息清洗后追加到 Session
      * <p>
-     * 整体流程：
-     * 1. 从 skip 位置开始遍历 messages（跳过已处理的历史消息）
-     * 2. 对每条消息做清洗：
-     * - 去掉 reasoning_content（思维链，不需要持久化）
-     * - 过滤掉空的 assistant 消息（既没有内容也没有 tool_calls）
-     * - 截断过长的 tool 返回结果
-     * - 将 user 消息中的 base64 图片替换为 "[image]" 文本（节省存储）
-     * 3. 给每条消息打上时间戳，追加到 session.messages 中
-     * 4. 更新 session 的 updatedAt 时间
+     * 只做清洗工作：
+     * - 跳过 system 消息（每次构建都会重新生成）
+     * - 跳过常驻技能/本地命令描述消息（每次构建都会重新生成）
+     * - 过滤空的 assistant 消息
+     * - 将 base64 图片替换为 [image]
      *
-     * @param session  当前会话对象，最终消息会存入 session.getMessages()
-     * @param messages 本轮对话的完整消息列表（包含 system/user/assistant/tool 等角色）
-     * @param skip     跳过前 skip 条消息（这些已经在之前的调用中保存过了，避免重复）
+     * @param session 当前会话
+     * @param newMessages 本轮新增的消息（不含已有历史）
      */
-    private void saveTurn(Session session, List<Map<String, Object>> messages, int skip) {
-
-        // 找到最后一个用户消息的索引，之后的工具结果（当前轮次）不做暴力截断
-        int lastUserIdx = -1;
-        for (int i = messages.size() - 1; i >= 0; i--) {
-            Map<String, Object> m = messages.get(i);
-            if (m != null && "user".equals(m.get("role"))) {
-                lastUserIdx = i;
-                break;
-            }
-        }
-
-        // 从 skip 位置开始遍历，只处理新增的消息
-        List<Map<String, Object>> newMessages = new ArrayList<>();
-        for (int i = skip; i < messages.size(); i++) {
-            Map<String, Object> m = messages.get(i);
-
-            // 创建一份新的有序 Map 作为清洗后的消息条目
-            // 用 LinkedHashMap 保证字段顺序与原始消息一致
-            Map<String, Object> entry = new LinkedHashMap<>();
-
-            // ── Step 1: 复制所有字段 ──
-            for (var e : m.entrySet()) {
-
-                entry.put(e.getKey(), e.getValue());
-            }
-
-            // 取出 role 和 content，后续判断用
+    private void saveTurn(Session session, List<Map<String, Object>> newMessages) {
+        for (Map<String, Object> m : newMessages) {
+            Map<String, Object> entry = new LinkedHashMap<>(m);
             Object role = entry.get("role");
             Object content = entry.get("content");
 
-            // ── Step 2: 过滤空的 assistant 消息 ──
-            // assistant 消息如果既没有文本内容也没有 tool_calls，就是无意义的空消息，跳过不保存
+            // 跳过 system 消息（每次构建都会重新生成）
+            if ("system".equals(String.valueOf(role))) {
+                continue;
+            }
+
+            // 跳过常驻技能/本地命令描述的 user 消息（每次构建都会重新生成）
+            if ("user".equals(String.valueOf(role)) && isContextPreamble(content)) {
+                continue;
+            }
+
+            // 过滤空的 assistant 消息
             if ("assistant".equals(String.valueOf(role))) {
                 Object toolCalls = entry.get("tool_calls");
-
-                // content 为 null 或者是空白字符串
                 boolean emptyContent = (content == null) || (content instanceof String s && s.isBlank());
-
-                // tool_calls 为 null 或者是空列表
                 boolean noToolCalls = (toolCalls == null) || (toolCalls instanceof List<?> l && l.isEmpty());
-
-                // 两个条件都满足 → 跳过这条消息
                 if (emptyContent && noToolCalls) continue;
             }
 
-            // ── Step 3: 截断过长的 tool 返回结果 ──
-            // tool 消息的 content 是工具执行的返回值，可能非常长（比如读取了一个大文件）
-            // 只对最后一个用户消息之前的工具结果做截断，当前轮次的工具结果保留完整
-            if ("tool".equals(String.valueOf(role)) && content instanceof String s && s.length() > TOOL_RESULT_MAX_CHARS) {
-                if (lastUserIdx >= 0 && i < lastUserIdx) {
-                    entry.put("content", s.substring(0, TOOL_RESULT_MAX_CHARS) + "\n... (truncated)");
-                }
-                // 当前轮次（最后一个用户消息之后）的工具结果不做截断
-            }
-
-            // ── Step 4: 将 user 消息中的 base64 图片替换为文本占位符 ──
-            // user 消息的 content 可能是一个 List（多模态消息，包含 text + image_url）
-            // base64 编码的图片体积巨大，不适合持久化，用 "[image]" 文本代替
+            // base64 图片替换为 [image]
             if ("user".equals(String.valueOf(role)) && content instanceof List<?> list) {
                 List<Object> replaced = new ArrayList<>();
-
                 for (Object c : list) {
-                    // 判断是否是 base64 图片块：
-                    //   { "type": "image_url", "image_url": { "url": "data:image/xxx;base64,..." } }
                     if (c instanceof Map<?, ?> cm
                             && "image_url".equals(String.valueOf(cm.get("type")))
                             && cm.get("image_url") instanceof Map<?, ?> im
                             && im.get("url") instanceof String u
                             && u.startsWith("data:image/")) {
-                        // 是 base64 图片 → 替换为文本
                         replaced.add(Map.of("type", "text", "text", "[image]"));
                         continue;
                     }
-                    // 非 base64 图片（普通文本块、URL 图片等）→ 原样保留
                     replaced.add(c);
                 }
-
-                // 用替换后的列表覆盖原来的 content
                 entry.put("content", replaced);
             }
 
-            // ── Step 5: 打时间戳，追加到 session ──
-            // 如果消息本身没有 timestamp 字段，补上当前时间
             entry.putIfAbsent("timestamp", LocalDateTime.now().toString());
-
-            // 追加到 session 的消息列表中
-            newMessages.add(entry);
+            session.getMessages().add(entry);
         }
 
-        session.setMessages(newMessages);
-
-        // 更新 session 的最后修改时间
         session.setUpdatedAt(LocalDateTime.now());
+        sessions.save(session);
+    }
+
+    /**
+     * 判断是否是上下文前置消息（常驻技能或本地命令描述）
+     * 这些消息每次构建都会重新生成，不需要保存到 session
+     */
+    private boolean isContextPreamble(Object content) {
+        if (content instanceof List<?> list) {
+            for (Object c : list) {
+                if (c instanceof Map<?, ?> cm
+                        && "text".equals(String.valueOf(cm.get("type")))
+                        && cm.get("text") instanceof String t) {
+                    if (t.contains("<resident-skill>") || t.contains("<local-command-caveat>")) {
+                        return true;
+                    }
+                }
+            }
+        } else if (content instanceof String s) {
+            return s.contains("<resident-skill>") || s.contains("<local-command-caveat>");
+        }
+        return false;
+    }
+
+    /**
+     * 过滤消息列表，跳过每次构建都会重新生成的消息
+     * 用于修剪场景，直接设置 session 的消息列表
+     */
+    private List<Map<String, Object>> filterSessionMessages(List<Map<String, Object>> messages) {
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Map<String, Object> m : messages) {
+            Object role = m.get("role");
+            Object content = m.get("content");
+
+            // 跳过 system 消息
+            if ("system".equals(String.valueOf(role))) {
+                continue;
+            }
+
+            // 跳过常驻技能/本地命令描述的 user 消息
+            if ("user".equals(String.valueOf(role)) && isContextPreamble(content)) {
+                continue;
+            }
+
+            result.add(m);
+        }
+        return result;
     }
 
     public CompletionStage<String> processDirect(

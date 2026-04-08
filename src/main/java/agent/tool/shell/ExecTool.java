@@ -41,7 +41,7 @@ public class ExecTool extends Tool {
      * Default timeout in milliseconds (aligned with Claude Code getDefaultTimeoutMs).
      * Claude Code uses 120_000ms (2 minutes) as default.
      */
-    private static final int DEFAULT_TIMEOUT_MS = 10_000;
+    private static final int DEFAULT_TIMEOUT_MS = 30_000;
 
     /**
      * Max timeout in milliseconds (aligned with Claude Code getMaxTimeoutMs).

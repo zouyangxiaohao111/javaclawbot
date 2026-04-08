@@ -50,41 +50,82 @@ public final class ShellSnapshot {
             Path snapshotFile = snapshotDir.resolve(
                     String.format("snapshot-%s-%d-%s.sh", shellType, timestamp, id));
 
-            String script = getSnapshotScript(shellPath, snapshotFile.toString());
+            // Convert Windows path to POSIX format for shell scripts
+            String outputFile = toPosixPath(snapshotFile.toString());
 
-            // Run as login shell with 10-second timeout
-            // Original: ShellSnapshot.ts lines 456-471
-            ProcessBuilder pb = new ProcessBuilder(shellPath, "-c", "-l", script);
-            pb.redirectErrorStream(true);
+            String script = getSnapshotScript(shellPath, outputFile);
 
-            Process process = pb.start();
-            boolean finished = process.waitFor(10, TimeUnit.SECONDS);
+            // 将脚本写入临时文件，避免 -c 参数中的引号转义问题
+            Path tempScript = Files.createTempFile("snapshot-script-", ".sh");
+            Files.writeString(tempScript, script, StandardCharsets.UTF_8);
 
-            if (!finished) {
-                process.destroyForcibly();
-                log.log(System.Logger.Level.WARNING, "Snapshot creation timed out");
-                return null;
+            try {
+                // Run as login shell with 10-second timeout
+                // Original: ShellSnapshot.ts lines 456-471
+                // 将临时脚本路径转换为 POSIX 格式（Windows 需要）
+                String tempScriptPath = isWindows() ? toPosixPath(tempScript.toString()) : tempScript.toString();
+                ProcessBuilder pb = new ProcessBuilder(shellPath, "-l", tempScriptPath);
+                pb.redirectErrorStream(true);
+
+                Process process = pb.start();
+                boolean finished = process.waitFor(10, TimeUnit.SECONDS);
+
+                if (!finished) {
+                    process.destroyForcibly();
+                    log.log(System.Logger.Level.WARNING, "Snapshot creation timed out");
+                    return null;
+                }
+
+                if (process.exitValue() != 0) {
+                    String error = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+                    log.log(System.Logger.Level.WARNING, "Snapshot creation failed: " + error);
+                    return null;
+                }
+
+                // Verify snapshot file was created and is non-empty
+                if (!Files.exists(snapshotFile) || Files.size(snapshotFile) == 0) {
+                    log.log(System.Logger.Level.WARNING, "Snapshot file was not created or is empty");
+                    return null;
+                }
+
+                log.log(System.Logger.Level.DEBUG, "Created shell snapshot: " + snapshotFile);
+                return snapshotFile.toString();
+
+            } finally {
+                // 清理临时脚本文件
+                Files.deleteIfExists(tempScript);
             }
-
-            if (process.exitValue() != 0) {
-                String error = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-                log.log(System.Logger.Level.WARNING, "Snapshot creation failed: " + error);
-                return null;
-            }
-
-            // Verify snapshot file was created and is non-empty
-            if (!Files.exists(snapshotFile) || Files.size(snapshotFile) == 0) {
-                log.log(System.Logger.Level.WARNING, "Snapshot file was not created or is empty");
-                return null;
-            }
-
-            log.log(System.Logger.Level.DEBUG, "Created shell snapshot: " + snapshotFile);
-            return snapshotFile.toString();
 
         } catch (Exception e) {
             log.log(System.Logger.Level.WARNING, "Failed to create shell snapshot: " + e.getMessage());
             return null;
         }
+    }
+
+    /**
+     * Convert Windows path to POSIX format for shell scripts.
+     *
+     * On Windows, converts C:\Users\... to /c/Users/...
+     * On other platforms, returns the path unchanged.
+     */
+    private static String toPosixPath(String path) {
+        if (!isWindows()) {
+            return path;
+        }
+
+        // Handle Windows drive letter: C:\... -> /c/...
+        if (path.length() >= 2 && path.charAt(1) == ':') {
+            char drive = Character.toLowerCase(path.charAt(0));
+            String rest = path.substring(2).replace('\\', '/');
+            return "/" + drive + rest;
+        }
+
+        // Already a path with forward slashes or UNC path
+        return path.replace('\\', '/');
+    }
+
+    private static boolean isWindows() {
+        return System.getProperty("os.name", "").toLowerCase().contains("windows");
     }
 
     /**
@@ -111,47 +152,51 @@ public final class ShellSnapshot {
 
         StringBuilder script = new StringBuilder();
 
-        // POSIX-compatible quoting for the output file path
-        String quotedOutputFile = "'" + outputFile.replace("'", "'\\''") + "'";
-
         // Source user's config file if it exists
         // Original: ShellSnapshot.ts lines 345-360
         if (configFile != null) {
-            String quotedConfig = "'" + configFile.replace("'", "'\\''") + "'";
-            script.append("source ").append(quotedConfig).append(" < /dev/null 2>/dev/null || true\n");
+            // Convert to POSIX path on Windows
+            String posixConfig = toPosixPath(configFile);
+            script.append("source ").append(quote(posixConfig)).append(" < /dev/null 2>/dev/null || true\n");
         }
 
         // Initialize snapshot file
-        script.append("echo '# Shell environment snapshot' >| ").append(quotedOutputFile).append("\n");
+        script.append("echo '# Shell environment snapshot' >| ").append(quote(outputFile)).append("\n");
 
         // Clear aliases to avoid conflicts
         // Original: ShellSnapshot.ts lines 237-241
-        script.append("echo 'unalias -a 2>/dev/null || true' >> ").append(quotedOutputFile).append("\n");
+        script.append("echo 'unalias -a 2>/dev/null || true' >> ").append(quote(outputFile)).append("\n");
 
         // Capture shell-specific content
         // Original: ShellSnapshot.ts → getUserSnapshotContent()
         if ("zsh".equals(shellType)) {
-            appendZshCapture(script, quotedOutputFile);
+            appendZshCapture(script, outputFile);
         } else {
-            appendBashCapture(script, quotedOutputFile);
+            appendBashCapture(script, outputFile);
         }
 
         // Enable alias expansion
         // Original: ShellSnapshot.ts lines 252-254
         if (!"zsh".equals(shellType)) {
-            script.append("echo 'shopt -s expand_aliases' >> ").append(quotedOutputFile).append("\n");
+            script.append("echo 'shopt -s expand_aliases' >> ").append(quote(outputFile)).append("\n");
         }
 
         // Capture aliases (filter out winpty aliases on Windows, cap at 1000)
         // Original: ShellSnapshot.ts lines 256-263
-        script.append("alias 2>/dev/null | grep -v 'winpty' | sed 's/^alias //g' | sed 's/^/alias -- /' | head -n 1000 >> ").append(quotedOutputFile).append("\n");
+        script.append("alias 2>/dev/null | grep -v 'winpty' | sed 's/^alias //g' | sed 's/^/alias -- /' | head -n 1000 >> ").append(quote(outputFile)).append("\n");
 
         // Export PATH
         // Original: ShellSnapshot.ts line 339
-        // 使用双引号包裹整个命令，避免引号嵌套问题
-        script.append("echo \"export PATH=\\\"$PATH\\\"\" >> ").append(quotedOutputFile).append("\n");
+        script.append("printf 'export PATH=\"%s\"\\n' \"$PATH\" >> ").append(quote(outputFile)).append("\n");
 
         return script.toString();
+    }
+
+    /**
+     * Quote a path for shell use (single-quote with escaping)
+     */
+    private static String quote(String path) {
+        return "'" + path.replace("'", "'\\''") + "'";
     }
 
     /**
@@ -159,21 +204,21 @@ public final class ShellSnapshot {
      *
      * Aligned with ShellSnapshot.ts → getUserSnapshotContent() for bash.
      */
-    private static void appendBashCapture(StringBuilder script, String quotedOutputFile) {
+    private static void appendBashCapture(StringBuilder script, String outputFile) {
         // Capture functions (filter out completion functions starting with single _)
         // Original: ShellSnapshot.ts lines 209-232
-        script.append("echo '# Functions' >> ").append(quotedOutputFile).append("\n");
+        script.append("echo '# Functions' >> ").append(quote(outputFile)).append("\n");
         script.append("if command -v declare > /dev/null 2>&1; then\n");
         script.append("  declare -F 2>/dev/null | cut -d' ' -f3 | grep -vE '^_[^_]' | while read func; do\n");
-        script.append("    declare -f \"$func\" 2>/dev/null >> ").append(quotedOutputFile).append("\n");
+        script.append("    declare -f \"$func\" 2>/dev/null >> ").append(quote(outputFile)).append("\n");
         script.append("  done\n");
         script.append("fi\n");
 
         // Capture shell options
         // Original: ShellSnapshot.ts lines 244-251
-        script.append("echo '# Shell Options' >> ").append(quotedOutputFile).append("\n");
-        script.append("shopt -p 2>/dev/null | head -n 1000 >> ").append(quotedOutputFile).append("\n");
-        script.append("set -o 2>/dev/null | grep 'on$' | awk '{print \"set -o \" $1}' | head -n 1000 >> ").append(quotedOutputFile).append("\n");
+        script.append("echo '# Shell Options' >> ").append(quote(outputFile)).append("\n");
+        script.append("shopt -p 2>/dev/null | head -n 1000 >> ").append(quote(outputFile)).append("\n");
+        script.append("set -o 2>/dev/null | grep 'on$' | awk '{print \"set -o \" $1}' | head -n 1000 >> ").append(quote(outputFile)).append("\n");
     }
 
     /**
@@ -181,16 +226,16 @@ public final class ShellSnapshot {
      *
      * Aligned with ShellSnapshot.ts → getUserSnapshotContent() for zsh.
      */
-    private static void appendZshCapture(StringBuilder script, String quotedOutputFile) {
+    private static void appendZshCapture(StringBuilder script, String outputFile) {
         // Capture functions (zsh uses typeset -f)
         // Original: ShellSnapshot.ts lines 209-232 (zsh branch)
-        script.append("echo '# Functions' >> ").append(quotedOutputFile).append("\n");
-        script.append("typeset -f 2>/dev/null | head -n 5000 >> ").append(quotedOutputFile).append("\n");
+        script.append("echo '# Functions' >> ").append(quote(outputFile)).append("\n");
+        script.append("typeset -f 2>/dev/null | head -n 5000 >> ").append(quote(outputFile)).append("\n");
 
         // Capture shell options
         // Original: ShellSnapshot.ts lines 244-251 (zsh branch)
-        script.append("echo '# Shell Options' >> ").append(quotedOutputFile).append("\n");
-        script.append("setopt 2>/dev/null | sed 's/^/setopt /' | head -n 1000 >> ").append(quotedOutputFile).append("\n");
+        script.append("echo '# Shell Options' >> ").append(quote(outputFile)).append("\n");
+        script.append("setopt 2>/dev/null | sed 's/^/setopt /' | head -n 1000 >> ").append(quote(outputFile)).append("\n");
     }
 
     /**

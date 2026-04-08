@@ -454,7 +454,7 @@ public class ContextBuilder {
             userBlocks.add(Map.of("type", "text", "text", loaded));
         }
 
-        // 构建第4条用户消息, 该消息为本地命令描述
+        // 该消息为本地命令描述
         userBlocks.add(Map.of("type", "text", "text", buildLocalCommandDesc()));
         out.add(mapOf(
                 "role", "user",

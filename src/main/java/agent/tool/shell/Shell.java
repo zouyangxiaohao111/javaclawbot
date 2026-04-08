@@ -3,6 +3,8 @@ package agent.tool.shell;
 import agent.tool.shell.ShellProvider.ExecCommandResult;
 import agent.tool.shell.ShellProvider.BuildExecCommandOpts;
 import agent.tool.shell.ShellProvider.ShellType;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.*;
 import java.nio.charset.StandardCharsets;
@@ -30,6 +32,8 @@ import java.util.concurrent.atomic.AtomicReference;
  * 4. Fallback paths: /bin/bash, /bin/zsh, /usr/bin/bash, /usr/bin/zsh, etc.
  */
 public final class Shell {
+
+    private static final Logger log = LoggerFactory.getLogger(Shell.class.getName());
 
     // ========================================================================
     // Constants — aligned with Shell.ts
@@ -392,7 +396,7 @@ public final class Shell {
         // Original: Shell.ts lines 128-134
         if (shellPath == null) {
             throw new ShellException(
-                    "No suitable shell found. Claude CLI requires a Posix shell environment. " +
+                    "No suitable shell found. requires a Posix shell environment. " +
                             "Please ensure you have a valid shell installed and the SHELL environment variable set."
             );
         }
@@ -561,6 +565,7 @@ public final class Shell {
                 ExecCommandResult buildResult = provider.buildExecCommand(command, buildOpts).join();
                 String commandString = buildResult.commandString();
                 String cwdFilePath = buildResult.cwdFilePath();
+                Path tempScriptFile = buildResult.tempScriptFile();
 
                 String cwd = pwd();
 
@@ -629,9 +634,16 @@ public final class Shell {
                     } catch (Exception ignored) {
                         // File may not exist if command failed before pwd ran
                     }
-                    // Clean up temp file
+                    // Clean up temp cwd file
                     try {
                         Files.deleteIfExists(Paths.get(cwdFilePath));
+                    } catch (Exception ignored) {}
+                }
+
+                // Clean up temp script file
+                if (tempScriptFile != null) {
+                    try {
+                        Files.deleteIfExists(tempScriptFile);
                     } catch (Exception ignored) {}
                 }
 
@@ -1072,7 +1084,7 @@ public final class Shell {
 
     private static void logDebug(String msg) {
         // Stub: original uses logForDebugging from src/utils/debug.ts
-        System.getLogger("shell").log(System.Logger.Level.DEBUG, msg);
+        log.debug(msg);
     }
 
     // ========================================================================
