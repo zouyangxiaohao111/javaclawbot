@@ -501,7 +501,7 @@ public class AgentLoop {
             // 系统主代理停止
             if ("/stop".equalsIgnoreCase(content.trim())) {
                 handleStop(msg).toCompletableFuture().join();
-                return CompletableFuture.completedFuture(null);
+                continue;  // 只停止任务，继续循环等待下一条消息
             }
 
             // 处理额外终端命令(开发者模式支持)

@@ -77,7 +77,7 @@ public final class AgentConsoleSession {
         });
 
         CompletableFuture<Void> outboundTask = CompletableFuture.runAsync(() -> {
-            while (running.get()) {
+            while (running.get() && runtime.isRunning()) {
                 try {
                     OutboundMessage out = runtime.consumeOutbound(1, TimeUnit.SECONDS);
                     if (out == null) continue;

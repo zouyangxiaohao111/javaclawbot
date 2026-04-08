@@ -190,7 +190,7 @@ public class CliAgentCommandHandler {
      * - /bind --main /path/to/project       直接设为主代理（名称为 main）
      */
     private void handleBind(InboundMessage msg, String[] parts) {
-        if (parts.length < 2) {
+        if (parts.length < 2 || msg.getContent().equalsIgnoreCase("/bind -help") || msg.getContent().equalsIgnoreCase("/bind -h")) {
             reply(msg, "用法: /bind <名称>=<路径> [--main]\n" +
                     "示例:\n" +
                     "  /bind p1=/home/user/project           # 普通绑定\n" +
@@ -249,6 +249,17 @@ public class CliAgentCommandHandler {
         // 验证路径
         if (path == null || path.isBlank()) {
             reply(msg, "❌ 缺少项目路径");
+            return;
+        }
+
+        // 校验路径是否存在
+        Path projectPath = Path.of(path);
+        if (!Files.exists(projectPath)) {
+            reply(msg, "❌ 绑定失败: 路径不存在\n   " + path);
+            return;
+        }
+        if (!Files.isDirectory(projectPath)) {
+            reply(msg, "❌ 绑定失败: 路径不是目录\n   " + path);
             return;
         }
 
@@ -504,7 +515,10 @@ public class CliAgentCommandHandler {
      * 回复消息
      */
     private void reply(InboundMessage msg, String content) {
-        if (sendToChannel != null) {
+        // 优先使用带元数据的回调
+        if (sendToChannelWithMeta != null) {
+            sendToChannelWithMeta.accept(content, msg.getSessionKey(), null);
+        } else if (sendToChannel != null) {
             sendToChannel.accept(content, msg.getSessionKey());
         }
     }

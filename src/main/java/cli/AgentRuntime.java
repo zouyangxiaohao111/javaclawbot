@@ -102,7 +102,15 @@ public final class AgentRuntime {
     }
 
     public OutboundMessage consumeOutbound(long timeout, TimeUnit unit) throws InterruptedException {
-        return bus.consumeOutbound(timeout, unit);
+        MessageBus currentBus = this.bus;
+        if (currentBus == null) {
+            throw new InterruptedException("Runtime stopped");
+        }
+        return currentBus.consumeOutbound(timeout, unit);
+    }
+
+    public boolean isRunning() {
+        return running.get();
     }
 
     public CompletionStage<String> processDirect(
