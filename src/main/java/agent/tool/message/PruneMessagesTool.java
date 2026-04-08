@@ -1,6 +1,7 @@
 package agent.tool.message;
 
 import agent.tool.Tool;
+import config.Config;
 import config.ConfigIO;
 import context.ContextPruner;
 import context.ContextPruningSettings;
@@ -254,8 +255,8 @@ public class PruneMessagesTool extends Tool {
 
     private void logContextUsage(List<Map<String, Object>> messages) {
         int estimatedChars = ContextPruner.estimateContextChars(messages);
-        int contextWindow = ConfigIO.loadConfig(ConfigIO.getConfigPath(sessionManager.getWorkspace()))
-                .getAgents().getDefaults().getContextWindow();
+        Config config = ConfigIO.loadConfig(ConfigIO.getConfigPath(sessionManager.getWorkspace()));
+        int contextWindow = config.obtainContextWindow(config.getAgents().getDefaults().getModel());
         double contextRatio = contextWindow > 0 ? (double) estimatedChars / contextWindowChars(contextWindow) : 0;
         log.info("压缩后上下文使用率: {}%", String.format("%.1f", contextRatio * 100));
     }

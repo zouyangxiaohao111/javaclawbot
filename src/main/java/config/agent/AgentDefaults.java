@@ -2,6 +2,7 @@ package config.agent;// =========================
 // 智能体 / 提供者 / 工具配置（字段与默认值一比一）
 // =========================
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import config.hearbet.HeartbeatConfig;
@@ -17,12 +18,12 @@ public class AgentDefaults {
     private String workspace = "~/.javaclawbot/workspace";
     private String model = "qwen/qwen3.6-plus";
     private String provider = "openrouter";
-    private int maxTokens = 8192;
+    public static final int MAX_TOKENS = 8192;
     /**
      * 上下文窗口token数量
      */
-    private int contextWindow = 32000;
-    private double temperature = 0.1;
+    public static final int CONTEXT_WINDOW = 32000;
+    public static final double TEMPERATURE = 0.1;
     /**
      * 是否开发者
      */

@@ -121,7 +121,7 @@ public class Config {
         ModelConfig modelConfig = obtainModelConfigByModel(model);
         Double temperature = modelConfig != null && modelConfig.getTemperature() != null  && modelConfig.getContextWindow() > 0
                 ? modelConfig.getTemperature()
-                : getAgents().getDefaults().getTemperature();
+                : AgentDefaults.TEMPERATURE;
         return temperature;
     }
 
@@ -135,7 +135,7 @@ public class Config {
         ModelConfig modelConfig = obtainModelConfigByModel(model);
         Integer maxTokens = modelConfig != null && modelConfig.getMaxTokens() != null  && modelConfig.getContextWindow() > 0
                 ? modelConfig.getMaxTokens()
-                : getAgents().getDefaults().getMaxTokens();
+                : AgentDefaults.MAX_TOKENS;
         return maxTokens;
     }
 
@@ -149,7 +149,7 @@ public class Config {
         ModelConfig modelConfig = obtainModelConfigByModel(model);
         Integer contextWindow = modelConfig != null && modelConfig.getContextWindow() != null
                 ? modelConfig.getContextWindow()
-                : getAgents().getDefaults().getContextWindow();
+                : AgentDefaults.CONTEXT_WINDOW;
         return contextWindow;
     }
 
