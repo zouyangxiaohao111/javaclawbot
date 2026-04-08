@@ -270,7 +270,8 @@ public class LocalSubagentExecutor implements SubagentExecutor {
 
         // Shell工具
         tools.register(new ExecTool(
-                toolsConfig.getExec().getTimeout(),
+                // 配置的是秒 输入得ms
+                toolsConfig.getExec().getTimeout() * 1000,
                 workspace.toString(),
                 List.of("rm -rm *"), null,
                 restrictToWorkspace,

@@ -111,9 +111,7 @@ public final class Shell {
             boolean shouldUseSandbox,
             boolean shouldAutoBackground
     ) {
-        public ExecOptions() {
-            this(null, false, false, false);
-        }
+
     }
 
     // ========================================================================

@@ -41,7 +41,7 @@ public class ExecTool extends Tool {
      * Default timeout in milliseconds (aligned with Claude Code getDefaultTimeoutMs).
      * Claude Code uses 120_000ms (2 minutes) as default.
      */
-    private static final int DEFAULT_TIMEOUT_MS = 30_000;
+    private static final int DEFAULT_TIMEOUT_MS = 120_000;
 
     /**
      * Max timeout in milliseconds (aligned with Claude Code getMaxTimeoutMs).
@@ -123,7 +123,7 @@ public class ExecTool extends Tool {
             String pathAppend,
             String windowsBashPath
     ) {
-        this.timeoutMs = timeoutMs > 0 ? Math.min(timeoutMs, MAX_TIMEOUT_MS) : DEFAULT_TIMEOUT_MS;
+        this.timeoutMs = timeoutMs > 3000 ? Math.min(timeoutMs, MAX_TIMEOUT_MS) : DEFAULT_TIMEOUT_MS;
         this.workingDir = (workingDir == null || workingDir.isBlank()) ? null : workingDir;
         this.denyPatterns = (denyPatterns == null || denyPatterns.isEmpty())
                 ? defaultDenyPatterns()

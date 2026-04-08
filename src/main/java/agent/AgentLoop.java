@@ -342,7 +342,7 @@ public class AgentLoop {
         // 校验git环境
         Shell.getShellConfig();
         sharedTools.register(new ExecTool(
-                currentTools().getExec().getTimeout(),
+                currentTools().getExec().getTimeout() * 1000,
                 workspace.toString(),
                 null,
                 null,
