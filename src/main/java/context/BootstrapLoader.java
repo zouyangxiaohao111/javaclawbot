@@ -9,6 +9,7 @@ import config.plugin.PluginsConfig;
 import org.graalvm.polyglot.Context;
 import org.graalvm.polyglot.HostAccess;
 import org.graalvm.polyglot.Value;
+import providers.cli.ProjectRegistry;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -50,15 +51,14 @@ public class BootstrapLoader {
     private final Path workspace;
     private final BootstrapConfig bootstrapConfig;
     private final Consumer<String> warnHandler;
+    private final ProjectRegistry projectRegistry;
 
-    public BootstrapLoader(Path workspace) {
-        this(workspace, new BootstrapConfig(), null);
-    }
 
-    public BootstrapLoader(Path workspace, BootstrapConfig bootstrapConfig, Consumer<String> warnHandler) {
+    public BootstrapLoader(Path workspace, BootstrapConfig bootstrapConfig, Consumer<String> warnHandler, ProjectRegistry projectRegistry) {
         this.workspace = workspace;
         this.bootstrapConfig = bootstrapConfig != null ? bootstrapConfig : new BootstrapConfig();
         this.warnHandler = warnHandler;
+        this.projectRegistry = projectRegistry;
     }
 
     /**
@@ -262,6 +262,7 @@ public class BootstrapLoader {
         // Python：workspace.expanduser().resolve()
         String workspacePath = workspace.toAbsolutePath().normalize().toString();
 
+
         String os = System.getProperty("os.name", "Unknown");
         String version = System.getProperty("os.version", "Unknown");
 
@@ -310,6 +311,7 @@ public class BootstrapLoader {
 
         return content
                 .replace("{workspace}", workspacePath)
+                .replace("{project_dir}", projectRegistry.getMainProjectPath())
                 .replace("{platform}", platform)
                 .replace("{shell}", shellHint)
                 .replace("{os_version}", osVersion)

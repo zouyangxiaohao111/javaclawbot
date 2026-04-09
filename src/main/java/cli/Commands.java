@@ -143,9 +143,14 @@ public class Commands implements Runnable {
 
     @Command(name = "onboard", description = "Initialize javaclawbot configuration and workspace.")
     static class OnboardCmd implements Runnable {
+        @Option(names = {"-workspace", "--workspace"}, description = "Workspace directory")
+        String workspace;
         @Override
         public void run() {
-            new OnboardWizard().run();
+            OnboardWizard onboardWizard = new OnboardWizard();
+            //onboardWizard.setWorkspace(Paths.get(workspace));
+
+            onboardWizard.run(new String[]{"--workspace=" + workspace});
         }
     }
 

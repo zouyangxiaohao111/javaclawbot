@@ -5,6 +5,8 @@ import config.ConfigIO;
 import config.ConfigSchema;
 import config.provider.FallbackTarget;
 import config.provider.ProviderConfig;
+import lombok.Getter;
+import lombok.Setter;
 import org.jline.reader.LineReader;
 import org.jline.reader.LineReaderBuilder;
 import org.jline.terminal.Terminal;
@@ -43,10 +45,9 @@ public final class OnboardWizard {
 
     /** 是否已通过命令行接受风险确认 */
     private boolean acceptRisk = false;
-
-    public void run() {
-        run(new String[0]);
-    }
+    @Getter
+    @Setter
+    private Path workspace = null;
 
     /**
      * 运行向导
@@ -151,6 +152,10 @@ public final class OnboardWizard {
      */
     private void parseArgs(String[] args) {
         for (String arg : args) {
+            if (arg.startsWith("--workspace=")) {
+                workspace = Path.of(arg.substring("--workspace=".length()));
+                continue;
+            }
             switch (arg) {
                 case "--quickstart", "-q" -> flow = WizardFlow.QUICKSTART;
                 case "--advanced", "-a" -> flow = WizardFlow.ADVANCED;

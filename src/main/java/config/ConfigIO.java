@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.*;
+import convert.ConfigConvert;
 import utils.GsonFactory;
 import utils.Helpers;
 
@@ -44,6 +45,13 @@ public final class ConfigIO {
      */
     public static Path getConfigPath() {
         return Paths.get(System.getProperty("user.home"), ".javaclawbot", "config.json");
+    }
+
+    /**
+     * 获取默认配置文件路径：~/.javaclawbot/workspace
+     */
+    public static Path getDefaultWorkSpacePath() {
+        return Paths.get(System.getProperty("user.home"), ".javaclawbot", "workspace");
     }
     /**
      * 获取指定的工作空间对应的配置文件路径
@@ -91,7 +99,8 @@ public final class ConfigIO {
 
                 // 反序列化为配置对象
                 ObjectMapper mapper = objectMapper();
-                return mapper.convertValue(data, Config.class);
+                Config config = mapper.convertValue(data, Config.class);
+                return ConfigConvert.A.updateConfig(config, new Config());
             } catch (Exception e) {
                 // 对齐 Python：打印警告并回退默认配置
                 System.out.println("警告: 从 " + path + " 加载配置失败: " + e.getMessage());

@@ -105,6 +105,7 @@
 # 环境
 你已被召唤在以下环境中操作：
 - 主工作目录：{workspace}
+- 项目目录: {project_dir}
 - 是 git 仓库：{is_git}
 - 是 svn 仓库：{is_svn}
 - 平台：{platform}

@@ -70,11 +70,12 @@ public class ContextBuilder {
         this.memory = new MemoryStore(workspace);
         this.skills = new SkillsLoader(workspace);
         this.bootstrapConfig = bootstrapConfig != null ? bootstrapConfig : new BootstrapConfig();
-        this.bootstrapLoader = new BootstrapLoader(workspace, this.bootstrapConfig, warnHandler);
         this.commandQueueManager = new CommandQueueManager(this.skills);
         // 使用 ProjectRegistry 管理项目（与 CLI Agent 共享 cli-projects.json）
         this.projectRegistry = new ProjectRegistry(workspace.resolve("cli-projects.json"));
         this.projectRegistry.load();
+
+        this.bootstrapLoader = new BootstrapLoader(workspace, this.bootstrapConfig, warnHandler, projectRegistry);
     }
 
 
