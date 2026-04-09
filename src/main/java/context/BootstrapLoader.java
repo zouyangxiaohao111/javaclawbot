@@ -323,7 +323,7 @@ public class BootstrapLoader {
                 .replace("{is_svn}", String.valueOf(isSvnRepo))
                 .replace("{model}", modelName);
         if (isDevMode()){
-            content = content.replace("{project_dir}", projectRegistry.getMainProjectPath())
+            content = content.replace("{project_dir}", projectRegistry.getMainProjectPath());
         }
         return content;
 
