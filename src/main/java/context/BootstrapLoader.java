@@ -322,8 +322,10 @@ public class BootstrapLoader {
                 .replace("{is_git}", String.valueOf(isGitRepo))
                 .replace("{is_svn}", String.valueOf(isSvnRepo))
                 .replace("{model}", modelName);
-        if (isDevMode()){
+        if (isDevMode() && StrUtil.isNotBlank(projectRegistry.getMainProjectPath())){
             content = content.replace("{project_dir}", projectRegistry.getMainProjectPath());
+        }else {
+            content = content.replace("{project_dir}", "");
         }
         return content;
 
