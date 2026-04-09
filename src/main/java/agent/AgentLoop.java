@@ -334,7 +334,7 @@ public class AgentLoop {
         sharedTools.register(new FileSystemTools.ReadWordTool(workspace, allowedDir));
         sharedTools.register(new FileSystemTools.ReadWordStructuredTool(workspace, allowedDir));
 
-        sharedTools.register(new ListDirTool(workspace, allowedDir));
+        sharedTools.register(new ListFilesTool(workspace, allowedDir));
 //        sharedTools.register(new FileSystemTools.ReadPptTool(workspace, allowedDir));
 //        sharedTools.register(new FileSystemTools.ReadPptStructuredTool(workspace, allowedDir));
 //        sharedTools.register(new FileSystemTools.ReadWordTool(workspace, allowedDir));
@@ -690,12 +690,16 @@ public class AgentLoop {
         );
     }
 
+    public static Set<String> system_cmd = Set.of("/context-press", "/help", "/init", "/clear", "/memory", "/mcp-reload", "/mcp-init" );
     /**
      * 入口处检测并执行上下文压缩
      */
     private void checkAndExecuteContextCompress(InboundMessage msg) {
         // 跳过系统消息和命令
         if ("system".equalsIgnoreCase(msg.getChannel())) {
+            return;
+        }
+        if (system_cmd.contains(msg.getContent().trim())) {
             return;
         }
 

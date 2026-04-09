@@ -277,7 +277,7 @@ public final class ShellSnapshot {
      * Aligned with CC's ~/.claude/shell-snapshots/
      */
     private static Path getSnapshotDir() {
-        return Paths.get(System.getProperty("user.home"), ".claude", "shell-snapshots");
+        return Paths.get(System.getProperty("user.home"), ".javaclawbot", "shell-snapshots");
     }
 
     /**
