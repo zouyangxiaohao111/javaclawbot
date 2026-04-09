@@ -488,7 +488,8 @@ public class MemoryStore {
   ├── {session_id}.jsonl        # 对应的活跃会话数据
 ```
 
-**重要提示**： 当调用prune_messages 工具完成消息修剪后，通过message 工具通知用户总结 
+**重要提示**： 1.当调用prune_messages 工具完成消息修剪后，通过message 工具通知用户总结 
+2.如果修改MEMORY.md 获取其他文件失败,请创建一个新的,写入进去 提醒用户需要手动更改
 \n\n
 """;
     }
