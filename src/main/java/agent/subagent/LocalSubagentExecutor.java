@@ -260,7 +260,7 @@ public class LocalSubagentExecutor implements SubagentExecutor {
 
         tools.register(new EditTool(workspace, null, fileStateCache));
         tools.register(new WriteTool(workspace, null, fileStateCache));
-        tools.register(new ListDirTool(workspace, allowedDir));
+        tools.register(new ListFilesTool(workspace, allowedDir));
         tools.register(new GlobTool(workspace, allowedDir));
         tools.register(new GrepTool(workspace, allowedDir));
         /*tools.register(new FileSystemTools.ReadPptTool(workspace, allowedDir));
