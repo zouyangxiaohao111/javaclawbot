@@ -1642,6 +1642,13 @@ public class AgentLoop {
         return runtimeSnapshot().model();
     }
 
+    /**
+     * 获取 MCP 管理器
+     */
+    public McpManager getMcpManager() {
+        return mcpManager;
+    }
+
     private AtomicBoolean stopFlag(String sessionKey) {
         return stopFlags.computeIfAbsent(sessionKey, k -> new AtomicBoolean(false));
     }

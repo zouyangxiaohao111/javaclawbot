@@ -125,6 +125,16 @@ public class JavaClawBotGUI extends JFrame {
     private CardLayout bottomModeLayout;
     private JButton gatewayStopInlineButton;
 
+    // =========================
+    // 命令补全
+    // =========================
+    private CommandCompletionPopup commandCompletionPopup;
+
+    // =========================
+    // 侧边栏
+    // =========================
+    private CollapsibleSidebar sidebar;
+
     private static final String BOTTOM_CARD_INPUT = "input";
     private static final String BOTTOM_CARD_GATEWAY = "gateway";
 
@@ -296,11 +306,32 @@ public class JavaClawBotGUI extends JFrame {
         root.setBorder(new EmptyBorder(16, 16, 16, 16));
         root.setBackground(WINDOW_BG);
 
+        // 创建侧边栏
+        sidebar = new CollapsibleSidebar();
+        sidebar.setToolsButtonListener(e -> showMcpToolsDialog());
+
+        // 创建中心区域（侧边栏 + 聊天区域）
+        JPanel centerWrapper = new JPanel(new BorderLayout(0, 0));
+        centerWrapper.setOpaque(false);
+        centerWrapper.add(sidebar, BorderLayout.WEST);
+        centerWrapper.add(buildCenterPanel(), BorderLayout.CENTER);
+
         root.add(buildTopBar(), BorderLayout.NORTH);
-        root.add(buildCenterPanel(), BorderLayout.CENTER);
+        root.add(centerWrapper, BorderLayout.CENTER);
         root.add(buildBottomPanel(), BorderLayout.SOUTH);
 
         add(root, BorderLayout.CENTER);
+
+        // 初始化命令补全弹窗
+        boolean developerMode = false;
+        try {
+            if (config != null && config.getAgents() != null
+                && config.getAgents().getDefaults() != null) {
+                developerMode = config.getAgents().getDefaults().isDevelopment();
+            }
+        } catch (Exception ignored) {}
+
+        commandCompletionPopup = new CommandCompletionPopup(this, inputArea, developerMode);
     }
 
     /**
@@ -316,11 +347,11 @@ public class JavaClawBotGUI extends JFrame {
         left.setLayout(new BoxLayout(left, BoxLayout.Y_AXIS));
 
         JLabel titleLabel = new JLabel("🐱 javaclawbot");
-        titleLabel.setFont(UiFonts.bold(20));
+        titleLabel.setFont(UiFonts.title());
         titleLabel.setForeground(TEXT_PRIMARY);
 
         modelLabel = new JLabel("Model · unknown");
-        modelLabel.setFont(UiFonts.normal(13));
+        modelLabel.setFont(UiFonts.heading());
         modelLabel.setForeground(TEXT_MUTED);
 
         left.add(titleLabel);
@@ -328,7 +359,7 @@ public class JavaClawBotGUI extends JFrame {
         left.add(modelLabel);
 
         statusLabel = new JLabel("就绪");
-        statusLabel.setFont(UiFonts.normal(13));
+        statusLabel.setFont(UiFonts.heading());
         statusLabel.setForeground(TEXT_SECONDARY);
 
         RoundedPanel statusCard = new RoundedPanel(16, new Color(248, 248, 250));
@@ -414,7 +445,7 @@ public class JavaClawBotGUI extends JFrame {
         inputCard.setBorder(new EmptyBorder(12, 12, 12, 12));
 
         inputArea = new JTextArea(3, 20);
-        inputArea.setFont(UiFonts.normal(14));
+        inputArea.setFont(UiFonts.input());
         inputArea.setForeground(TEXT_PRIMARY);
         inputArea.setLineWrap(true);
         inputArea.setWrapStyleWord(true);
@@ -624,6 +655,12 @@ public class JavaClawBotGUI extends JFrame {
 
             refreshModelLabel();
 
+            // 更新命令补全的开发者模式
+            if (commandCompletionPopup != null) {
+                boolean devMode = this.config.getAgents().getDefaults().isDevelopment();
+                commandCompletionPopup.updateDeveloperMode(devMode);
+            }
+
             if (autoGatewayOnLaunch) {
                 guiChatAvailable.set(false);
                 applyTurnUiState(TurnPhase.IDLE);
@@ -705,6 +742,9 @@ public class JavaClawBotGUI extends JFrame {
                 gatewayButton.setEnabled(true);
             }
             updateStatus("就绪");
+
+            // 加载历史消息
+            loadHistoryMessages();
         } catch (Exception e) {
             guiChatAvailable.set(false);
             applyTurnUiState(TurnPhase.IDLE);
@@ -1710,6 +1750,85 @@ public class JavaClawBotGUI extends JFrame {
     }
 
     /**
+     * 加载历史消息
+     */
+    private void loadHistoryMessages() {
+        if (sessionManager == null) {
+            return;
+        }
+
+        try {
+            // 获取 cli:direct 会话
+            session.Session session = sessionManager.getOrCreate(cliChannel + ":" + cliChatId);
+            java.util.List<Map<String, Object>> history = session.getHistory();
+
+            if (history == null || history.isEmpty()) {
+                return;
+            }
+
+            // 在 Swing 线程中渲染
+            SwingUtilities.invokeLater(() -> {
+                for (Map<String, Object> msg : history) {
+                    String role = (String) msg.get("role");
+                    Object contentObj = msg.get("content");
+                    String content = extractContent(contentObj);
+
+                    if (content == null || content.isBlank()) {
+                        continue;
+                    }
+
+                    // 根据角色渲染气泡
+                    if ("user".equals(role)) {
+                        addBubble(BubbleType.USER, "你", content);
+                    } else if ("assistant".equals(role)) {
+                        addBubble(BubbleType.BOT, "🐱 javaclawbot", content);
+                    }
+                    // 跳过 system 消息
+                }
+
+                // 滚动到底部
+                scrollToBottom();
+            });
+
+        } catch (Exception e) {
+            appendSystem("加载历史消息失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 从消息内容中提取文本
+     */
+    private String extractContent(Object contentObj) {
+        if (contentObj == null) {
+            return null;
+        }
+
+        if (contentObj instanceof String s) {
+            return s;
+        }
+
+        if (contentObj instanceof java.util.List<?> list) {
+            StringBuilder sb = new StringBuilder();
+            for (Object item : list) {
+                if (item instanceof Map<?, ?> map) {
+                    String type = (String) map.get("type");
+                    if ("text".equals(type)) {
+                        Object text = map.get("text");
+                        if (text instanceof String s) {
+                            if (sb.length() > 0) sb.append("\n");
+                            sb.append(s);
+                        }
+                    }
+                    // 跳过 image_url 等其他类型
+                }
+            }
+            return sb.toString();
+        }
+
+        return String.valueOf(contentObj);
+    }
+
+    /**
      * 添加气泡
      */
     private void addBubble(BubbleType type, String sender, String message) {
@@ -1813,13 +1932,29 @@ public class JavaClawBotGUI extends JFrame {
         ta.setEditable(false);
         ta.setLineWrap(true);
         ta.setWrapStyleWord(true);
-        ta.setFont(UiFonts.normal(13));
+        ta.setFont(UiFonts.body());
         ta.setBorder(new EmptyBorder(12, 12, 12, 12));
 
         JScrollPane sp = new JScrollPane(ta);
         sp.setPreferredSize(new Dimension(580, 360));
 
         JOptionPane.showMessageDialog(this, sp, "状态", JOptionPane.INFORMATION_MESSAGE);
+    }
+
+    /**
+     * 显示 MCP 工具列表弹窗
+     */
+    private void showMcpToolsDialog() {
+        McpToolsDialog dialog = new McpToolsDialog(this, agentLoop, config);
+        dialog.setVisible(true);
+
+        // 弹窗关闭后刷新配置
+        try {
+            this.config = ConfigIO.loadConfig(null);
+            refreshModelLabel();
+        } catch (Exception e) {
+            appendSystem("刷新配置失败: " + e.getMessage());
+        }
     }
 
     private void openConfig() {
@@ -2196,14 +2331,14 @@ public class JavaClawBotGUI extends JFrame {
     }
 
     private void stylePrimaryButton(JButton btn, int width, int height) {
-        btn.setFont(UiFonts.bold(13));
+        btn.setFont(UiFonts.bodyBold());
         btn.putClientProperty(FlatClientProperties.BUTTON_TYPE, FlatClientProperties.BUTTON_TYPE_ROUND_RECT);
         btn.setPreferredSize(new Dimension(width, height));
         btn.setFocusable(false);
     }
 
     private void styleSecondaryButton(JButton btn, int width, int height) {
-        btn.setFont(UiFonts.normal(13));
+        btn.setFont(UiFonts.body());
         btn.putClientProperty(FlatClientProperties.BUTTON_TYPE, FlatClientProperties.BUTTON_TYPE_ROUND_RECT);
         btn.setPreferredSize(new Dimension(width, height));
         btn.setFocusable(false);
@@ -2376,7 +2511,7 @@ public class JavaClawBotGUI extends JFrame {
 
             if (sender != null && !sender.isBlank()) {
                 JLabel senderLabel = new JLabel(sender);
-                senderLabel.setFont(type == BubbleType.BOT || type == BubbleType.USER ? UiFonts.bold(10) : UiFonts.bold(9));
+                senderLabel.setFont(UiFonts.captionBold());
                 senderLabel.setForeground(senderColor);
                 senderLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
                 content.add(senderLabel);
@@ -2393,7 +2528,7 @@ public class JavaClawBotGUI extends JFrame {
             htmlPane.putClientProperty(JEditorPane.HONOR_DISPLAY_PROPERTIES, Boolean.TRUE);
             htmlPane.setBorder(null);
             htmlPane.setMargin(new Insets(0, 0, 0, 0));
-            htmlPane.setFont(type == BubbleType.BOT || type == BubbleType.USER ? UiFonts.normal(10) : UiFonts.normal(9));
+            htmlPane.setFont(type == BubbleType.BOT || type == BubbleType.USER ? UiFonts.body() : UiFonts.small());
             htmlPane.setForeground(type == BubbleType.USER ? USER_BUBBLE_TEXT : BOT_BUBBLE_TEXT);
 
             CaretSafe.makeNonUpdating(htmlPane);
@@ -2420,7 +2555,7 @@ public class JavaClawBotGUI extends JFrame {
                             .withZone(ZoneId.systemDefault())
                             .format(Instant.now())
             );
-            timeLabel.setFont(type == BubbleType.BOT || type == BubbleType.USER ? UiFonts.normal(10) : UiFonts.normal(9));
+            timeLabel.setFont(UiFonts.caption());
             timeLabel.setForeground(type == BubbleType.USER ? new Color(220, 230, 245) : TEXT_MUTED);
             timeLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
             content.add(timeLabel);
@@ -2631,14 +2766,14 @@ public class JavaClawBotGUI extends JFrame {
             String quoteBorder = type == BubbleType.USER ? "rgba(255,255,255,0.35)" : "#d1d1d6";
             String inlineCodeBg = type == BubbleType.USER ? "rgba(255,255,255,0.16)" : "#f2f2f7";
             String linkColor = type == BubbleType.USER ? "#ffffff" : "#007aff";
-            String bodyFontSize = (type == BubbleType.BOT || type == BubbleType.USER) ? "10" : "9";
+            String bodyFontSize = (type == BubbleType.BOT || type == BubbleType.USER) ? "13" : "12";
 
             return "<html><head>"
                     + "<style>"
                     + "body { font-family: " + UiFonts.htmlFontFamily() + "; color:" + textColor + "; font-size:" + bodyFontSize + "px; margin:0; padding:0; }"
-                    + "h1 { font-size:22px; margin:8px 0 10px 0; }"
-                    + "h2 { font-size:18px; margin:8px 0 8px 0; }"
-                    + "h3 { font-size:16px; margin:6px 0 8px 0; }"
+                    + "h1 { font-size:18px; margin:8px 0 10px 0; }"
+                    + "h2 { font-size:16px; margin:8px 0 8px 0; }"
+                    + "h3 { font-size:14px; margin:6px 0 8px 0; }"
                     + "p { margin:6px 0; line-height:1.6; }"
                     + "ul,ol { margin:6px 0 6px 22px; }"
                     + "li { margin:4px 0; line-height:1.6; }"
@@ -2713,22 +2848,7 @@ public class JavaClawBotGUI extends JFrame {
         }
     }
 
-    static final class UiFonts {
-        private UiFonts() {
-        }
-
-        static Font normal(int size) {
-            return new Font("Microsoft YaHei UI", Font.PLAIN, size);
-        }
-
-        static Font bold(int size) {
-            return new Font("Microsoft YaHei UI", Font.BOLD, size);
-        }
-
-        static String htmlFontFamily() {
-            return "'Microsoft YaHei UI','Microsoft YaHei','PingFang SC','Segoe UI Emoji','Dialog'";
-        }
-    }
+    
 
     public static void main(String[] args) {
         try {
@@ -2750,7 +2870,7 @@ public class JavaClawBotGUI extends JFrame {
             UIManager.put("Button.default.background", new Color(0, 122, 255));
             UIManager.put("Button.default.foreground", Color.WHITE);
 
-            Font font = new Font("Microsoft YaHei UI", Font.PLAIN, 13);
+            Font font = UiFonts.body();
             FlatLaf.setPreferredFontFamily("Microsoft YaHei UI");
             FlatLaf.setPreferredLightFontFamily("Microsoft YaHei UI");
             FlatLaf.setPreferredSemiboldFontFamily("Microsoft YaHei UI");

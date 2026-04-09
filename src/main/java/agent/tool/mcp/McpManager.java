@@ -376,6 +376,68 @@ public class McpManager {
         return connected;
     }
 
+    /**
+     * 检查单个服务器是否已连接
+     */
+    public boolean isServerConnected(String serverName) {
+        return handles.containsKey(serverName);
+    }
+
+    /**
+     * 获取所有已连接的服务器名称
+     */
+    public java.util.Set<String> getConnectedServerNames() {
+        return new java.util.HashSet<>(handles.keySet());
+    }
+
+    /**
+     * 重连单个服务器
+     *
+     * @param serverName 服务器名称
+     * @return 错误信息，null 表示成功
+     */
+    public CompletionStage<String> reconnectServer(String serverName) {
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                MCPServerConfig cfg = mcpServers.get(serverName);
+                if (cfg == null) {
+                    // 尝试从配置文件重新加载
+                    Config config = ConfigIO.loadConfig(ConfigIO.getConfigPath(workspace));
+                    if (config != null && config.getTools() != null
+                        && config.getTools().getMcpServers() != null) {
+                        cfg = config.getTools().getMcpServers().get(serverName);
+                        // 更新本地缓存
+                        if (cfg != null) {
+                            mcpServers = config.getTools().getMcpServers();
+                        }
+                    }
+                }
+
+                if (cfg == null) {
+                    return "服务器配置不存在: " + serverName;
+                }
+
+                if (!cfg.isEnable()) {
+                    return "服务器已禁用: " + serverName;
+                }
+
+                // 先移除旧连接
+                removeServer(serverName);
+
+                // 重新连接
+                connectOneServer(serverName, cfg);
+
+                log.info("[MCP] 重连服务器成功: {}", serverName);
+                return null;
+
+            } catch (Exception e) {
+                String errorMsg = safeErrorMessage(e);
+                log.error("[MCP] 重连服务器失败: {}", serverName, e);
+                return "重连失败: " + errorMsg;
+            }
+        }, executor);
+    }
+
     public CompletionStage<Void> closeAll() {
         return CompletableFuture.runAsync(() -> {
             stopAutoRefresh();
