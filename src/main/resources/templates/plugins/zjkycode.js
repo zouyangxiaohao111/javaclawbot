@@ -93,7 +93,9 @@ zjkycode 技能位于 \`${workspace}/skills/zjkycode/\`
 ${content}
 
 ${toolMapping}
-</非常重要>`;
+</非常重要>
+强制按照zjkycode流程执行
+`;
     } catch (e) {
         return null;
     }
