@@ -1,0 +1,71 @@
+/* 公共样式定义 */
+
+.root {
+    -fx-font-family: "Microsoft YaHei UI", "Segoe UI", sans-serif;
+    -fx-font-smoothing-type: gray;
+}
+
+.scroll-bar {
+    -fx-background-color: transparent;
+}
+
+.scroll-bar .thumb {
+    -fx-background-color: #C7C7CC;
+    -fx-background-radius: 4px;
+}
+
+.scroll-bar .thumb:hover {
+    -fx-background-color: #AEAEB2;
+}
+
+.button {
+    -fx-background-radius: 10px;
+    -fx-border-radius: 10px;
+    -fx-cursor: hand;
+    -fx-padding: 8px 16px;
+    -fx-font-size: 13px;
+    -fx-font-weight: 500;
+}
+
+.button:hover {
+    -fx-scale-x: 1.02;
+    -fx-scale-y: 1.02;
+}
+
+.text-field, .text-area {
+    -fx-background-radius: 16px;
+    -fx-border-radius: 16px;
+    -fx-border-color: transparent;
+    -fx-padding: 12px 16px;
+    -fx-font-size: 14px;
+}
+
+.text-field:focused, .text-area:focused {
+    -fx-border-color: #007AFF;
+    -fx-border-width: 2px;
+}
+
+.separator {
+    -fx-background-color: #E5E5EA;
+    -fx-pref-height: 1px;
+}
+
+.glass-effect {
+    -fx-background-color: rgba(255, 255, 255, 0.85);
+}
+
+.card {
+    -fx-background-radius: 16px;
+}
+
+.header-bar {
+    -fx-background-color: #FFFFFF;
+    -fx-border-color: #E5E5EA;
+    -fx-border-width: 0 0 1 0;
+}
+
+.status-bar {
+    -fx-background-color: #F5F5F7;
+    -fx-border-color: #E5E5EA;
+    -fx-border-width: 1 0 0 0;
+}

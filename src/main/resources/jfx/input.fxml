@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.scene.layout.*?>
+<?import javafx.scene.control.*?>
+<?import javafx.geometry.Insets?>
+
+<VBox xmlns="http://javafx.com/javafx"
+      xmlns:fx="http://javafx.com/fxml"
+      fx:controller="gui.javafx.controller.InputController"
+      spacing="8"
+      styleClass="input-area">
+
+    <padding>
+        <Insets top="15.0" right="15.0" bottom="15.0" left="15.0"/>
+    </padding>
+
+    <HBox fx:id="attachmentBar" spacing="8" visible="false">
+        <Button text="+ File" styleClass="secondary-button" onAction="#onAddFileClicked" />
+        <Button text="+ Image" styleClass="secondary-button" onAction="#onAddImageClicked" />
+        <Label fx:id="attachmentCountLabel" text="" styleClass="secondary-text" />
+    </HBox>
+
+    <HBox spacing="12" alignment="CENTER_LEFT">
+        <TextArea fx:id="inputTextArea"
+                  promptText="Type a message... (Enter to send, Shift+Enter for new line)"
+                  styleClass="input-area"
+                  wrapText="true"
+                  prefRowCount="1"
+                  HBox.hgrow="ALWAYS"
+                  onKeyPressed="#onInputKeyPressed" />
+
+        <Button fx:id="sendButton" text="Send"
+                styleClass="primary-button"
+                prefWidth="80" prefHeight="40"
+                onAction="#onSendClicked" />
+    </HBox>
+
+    <Label text="Commands: /new /stop /help /status" styleClass="hint-text" />
+</VBox>

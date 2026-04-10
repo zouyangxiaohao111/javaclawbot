@@ -415,25 +415,25 @@ public class JavaClawBotFX extends Application {
     private AgentLoop agentLoop;
     private SessionManager sessionManager;
     private ThemeManager themeManager;
-    
+
     @Override
     public void start(Stage primaryStage) {
         // 1. 加载配置
         config = ConfigIO.loadConfig();
-        
+
         // 2. 初始化核心组件
         initializeCoreComponents();
-        
+
         // 3. 加载 FXML
-        FXMLLoader loader = new FXMLLoader(getClass().getResource("main.fxml"));
+        FXMLLoader loader = new FXMLLoader(getClass().getResource("jfx/main.fxml"));
         Parent root = loader.load();
         MainController controller = loader.getController();
         controller.setDependencies(config, agentLoop, sessionManager);
-        
+
         // 4. 应用主题
         themeManager = new ThemeManager(root);
         themeManager.applyTheme(config.getTheme());
-        
+
         // 5. 设置窗口
         primaryStage.setTitle("javaclawbot");
         primaryStage.setScene(new Scene(root, 1100, 800));

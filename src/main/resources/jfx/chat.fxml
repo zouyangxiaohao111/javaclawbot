@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.scene.layout.*?>
+<?import javafx.scene.control.*?>
+<?import javafx.geometry.Insets?>
+
+<VBox xmlns="http://javafx.com/javafx"
+      xmlns:fx="http://javafx.com/fxml"
+      fx:controller="gui.javafx.controller.ChatController"
+      spacing="0"
+      VBox.vgrow="ALWAYS">
+
+    <ScrollPane fx:id="scrollPane" VBox.vgrow="ALWAYS"
+                style="-fx-background-color: transparent;">
+        <VBox fx:id="messageContainer" spacing="12">
+            <padding>
+                <Insets top="20.0" right="20.0" bottom="20.0" left="20.0"/>
+            </padding>
+        </VBox>
+    </ScrollPane>
+</VBox>

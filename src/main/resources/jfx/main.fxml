@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.scene.layout.*?>
+<?import javafx.scene.control.*?>
+<?import javafx.geometry.Insets?>
+
+<BorderPane xmlns="http://javafx.com/javafx"
+            xmlns:fx="http://javafx.com/fxml"
+            fx:controller="gui.javafx.controller.MainController"
+            prefWidth="1100" prefHeight="800">
+
+    <top>
+        <BorderPane styleClass="header-bar" prefHeight="48">
+            <left>
+                <HBox alignment="CENTER_LEFT" spacing="8">
+                    <padding>
+                        <Insets top="10.0" right="10.0" bottom="10.0" left="10.0"/>
+                    </padding>
+                    <Label text="javaclawbot" styleClass="primary-text" style="-fx-font-size: 18px; -fx-font-weight: bold;" />
+                    <Separator orientation="VERTICAL" />
+                    <Label fx:id="statusLabel" text="Ready" styleClass="secondary-text" />
+                </HBox>
+            </left>
+            <right>
+                <HBox alignment="CENTER_RIGHT" spacing="8">
+                    <padding>
+                        <Insets top="10.0" right="10.0" bottom="10.0" left="10.0"/>
+                    </padding>
+                    <Button text="Gateway" styleClass="secondary-button" onAction="#onGatewayClicked" />
+                    <Button fx:id="themeToggleButton" text="Dark" onAction="#onThemeToggleClicked"
+                            styleClass="secondary-button" minWidth="60" />
+                </HBox>
+            </right>
+        </BorderPane>
+    </top>
+
+    <center>
+        <SplitPane dividerPositions="0.2" style="-fx-background-color: transparent;">
+            <fx:include fx:id="sidebar" source="sidebar.fxml" />
+            <VBox spacing="0" style="-fx-background-color: transparent;">
+                <fx:include fx:id="chatArea" source="chat.fxml" VBox.vgrow="ALWAYS" />
+                <fx:include fx:id="inputArea" source="input.fxml" />
+            </VBox>
+        </SplitPane>
+    </center>
+
+    <bottom>
+        <BorderPane prefHeight="32" styleClass="status-bar">
+            <left>
+                <HBox alignment="CENTER_LEFT" spacing="8">
+                    <padding>
+                        <Insets top="5.0" right="5.0" bottom="5.0" left="5.0"/>
+                    </padding>
+                    <Label fx:id="modelLabel" text="Model: Claude" styleClass="secondary-text" />
+                    <Label fx:id="mcpStatusLabel" text="MCP: 0/0" styleClass="secondary-text" />
+                </HBox>
+            </left>
+            <right>
+                <HBox alignment="CENTER_RIGHT" spacing="8">
+                    <padding>
+                        <Insets top="5.0" right="5.0" bottom="5.0" left="5.0"/>
+                    </padding>
+                    <Label fx:id="memoryUsageLabel" text="Memory: 0MB" styleClass="secondary-text" />
+                </HBox>
+            </right>
+        </BorderPane>
+    </bottom>
+</BorderPane>

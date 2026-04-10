@@ -1,0 +1,192 @@
+.root{
+    -fx-font-family: "Microsoft YaHei UI", "Segoe UI", sans-serif;
+    -fx-font-size: 13px;
+    -fx-background-color: #111827;
+    -fx-text-fill: #e5e7eb;
+}
+
+.label{
+    -fx-text-fill: #e5e7eb;
+}
+
+.header-bar{
+    -fx-background-color: linear-gradient(to bottom, #141c2b, #111827);
+    -fx-border-color: transparent transparent #233047 transparent;
+    -fx-border-width: 0 0 1 0;
+}
+
+.status-bar{
+    -fx-background-color: #111827;
+    -fx-border-color: #233047 transparent transparent transparent;
+    -fx-border-width: 1 0 0 0;
+}
+
+.primary-text{
+    -fx-text-fill: #f3f4f6;
+}
+
+.secondary-text{
+    -fx-text-fill: #93a0b5;
+}
+
+.hint-text{
+    -fx-text-fill: #7b8799;
+    -fx-font-size: 12px;
+}
+
+.sidebar{
+    -fx-background-color: #131c2a;
+    -fx-border-color: transparent #233047 transparent transparent;
+    -fx-border-width: 0 1 0 0;
+    -fx-padding: 12;
+    -fx-spacing: 10;
+}
+
+.separator *.line{
+    -fx-border-color: #223049;
+    -fx-border-width: 1 0 0 0;
+}
+
+.button{
+    -fx-background-radius: 12;
+    -fx-border-radius: 12;
+    -fx-padding: 9 14;
+    -fx-cursor: hand;
+}
+
+.primary-button{
+    -fx-background-color: linear-gradient(to bottom, #3b82f6, #2563eb);
+    -fx-text-fill: white;
+}
+
+.secondary-button{
+    -fx-background-color: #182335;
+    -fx-text-fill: #d1d5db;
+    -fx-border-color: #2a3954;
+    -fx-border-width: 1;
+}
+
+.secondary-button:hover{
+    -fx-background-color: #1d2a40;
+}
+
+.danger-button{
+    -fx-background-color: #dc2626;
+    -fx-text-fill: white;
+}
+
+.combo-box,
+.text-area,
+.list-view,
+.toggle-button{
+    -fx-background-radius: 12;
+    -fx-border-radius: 12;
+}
+
+.combo-box{
+    -fx-background-color: #182335;
+    -fx-border-color: #30415e;
+    -fx-border-width: 1;
+    -fx-text-fill: #e5e7eb;
+}
+
+.list-view{
+    -fx-background-color: #111827;
+    -fx-border-color: #27364f;
+    -fx-border-width: 1;
+    -fx-padding: 6;
+}
+
+.list-cell{
+    -fx-background-color: transparent;
+    -fx-text-fill: #d1d5db;
+    -fx-padding: 10 12;
+    -fx-background-radius: 10;
+}
+
+.list-cell:filled:hover{
+    -fx-background-color: #1b2940;
+}
+
+.list-cell:filled:selected{
+    -fx-background-color: #223556;
+    -fx-text-fill: #93c5fd;
+}
+
+.scroll-pane{
+    -fx-background-color: transparent;
+    -fx-border-color: transparent;
+}
+
+.scroll-pane > .viewport{
+    -fx-background-color: transparent;
+}
+
+#messageContainer{
+    -fx-background-color: #0f1726;
+}
+
+.message-bubble-user,
+.message-bubble-ai,
+.message-bubble-system{
+    -fx-padding: 12 14;
+    -fx-background-radius: 16;
+    -fx-border-radius: 16;
+}
+
+.message-bubble-user{
+    -fx-background-color: linear-gradient(to bottom, #3b82f6, #2563eb);
+    -fx-text-fill: white;
+}
+
+.message-bubble-ai{
+    -fx-background-color: #182335;
+    -fx-text-fill: #e5e7eb;
+    -fx-border-color: #2c3d59;
+    -fx-border-width: 1;
+}
+
+.message-bubble-system{
+    -fx-background-color: #3a2d11;
+    -fx-text-fill: #f5d98c;
+    -fx-border-color: #5f4b1e;
+    -fx-border-width: 1;
+}
+
+.input-area{
+    -fx-background-color: #131c2a;
+    -fx-border-color: #27364f;
+    -fx-border-width: 1;
+    -fx-background-radius: 16;
+    -fx-border-radius: 16;
+}
+
+.text-area{
+    -fx-background-color: transparent;
+    -fx-border-color: transparent;
+    -fx-text-fill: #e5e7eb;
+    -fx-padding: 8 10;
+}
+
+.text-area .content{
+    -fx-background-color: transparent;
+}
+
+#sendButton{
+    -fx-min-width: 86;
+    -fx-font-weight: 600;
+}
+
+.toggle-button{
+    -fx-background-color: #182335;
+    -fx-text-fill: #d1d5db;
+    -fx-border-color: #30415e;
+    -fx-border-width: 1;
+    -fx-padding: 7 12;
+}
+
+.toggle-button:selected{
+    -fx-background-color: #2563eb;
+    -fx-text-fill: white;
+    -fx-border-color: #2563eb;
+}

@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.scene.layout.*?>
+<?import javafx.scene.control.*?>
+<?import javafx.geometry.Insets?>
+
+<VBox xmlns="http://javafx.com/javafx"
+      xmlns:fx="http://javafx.com/fxml"
+      fx:controller="gui.javafx.controller.SidebarController"
+      styleClass="sidebar"
+      prefWidth="200" minWidth="50" maxWidth="300">
+
+    <Button fx:id="newChatButton" text="+ New Chat"
+            styleClass="primary-button"
+            maxWidth="Infinity"
+            prefHeight="40"
+            onAction="#onNewChatClicked" />
+
+    <Separator />
+
+    <Label text="Sessions" styleClass="secondary-text">
+        <padding>
+            <Insets top="10.0" right="10.0" bottom="5.0" left="10.0"/>
+        </padding>
+    </Label>
+
+    <ListView fx:id="sessionListView" VBox.vgrow="ALWAYS" />
+
+    <Separator />
+
+    <Label text="Tools" styleClass="secondary-text">
+        <padding>
+            <Insets top="10.0" right="10.0" bottom="5.0" left="10.0"/>
+        </padding>
+    </Label>
+
+    <HBox spacing="8">
+        <padding>
+            <Insets top="10.0" right="10.0" bottom="10.0" left="10.0"/>
+        </padding>
+        <Label text="Model:" styleClass="secondary-text" />
+        <ComboBox fx:id="modelComboBox" promptText="Select Model" />
+    </HBox>
+
+    <HBox spacing="8">
+        <padding>
+            <Insets top="10.0" right="10.0" bottom="10.0" left="10.0"/>
+        </padding>
+        <Label text="MCP:" styleClass="secondary-text" />
+        <Label fx:id="mcpStatusLabel" text="0/0" styleClass="secondary-text" />
+        <Button text="Manage" styleClass="secondary-button" onAction="#onMcpManageClicked" />
+    </HBox>
+
+    <HBox spacing="8">
+        <padding>
+            <Insets top="10.0" right="10.0" bottom="10.0" left="10.0"/>
+        </padding>
+        <Label text="Dev:" styleClass="secondary-text" />
+        <ToggleButton fx:id="devModeToggle" text="OFF" onAction="#onDevModeToggled" />
+    </HBox>
+
+    <Separator />
+
+    <Button text="Settings" styleClass="secondary-button"
+            maxWidth="Infinity" onAction="#onSettingsClicked" />
+    <Button text="Help" styleClass="secondary-button"
+            maxWidth="Infinity" onAction="#onHelpClicked" />
+
+    <Button fx:id="toggleSidebarButton" text="▶"
+            styleClass="secondary-button"
+            maxWidth="Infinity" onAction="#onToggleSidebarClicked" />
+</VBox>
