@@ -2,6 +2,7 @@ package agent.tool.message;
 
 import agent.tool.Tool;
 import bus.OutboundMessage;
+import lombok.extern.slf4j.Slf4j;
 
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
@@ -21,6 +22,7 @@ import java.util.function.Function;
  *
  * Schema parameters intentionally do NOT expose message_id (matches Python).
  */
+@Slf4j
 public class MessageTool extends Tool {
 
     private Function<OutboundMessage, CompletionStage<Void>> sendCallback;
@@ -36,6 +38,7 @@ public class MessageTool extends Tool {
 
     public MessageTool(Function<OutboundMessage, CompletionStage<Void>> sendCallback) {
         this.sendCallback = sendCallback;
+        log.info("初始化 MessageTool (带发送回调)");
     }
 
     public MessageTool(
@@ -48,6 +51,7 @@ public class MessageTool extends Tool {
         this.defaultChannel = defaultChannel == null ? "" : defaultChannel;
         this.defaultChatId = defaultChatId == null ? "" : defaultChatId;
         this.defaultMessageId = defaultMessageId;
+        log.info("初始化 MessageTool (带完整上下文): channel={}, chatId={}", this.defaultChannel, this.defaultChatId);
     }
 
     // ---------------- Python API parity ----------------
@@ -57,16 +61,19 @@ public class MessageTool extends Tool {
         this.defaultChannel = channel == null ? "" : channel;
         this.defaultChatId = chatId == null ? "" : chatId;
         this.defaultMessageId = messageId;
+        log.debug("设置消息上下文: channel={}, chatId={}, messageId={}", this.defaultChannel, this.defaultChatId, this.defaultMessageId);
     }
 
     /** Python: set_send_callback(callback) */
     public void setSendCallback(Function<OutboundMessage, CompletionStage<Void>> callback) {
         this.sendCallback = callback;
+        log.debug("设置消息发送回调");
     }
 
     /** Python: start_turn(): reset per-turn send tracking */
     public void startTurn() {
         this.sentInTurn = false;
+        log.debug("开始新回合，重置发送标记");
     }
 
     public boolean isSentInTurn() {
@@ -138,11 +145,15 @@ public class MessageTool extends Tool {
         String effectiveChatId = isBlank(chatId) ? defaultChatId : chatId;
         String effectiveMessageId = isBlank(messageIdArg) ? defaultMessageId : messageIdArg;
 
+        log.info("执行工具: message, 目标: {}:{}, 内容长度: {}", effectiveChannel, effectiveChatId, content == null ? 0 : content.length());
+
         if (isBlank(effectiveChannel) || isBlank(effectiveChatId)) {
+            log.warn("发送消息失败: 未指定目标频道/聊天");
             return CompletableFuture.completedFuture("Error: No target channel/chat specified");
         }
 
         if (sendCallback == null) {
+            log.error("发送消息失败: 消息发送未配置");
             return CompletableFuture.completedFuture("Error: Message sending not configured");
         }
 
@@ -161,16 +172,19 @@ public class MessageTool extends Tool {
         try {
             stage = sendCallback.apply(msg);
         } catch (Exception e) {
+            log.error("调用发送回调异常: {}", e.getMessage(), e);
             return CompletableFuture.completedFuture("Error sending message: " + String.valueOf(e));
         }
 
         if (stage == null) {
+            log.error("发送消息失败: 发送回调返回 null");
             return CompletableFuture.completedFuture("Error: Message sending not configured");
         }
 
         return stage.handle((ok, ex) -> {
             if (ex != null) {
                 // Python: f"Error sending message: {str(e)}"
+                log.error("消息发送失败: {}", ex.getMessage(), ex);
                 return "Error sending message: " + String.valueOf(ex);
             }
 
@@ -183,6 +197,7 @@ public class MessageTool extends Tool {
             String mediaInfo = (media != null && !media.isEmpty())
                     ? (" with " + media.size() + " attachments")
                     : "";
+            log.debug("消息发送成功: {}:{}{}", effectiveChannel, effectiveChatId, mediaInfo);
             return "Message sent to " + effectiveChannel + ":" + effectiveChatId + mediaInfo;
         });
     }

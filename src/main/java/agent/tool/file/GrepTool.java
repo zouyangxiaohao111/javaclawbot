@@ -2,6 +2,7 @@ package agent.tool.file;
 
 import agent.tool.Tool;
 import cn.hutool.core.util.StrUtil;
+import lombok.extern.slf4j.Slf4j;
 import providers.cli.ProjectRegistry;
 import utils.PathUtil;
 

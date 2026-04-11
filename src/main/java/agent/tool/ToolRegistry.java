@@ -6,6 +6,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
+import lombok.extern.slf4j.Slf4j;
+
 /**
  * 工具注册表：用于动态管理与执行工具。
  *
@@ -24,6 +26,7 @@ import java.util.concurrent.CompletableFuture;
  * - Python 的 tool.execute(**params) 需要把 params 作为关键字参数展开；
  *   Java 侧 Tool 基类签名为 execute(Map<String,Object> args)，等价于传入 params map
  */
+@Slf4j
 public class ToolRegistry {
 
     /**
@@ -44,6 +47,7 @@ public class ToolRegistry {
     public void register(Tool tool) {
         if (tool == null) return;
         tools.put(tool.name(), tool);
+        log.info("注册工具: {}", tool.name());
     }
 
     /**
@@ -54,6 +58,7 @@ public class ToolRegistry {
     public void unregister(String name) {
         if (name == null) return;
         tools.remove(name);
+        log.info("注销工具: {}", name);
     }
 
     /**
@@ -88,6 +93,7 @@ public class ToolRegistry {
         for (Tool t : tools.values()) {
             out.add(t.toSchema());
         }
+        log.debug("获取工具定义，共 {} 个工具", out.size());
         return out;
     }
 
@@ -102,6 +108,7 @@ public class ToolRegistry {
         Tool tool = tools.get(name);
         if (tool == null) {
             // 对齐 Python：报错并给出可用工具名列表
+            log.warn("工具未找到: {}, 可用工具: {}", name, String.join(", ", toolNames()));
             return CompletableFuture.completedFuture(
                     "Error: Tool '" + name + "' not found. Available: " + String.join(", ", toolNames())
             );
@@ -110,10 +117,13 @@ public class ToolRegistry {
         // 对齐 Python：params 必须是 dict；这里允许 null 并转为空 map
         Map<String, Object> safeParams = (params == null) ? new LinkedHashMap<>() : params;
 
+        log.info("执行工具: {}, 参数: {}", name, safeParams);
+
         try {
             // 参数校验（对齐 Python: validate_params）
             List<String> errors = tool.validateParams(safeParams);
             if (errors != null && !errors.isEmpty()) {
+                log.warn("工具参数校验失败: {}, 错误: {}", name, String.join("; ", errors));
                 return CompletableFuture.completedFuture(
                         "Error: Invalid parameters for tool '" + name + "': "
                                 + String.join("; ", errors)
@@ -127,14 +137,17 @@ public class ToolRegistry {
                     .handle((result, ex) -> {
                         // 对齐 Python：异常进入 except，返回 Error executing ... + HINT
                         if (ex != null) {
+                            log.error("工具执行失败: {}, 错误: {}", name, ex.getMessage(), ex);
                             return "Error executing " + name + ": " + ex.getMessage() + HINT;
                         }
 
                         // 对齐 Python：如果 result 是字符串且以 "Error" 开头，追加 HINT
                         if (result != null && result.startsWith("Error")) {
+                            log.warn("工具执行返回错误结果: {}", name);
                             return result + HINT;
                         }
 
+                        log.debug("工具执行成功: {}", name);
                         // Python 直接 return result（可能为非字符串，但该工程约定返回字符串）
                         return result;
                     })
@@ -142,6 +155,7 @@ public class ToolRegistry {
 
         } catch (Exception e) {
             // 对齐 Python：捕获异常，返回 Error executing ... + HINT
+            log.error("工具执行异常: {}, 错误: {}", name, e.getMessage(), e);
             return CompletableFuture.completedFuture(
                     "Error executing " + name + ": " + e.getMessage() + HINT
             );

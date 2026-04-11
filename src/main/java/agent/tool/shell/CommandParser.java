@@ -3,6 +3,8 @@ package agent.tool.shell;
 import java.util.*;
 import java.util.regex.Pattern;
 
+import lombok.extern.slf4j.Slf4j;
+
 /**
  * Atomic replication of Claude Code bash/commands.ts + parser.ts.
  *
@@ -19,9 +21,8 @@ import java.util.regex.Pattern;
  * - Output redirection extraction for permission checking
  * - Placeholder generation with random salt for injection prevention
  */
+@Slf4j
 public final class CommandParser {
-
-    private static final System.Logger log = System.getLogger(CommandParser.class.getName());
 
     private CommandParser() {}
 
@@ -151,13 +152,12 @@ public final class CommandParser {
      */
     public static ParsedCommandData parseCommand(String command) {
         if (command == null || command.isEmpty()) {
-            log.log(System.Logger.Level.DEBUG, "parseCommand: empty/null command");
+            log.debug("解析命令: 命令为空");
             return null;
         }
 
         if (command.length() > MAX_COMMAND_LENGTH) {
-            log.log(System.Logger.Level.WARNING, "parseCommand: command exceeds max length ({0} > {1})",
-                    command.length(), MAX_COMMAND_LENGTH);
+            log.warn("解析命令: 命令超出最大长度 ({} > {})", command.length(), MAX_COMMAND_LENGTH);
             return null;
         }
 
@@ -165,7 +165,7 @@ public final class CommandParser {
             // Use ShellQuote parser for basic tokenization
             ShellQuote.ParseResult parseResult = ShellQuote.tryParseShellCommand(command);
             if (!parseResult.isSuccess() || parseResult.getTokens().isEmpty()) {
-                log.log(System.Logger.Level.DEBUG, "parseCommand: shell quote parse failed");
+                log.debug("解析命令: Shell引号解析失败");
                 return null;
             }
 
@@ -174,17 +174,16 @@ public final class CommandParser {
             List<String> commandArgs = extractCommandArguments(command);
 
             if (commandArgs.isEmpty()) {
-                log.log(System.Logger.Level.DEBUG, "parseCommand: no command arguments found");
+                log.debug("解析命令: 未找到命令参数");
                 return null;
             }
 
-            log.log(System.Logger.Level.DEBUG, "parseCommand: {0} env vars, {1} args, command={2}",
-                    envVars.size(), commandArgs.size(), commandArgs.get(0));
+            log.debug("解析命令: {} 个环境变量, {} 个参数, 命令={}", envVars.size(), commandArgs.size(), commandArgs.get(0));
 
             return new ParsedCommandData(command, envVars, commandArgs, true);
 
         } catch (Exception e) {
-            log.log(System.Logger.Level.WARNING, "parseCommand failed: {0}", e.getMessage());
+            log.warn("解析命令失败: {}", e.getMessage());
             return null;
         }
     }
@@ -215,7 +214,7 @@ public final class CommandParser {
         for (String token : tokens) {
             if (ENV_VAR_PATTERN.matcher(token).find()) {
                 envVars.add(token);
-                log.log(System.Logger.Level.DEBUG, "extractEnvVars: found env var: {0}", token);
+                log.debug("提取环境变量: 发现环境变量: {}", token);
             } else {
                 // Env vars must be at the start, stop at first non-env token
                 break;
@@ -285,7 +284,7 @@ public final class CommandParser {
 
             // Stop at command substitution
             if (token.contains("$(") || token.contains("`")) {
-                log.log(System.Logger.Level.DEBUG, "extractCommandArguments: stopping at substitution: {0}", token);
+                log.debug("提取命令参数: 在命令替换处停止: {}", token);
                 break;
             }
 
@@ -334,7 +333,7 @@ public final class CommandParser {
 
         ShellQuote.ParseResult result = ShellQuote.tryParseShellCommand(command);
         if (!result.isSuccess()) {
-            log.log(System.Logger.Level.DEBUG, "splitCommand: parse failed, returning original");
+            log.debug("拆分命令: 解析失败, 返回原始命令");
             return new String[]{command};
         }
 
@@ -361,7 +360,7 @@ public final class CommandParser {
             subcommands.add(String.join(" ", currentParts));
         }
 
-        log.log(System.Logger.Level.DEBUG, "splitCommand: {0} subcommands found", subcommands.size());
+        log.debug("拆分命令: 找到 {} 个子命令", subcommands.size());
         return subcommands.toArray(new String[0]);
     }
 
@@ -407,7 +406,7 @@ public final class CommandParser {
             }
         }
 
-        log.log(System.Logger.Level.DEBUG, "splitCommandWithOperators: {0} parts", parts.size());
+        log.debug("拆分命令(保留操作符): {} 个部分", parts.size());
         return parts.toArray(new String[0]);
     }
 
@@ -465,8 +464,7 @@ public final class CommandParser {
 
             // Security: validate the target is a simple static file path
             if (!isSimpleStaticPath(target)) {
-                log.log(System.Logger.Level.DEBUG,
-                    "Skipping suspicious redirect target: {0}", target);
+                log.debug("跳过可疑的重定向目标: {}", target);
                 continue;
             }
 
@@ -484,8 +482,7 @@ public final class CommandParser {
             cleaned.append(remaining, lastEnd, matcher.start());
             lastEnd = matcher.end();
 
-            log.log(System.Logger.Level.DEBUG, "extractOutputRedirections: found {0} {1}",
-                    normalizedOp, target);
+            log.debug("提取输出重定向: 找到 {} {}", normalizedOp, target);
         }
 
         cleaned.append(remaining.substring(lastEnd));
@@ -540,7 +537,7 @@ public final class CommandParser {
         placeholders.put("ESCAPED_OPEN_PAREN", "__ESCAPED_OPEN_PAREN_" + salt + "__");
         placeholders.put("ESCAPED_CLOSE_PAREN", "__ESCAPED_CLOSE_PAREN_" + salt + "__");
 
-        log.log(System.Logger.Level.DEBUG, "Generated command placeholders with salt");
+        log.debug("已生成带随机盐的命令占位符");
         return placeholders;
     }
 

@@ -4,6 +4,7 @@ import agent.command.CommandQueueManager;
 import agent.command.SkillCommand;
 import agent.tool.Tool;
 import cn.hutool.core.util.StrUtil;
+import lombok.extern.slf4j.Slf4j;
 import skills.SkillsLoader;
 import utils.GsonFactory;
 
@@ -13,6 +14,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
+@Slf4j
 public class SkillTool extends Tool {
 
     private final SkillsLoader skillsLoader;
@@ -21,6 +23,7 @@ public class SkillTool extends Tool {
     public SkillTool(CommandQueueManager commandQueueManager, SkillsLoader skillManager) {
         this.skillsLoader = skillManager;
         this.commandQueueManager = commandQueueManager;
+        log.info("初始化 SkillTool");
     }
 
     @Override
@@ -91,15 +94,19 @@ public class SkillTool extends Tool {
         }
 
         action = action.trim().toLowerCase(Locale.ROOT);
+        log.info("执行工具: skill, 动作: {}", action);
 
         return switch (action) {
             case "load" -> executeLoad(params);
             case "list" -> executeList(params);
             case "unload" -> executeUnload(params);
             case "reload" -> executeReload(params);
-            default -> CompletableFuture.completedFuture(
-                    "Error: unsupported action '" + action + "', expected one of: load, list, unload, reload"
-            );
+            default -> {
+                log.warn("不支持的 skill 动作: {}", action);
+                yield CompletableFuture.completedFuture(
+                        "Error: unsupported action '" + action + "', expected one of: load, list, unload, reload"
+                );
+            }
         };
     }
 
@@ -110,21 +117,25 @@ public class SkillTool extends Tool {
         String name = getString(params, "name");
 
         if (name == null || name.isBlank()) {
+            log.warn("加载技能失败: 技能名称为空");
             return CompletableFuture.completedFuture("Error: skill name required for action=load");
         }
 
         if (commandQueueManager.isLoaded(name)) {
+            log.info("技能已加载，跳过重复加载: {}", name);
             return CompletableFuture.completedFuture("技能已加载, 请勿重复加载, 请查看上下文,帮助用户说明如何使用技能");
         }
 
+        log.info("加载技能: {}", name);
         SkillCommand skillCommand = new SkillCommand(name, name, skillsLoader);
         commandQueueManager.addSkillCommandByTool(skillCommand);
 
         // 如果技能输出为空，则提示用户技能正在加载中
         if (StrUtil.isBlank(skillCommand.getOutput())) {
-
+            log.debug("技能输出为空: {}", name);
         }
 
+        log.info("技能加载完成: {}", name);
         return CompletableFuture.completedFuture(
                 skillCommand.getOutput()
         );
@@ -137,9 +148,11 @@ public class SkillTool extends Tool {
     private CompletableFuture<String> executeList(Map<String, Object> params) {
         String path = getString(params, "path");
         if (StrUtil.isNotBlank(path)) {
+            log.info("列出技能, 路径: {}", path);
             return CompletableFuture.completedFuture(GsonFactory.toJson(skillsLoader.listSkills(Path.of(path))));
         }
 
+        log.info("列出所有技能");
         return CompletableFuture.completedFuture(GsonFactory.toJson(skillsLoader.listSkills(true)) );
     }
 
@@ -151,9 +164,11 @@ public class SkillTool extends Tool {
         String name = getString(params, "name");
 
         if (name == null || name.isBlank()) {
+            log.warn("卸载技能失败: 技能名称为空");
             return CompletableFuture.completedFuture("Error: skill name required for action=unload");
         }
 
+        log.info("卸载技能: {}", name);
         return CompletableFuture.completedFuture(
                 commandQueueManager.unloadUserSkill(name)
         );
@@ -167,9 +182,11 @@ public class SkillTool extends Tool {
         String name = getString(params, "name");
 
         if (name == null || name.isBlank()) {
+            log.warn("重新加载技能失败: 技能名称为空");
             return CompletableFuture.completedFuture("Error: skill name required for action=reload");
         }
 
+        log.info("重新加载技能: {}", name);
         // 从 loadSkills 中移除，绕过 isLoaded 检查
         // 注意：不从 userLoadedSkills 移除，用户仍然在使用这个技能
         commandQueueManager.getLoadSkills().remove(name);
@@ -178,6 +195,7 @@ public class SkillTool extends Tool {
         SkillCommand skillCommand = new SkillCommand(name, name, skillsLoader);
         commandQueueManager.addSkillCommandByTool(skillCommand);
 
+        log.info("技能重新加载完成: {}", name);
         return CompletableFuture.completedFuture(
                 "[技能重新加载完成]\n" + skillCommand.getOutput()
         );

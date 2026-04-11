@@ -2,6 +2,7 @@ package agent.tool.file;
 
 import agent.tool.Tool;
 import cn.hutool.core.util.StrUtil;
+import lombok.extern.slf4j.Slf4j;
 import providers.cli.ProjectRegistry;
 import utils.PathUtil;
 
@@ -29,6 +30,7 @@ import java.util.regex.Pattern;
  * - glob.ts extractGlobBaseDirectory() → extractGlobBaseDirectory()
  * - GlobTool.ts mapToolResultToToolResultBlockParam → result formatting in execute()
  */
+@Slf4j
 public final class GlobTool extends Tool {
 
     // ---------- Line 60: maxResultSizeChars = 100_000 ----------
@@ -99,6 +101,8 @@ public final class GlobTool extends Tool {
             String pattern = asString(args.get("pattern"));
             String path = asString(args.get("path"));
 
+            log.info("执行工具: Glob, 参数: pattern={}, path={}", pattern, path);
+
             // ---------- Line 88-89: getPath ----------
             Path searchDir;
             if (path != null && !path.isEmpty()) {
@@ -150,6 +154,8 @@ public final class GlobTool extends Tool {
             int numFiles = filenames.size();
             boolean truncated = globResult.truncated;
 
+            log.debug("Glob 搜索完成, 找到 {} 个文件, 耗时 {} ms", numFiles, durationMs);
+
             // ---------- Line 177-197: mapToolResultToToolResultBlockParam ----------
             if (numFiles == 0) {
                 return CompletableFuture.completedFuture("No files found");
@@ -165,6 +171,7 @@ public final class GlobTool extends Tool {
         } catch (SecurityException se) {
             return CompletableFuture.completedFuture("Error: " + se.getMessage());
         } catch (Exception e) {
+            log.error("工具执行失败: Glob, 错误: {}", e.getMessage(), e);
             return CompletableFuture.completedFuture("Error searching files: " + e.getMessage());
         }
     }

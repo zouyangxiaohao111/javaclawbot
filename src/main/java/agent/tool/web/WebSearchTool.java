@@ -20,6 +20,8 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 
+import lombok.extern.slf4j.Slf4j;
+
 /**
  * Java port of javaclawbot/agent/tools/web.py -> WebSearchTool
  *
@@ -27,6 +29,7 @@ import java.util.concurrent.CompletionStage;
  * - proxy 支持
  * - Brave Search API
  */
+@Slf4j
 public class WebSearchTool extends Tool {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
@@ -120,6 +123,7 @@ public class WebSearchTool extends Tool {
     public CompletionStage<String> execute(Map<String, Object> args) {
         String apiKey = resolveApiKey();
         if (apiKey.isBlank()) {
+            log.warn("执行工具: web_search 失败, Brave Search API Key 未配置");
             return CompletableFuture.completedFuture(
                     "Error: Brave Search API key not configured. " +
                     "Set it in ~/.javaclawbot/config.json under tools.web.search.apiKey " +
@@ -129,6 +133,7 @@ public class WebSearchTool extends Tool {
 
         String query = String.valueOf(args.getOrDefault("query", "")).trim();
         if (query.isEmpty()) {
+            log.warn("执行工具: web_search 失败, 查询参数为空");
             return CompletableFuture.completedFuture("Error: query is required");
         }
 
@@ -136,6 +141,8 @@ public class WebSearchTool extends Tool {
         Object c = args.get("count");
         if (c instanceof Number n) count = n.intValue();
         int n = Math.min(Math.max(count != null ? count : this.maxResults, 1), 10);
+
+        log.info("执行工具: web_search, 参数: query={}, count={}", query, n);
 
         String url = API_ENDPOINT
                 + "?q=" + URLEncoder.encode(query, StandardCharsets.UTF_8)
@@ -148,15 +155,19 @@ public class WebSearchTool extends Tool {
                 .GET()
                 .build();
 
+        log.debug("向Brave Search API发起请求: url={}", url);
+
         return http.sendAsync(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
                 .thenApply(resp -> {
                     if (resp.statusCode() / 100 != 2) {
+                        log.warn("Brave Search API返回错误状态码: {}, 响应: {}", resp.statusCode(), safeTrim(resp.body(), 2000));
                         return "Error: Brave Search API HTTP " + resp.statusCode() + "\n" + safeTrim(resp.body(), 2000);
                     }
                     try {
                         JsonNode root = MAPPER.readTree(resp.body());
                         JsonNode results = root.path("web").path("results");
                         if (!results.isArray() || results.size() == 0) {
+                            log.debug("搜索无结果: query={}", query);
                             return "No results for: " + query;
                         }
 
@@ -176,12 +187,15 @@ public class WebSearchTool extends Tool {
                             lines.add("   " + u);
                             if (!desc.isBlank()) lines.add("   " + desc);
                         }
+                        log.debug("工具执行成功: web_search, 结果数量={}", Math.min(results.size(), n));
                         return String.join("\n", lines);
                     } catch (Exception e) {
+                        log.error("工具执行失败: web_search, 解析响应失败, 错误: {}", e.getMessage(), e);
                         return "Error: " + e.getMessage();
                     }
                 })
                 .exceptionally(ex -> {
+                    log.error("工具执行异常: web_search, 错误: {}", ex.getMessage(), ex);
                     String msg = rootMessage(ex);
                     if (msg != null && (msg.contains("proxy") || msg.contains("Proxy"))) {
                         return "Proxy error: " + msg;

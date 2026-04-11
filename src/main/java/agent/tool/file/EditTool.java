@@ -1,6 +1,7 @@
 package agent.tool.file;
 
 import agent.tool.Tool;
+import lombok.extern.slf4j.Slf4j;
 import utils.PathUtil;
 
 import java.nio.charset.Charset;
@@ -35,6 +36,7 @@ import java.util.concurrent.CompletionStage;
  *   - File not found with suggestion
  *   - stripTrailingWhitespace for non-markdown files
  */
+@lombok.extern.slf4j.Slf4j
 public final class EditTool extends Tool {
 
     // ---- Port of constants.ts ----
@@ -158,6 +160,8 @@ public final class EditTool extends Tool {
         String newString = FileSystemTools.asString(args.get("new_string"));
         boolean replaceAll = FileSystemTools.asBool(args.get("replace_all"), false);
 
+        log.info("执行工具: edit_file, 参数: file_path={}, replace_all={}", filePath, replaceAll);
+
         if (filePath == null) {
             return CompletableFuture.completedFuture("Error: file_path is required");
         }
@@ -172,11 +176,13 @@ public final class EditTool extends Tool {
 
         try {
             Path resolvedPath = PathUtil.resolvePath(filePath, workspace, allowedDir);
+            log.debug("解析文件路径: {}", resolvedPath);
 
             // ---- validateInput: file size check (errorCode: 10) ----
             if (Files.exists(resolvedPath)) {
                 long fileSize = Files.size(resolvedPath);
                 if (fileSize > MAX_EDIT_FILE_SIZE) {
+                    log.warn("文件过大无法编辑: {}, 大小: {} MB", resolvedPath, fileSize / (1024.0 * 1024.0));
                     return CompletableFuture.completedFuture(
                             String.format("Error: File is too large to edit (%.1f MB). Maximum editable file size is 1024 MB.",
                                     fileSize / (1024.0 * 1024.0)));
@@ -185,6 +191,7 @@ public final class EditTool extends Tool {
 
             // ---- readFileForEdit: read file content with encoding detection ----
             // Port of CC's readFileForEdit() helper function
+            log.debug("读取文件内容: {}", resolvedPath);
             ReadFileResult readResult = readFileForEdit(resolvedPath);
             String fileContent = readResult.content;
             boolean fileExists = readResult.fileExists;
@@ -309,10 +316,12 @@ public final class EditTool extends Tool {
                     normalizedContent, updatedContent);
 
             // ---- call: writeTextContent (preserve encoding/line endings/BOM) ----
+            log.debug("写入文件内容: {}", resolvedPath);
             String finalContent = FileSystemTools.normalizeLineEndings(updatedContent, targetLineEnding);
             Path parent = resolvedPath.getParent();
             if (parent != null) Files.createDirectories(parent);
             writeFilePreserving(resolvedPath, finalContent, fileCharset, preserveBom);
+            log.debug("文件写入成功: {}", resolvedPath);
 
             // ---- call: update FileStateCache (re-mark as read) ----
             // Port of: readFileState.set(absoluteFilePath, {content, timestamp, offset, limit})
@@ -338,8 +347,10 @@ public final class EditTool extends Tool {
             return CompletableFuture.completedFuture(result.toString());
 
         } catch (SecurityException se) {
+            log.error("工具执行失败: edit_file, 安全异常: {}", se.getMessage(), se);
             return CompletableFuture.completedFuture("Error: " + se.getMessage());
         } catch (Exception e) {
+            log.error("工具执行失败: edit_file, 错误: {}", e.getMessage(), e);
             return CompletableFuture.completedFuture("Error editing file: " + e.getMessage());
         }
     }

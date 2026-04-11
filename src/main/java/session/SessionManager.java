@@ -421,27 +421,49 @@ public final class SessionManager {
 
     /**
      * 保存 sessionKey -> sessionId 映射
+     * 失败时不影响内存中的映射数据，只记录警告
      */
     private void saveKeyToIdMap() {
         Path mapFile = sessionsDir.resolve("sessions.json");
         Path tmpFile = mapFile.resolveSibling("sessions.json.tmp");
-        
+
+        // 确保目录存在（防止并发删除等情况）
+        Helpers.ensureDir(sessionsDir);
+
+        // 先写入临时文件
         try (BufferedWriter w = Files.newBufferedWriter(tmpFile, StandardCharsets.UTF_8,
                 StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)) {
             objectMapper.writeValue(w, new HashMap<>(keyToIdMap));
         } catch (Exception e) {
-            LOG.log(Level.WARNING, "保存会话映射失败", e);
+            LOG.log(Level.WARNING, "写入会话映射临时文件失败", e);
+            // 清理临时文件（如果存在）
+            deleteIfExists(tmpFile);
             return;
         }
-        
+
+        // 尝试原子移动
         try {
             Files.move(tmpFile, mapFile, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
         } catch (Exception e) {
+            // 原子移动失败，尝试普通移动
             try {
                 Files.move(tmpFile, mapFile, StandardCopyOption.REPLACE_EXISTING);
             } catch (Exception ex) {
-                LOG.log(Level.WARNING, "保存会话映射失败", ex);
+                LOG.log(Level.WARNING, "移动会话映射文件失败", ex);
+                // 清理临时文件
+                deleteIfExists(tmpFile);
             }
+        }
+    }
+
+    /**
+     * 安全删除文件（如果存在）
+     */
+    private void deleteIfExists(Path path) {
+        try {
+            Files.deleteIfExists(path);
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "清理临时文件失败: " + path, e);
         }
     }
 

@@ -3,6 +3,7 @@ package agent.tool.mcp;
 import agent.tool.Tool;
 import io.modelcontextprotocol.client.McpAsyncClient;
 import io.modelcontextprotocol.spec.McpSchema;
+import lombok.extern.slf4j.Slf4j;
 
 import java.time.Duration;
 import java.util.LinkedHashMap;
@@ -17,6 +18,7 @@ import java.util.concurrent.CompletableFuture;
  * - name()/description()/parameters()/execute(Map<String,Object>)
  * - toSchema() 仍走现有 Tool 基类逻辑
  */
+@Slf4j
 public class OfficialMcpToolWrapper extends Tool {
 
     private final String serverName;
@@ -44,6 +46,7 @@ public class OfficialMcpToolWrapper extends Tool {
         this.parameters = normalizeParameters(inputSchema);
         this.client = Objects.requireNonNull(client, "client");
         this.timeout = timeout != null ? timeout : Duration.ofSeconds(60);
+        log.info("注册 MCP 工具: {} (服务器: {}, 原始名称: {})", exposedName, serverName, rawToolName);
     }
 
     @Override
@@ -57,7 +60,7 @@ public class OfficialMcpToolWrapper extends Tool {
     }
 
     /**
-     * 这里返回的必须是“参数 schema 本体”，与现有 Tool 基类保持一致。
+     * 这里返回的必须是"参数 schema 本体"，与现有 Tool 基类保持一致。
      * 即：通常是 {"type":"object","properties":...,"required":[...]}
      */
     @Override
@@ -69,16 +72,21 @@ public class OfficialMcpToolWrapper extends Tool {
     public CompletableFuture<String> execute(Map<String, Object> args) {
         Map<String, Object> safeArgs = (args == null) ? Map.of() : args;
 
+        log.info("执行 MCP 工具: {}, 参数: {}", exposedName, safeArgs);
+
         return CompletableFuture.supplyAsync(() -> {
             try {
                 McpSchema.CallToolRequest request = new McpSchema.CallToolRequest(rawToolName, safeArgs);
                 McpSchema.CallToolResult result = client.callTool(request).block(timeout);
 
                 if (result == null) {
+                    log.debug("MCP 工具执行成功: {}, 无输出", exposedName);
                     return "(no output)";
                 }
+                log.debug("MCP 工具执行成功: {}", exposedName);
                 return normalizeToolResult(result);
             } catch (Exception e) {
+                log.error("MCP 工具执行失败: {}, 错误: {}", exposedName, e.getMessage(), e);
                 throw new RuntimeException(
                         "调用 MCP 工具失败: " + exposedName + " -> " + e.getMessage(), e
                 );

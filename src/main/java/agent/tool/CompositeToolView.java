@@ -1,9 +1,12 @@
 package agent.tool;
 
+import lombok.extern.slf4j.Slf4j;
+
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 
+@Slf4j
 public final class CompositeToolView implements ToolView {
     private final List<ToolRegistry> registries;
 
@@ -15,6 +18,7 @@ public final class CompositeToolView implements ToolView {
             }
             this.registries.add(registry); // Added once
         }
+        log.info("创建复合工具视图，共 {} 个注册表", this.registries.size());
     }
 
     @Override
@@ -32,17 +36,21 @@ public final class CompositeToolView implements ToolView {
             }
         }
 
+        log.debug("获取复合工具定义，合并后共 {} 个工具", merged.size());
         return new ArrayList<>(merged.values());
     }
 
     @Override
     public CompletionStage<String> execute(String name, Map<String, Object> args) {
+        log.info("执行工具: {}, 参数: {}", name, args);
         for (int i = registries.size() - 1; i >= 0; i--) {
             ToolRegistry registry = registries.get(i);
             if (registry != null && registry.get(name) != null) {
+                log.debug("在注册表[{}]中找到工具: {}", i, name);
                 return registry.execute(name, args);
             }
         }
+        log.warn("工具未找到: {}", name);
         return CompletableFuture.completedFuture(
                 "Error: Tool '" + name + "' not found."
         );
@@ -66,6 +74,7 @@ public final class CompositeToolView implements ToolView {
     public void addTool(Tool tool) {
         if (registries.isEmpty()) {
             registries.add(new ToolRegistry());
+            log.info("创建新的工具注册表");
         }
         this.registries.get(registries.size() - 1).register(tool);
     }

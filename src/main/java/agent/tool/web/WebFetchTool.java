@@ -22,6 +22,8 @@ import java.util.concurrent.CompletionStage;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import lombok.extern.slf4j.Slf4j;
+
 /**
  * Java port of javaclawbot/agent/tools/web.py -> WebFetchTool
  *
@@ -30,6 +32,7 @@ import java.util.regex.Pattern;
  * - Readability 内容提取
  * - 重定向限制
  */
+@Slf4j
 public class WebFetchTool extends Tool {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
@@ -124,9 +127,12 @@ public class WebFetchTool extends Tool {
         Object mc = args.get("maxChars");
         if (mc instanceof Number n) maxChars = n.intValue();
 
+        log.info("执行工具: web_fetch, 参数: url={}, extractMode={}, maxChars={}", url, extractMode, maxChars);
+
         // validate url first
         UrlCheck chk = validateUrl(url);
         if (!chk.ok) {
+            log.warn("URL验证失败: {}, 错误: {}", url, chk.error);
             ObjectNode out = MAPPER.createObjectNode();
             out.put("error", "URL validation failed: " + chk.error);
             out.put("url", url);
@@ -144,20 +150,25 @@ public class WebFetchTool extends Tool {
                         String ctype = resp.contentType == null ? "" : resp.contentType.toLowerCase(Locale.ROOT);
                         String body = resp.body == null ? "" : resp.body;
 
+                        log.debug("HTTP请求完成: url={}, 状态码={}, 内容类型={}", finalUrl, status, ctype);
+
                         String extractor;
                         String text;
 
                         if (ctype.contains("application/json")) {
                             extractor = "json";
+                            log.debug("使用JSON解析器处理响应内容");
                             try {
                                 JsonNode node = MAPPER.readTree(body);
                                 text = MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(node);
                             } catch (Exception e) {
                                 // fallback raw if invalid json
+                                log.warn("JSON解析失败，使用原始内容作为回退");
                                 text = body;
                             }
                         } else if (ctype.contains("text/html") || looksLikeHtml(body)) {
                             // Readability
+                            log.debug("使用Readability提取页面内容, 模式: {}", finalExtractMode);
                             Extracted ex = extractReadable(finalUrl, body, finalExtractMode);
                             extractor = ex.extractor;
                             text = ex.text;
@@ -167,7 +178,10 @@ public class WebFetchTool extends Tool {
                         }
 
                         boolean truncated = text != null && text.length() > finalMaxChars;
-                        if (truncated) text = text.substring(0, finalMaxChars);
+                        if (truncated) {
+                            log.debug("内容被截断: 原始长度={}, 截断到={}", text.length(), finalMaxChars);
+                            text = text.substring(0, finalMaxChars);
+                        }
 
                         ObjectNode out = MAPPER.createObjectNode();
                         out.put("url", url);
@@ -177,8 +191,11 @@ public class WebFetchTool extends Tool {
                         out.put("truncated", truncated);
                         out.put("length", text == null ? 0 : text.length());
                         out.put("text", text == null ? "" : text);
+
+                        log.debug("工具执行成功: web_fetch, 提取器={}, 内容长度={}", extractor, text == null ? 0 : text.length());
                         return out.toString();
                     } catch (Exception e) {
+                        log.error("工具执行失败: web_fetch, 错误: {}", e.getMessage(), e);
                         ObjectNode out = MAPPER.createObjectNode();
                         out.put("error", String.valueOf(e.getMessage()));
                         out.put("url", url);
@@ -186,6 +203,7 @@ public class WebFetchTool extends Tool {
                     }
                 })
                 .exceptionally(ex -> {
+                    log.error("工具执行异常: web_fetch, 错误: {}", ex.getMessage(), ex);
                     ObjectNode out = MAPPER.createObjectNode();
                     String msg = rootMessage(ex);
                     if (msg != null && (msg.contains("proxy") || msg.contains("Proxy"))) {

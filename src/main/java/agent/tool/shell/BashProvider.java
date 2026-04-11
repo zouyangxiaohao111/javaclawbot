@@ -5,8 +5,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.util.*;
 import java.util.concurrent.*;
-import java.util.logging.Level;
-import java.util.logging.Logger;
+
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * Atomic replication of Claude Code shell/bashProvider.ts.
@@ -25,9 +25,8 @@ import java.util.logging.Logger;
  *   && eval <quoted_command>
  *   && pwd -P >| <cwd_temp_file>
  */
+@Slf4j
 public final class BashProvider implements ShellProvider {
-
-    private static final Logger log = Logger.getLogger(BashProvider.class.getName());
 
     private final String shellPath;
     private volatile String currentSandboxTmpDir;
@@ -182,11 +181,11 @@ public final class BashProvider implements ShellProvider {
                 // 使用 source 执行脚本（而不是直接执行，这样可以保持环境变量）
                 String commandString = "source " + quote(new String[]{scriptPath});
 
-                // === DEBUG LOG ===
-                log.log(Level.FINE, "=== BashProvider Debug ===");
-                log.log(Level.FINE, "原始命令: {0}", command);
-                log.log(Level.FINE, "脚本内容:\n{0}", scriptContent);
-                log.log(Level.FINE, "命令字符串: {0}", commandString);
+                // === 调试日志 ===
+                log.debug("=== BashProvider 调试 ===");
+                log.debug("原始命令: {}", command);
+                log.debug("脚本内容:\n{}", scriptContent);
+                log.debug("命令字符串: {}", commandString);
 
                 return new ExecCommandResult(commandString, cwdFilePath, tempScript);
 

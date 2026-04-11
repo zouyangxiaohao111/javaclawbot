@@ -4,6 +4,7 @@ import agent.tool.Tool;
 import corn.CronJob;
 import corn.CronSchedule;
 import corn.CronService;
+import lombok.extern.slf4j.Slf4j;
 
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -21,6 +22,7 @@ import java.util.concurrent.CompletionStage;
  * 3. cron_expr：用于"固定时刻周期任务"，例如每天 7:30 执行
  * 4. at：用于"绝对时间的一次性任务"，例如 2026-03-06T18:00:00
  */
+@Slf4j
 public class CronTool extends Tool {
 
     private final CronService cron;
@@ -31,12 +33,14 @@ public class CronTool extends Tool {
 
     public CronTool(CronService cronService) {
         this.cron = Objects.requireNonNull(cronService, "cronService");
+        log.info("初始化 CronTool");
     }
 
     /** 设置当前会话上下文，用于任务执行后消息投递 */
     public void setContext(String channel, String chatId) {
         this.channel = channel == null ? "" : channel;
         this.chatId = chatId == null ? "" : chatId;
+        log.debug("设置 CronTool 上下文: channel={}, chatId={}", this.channel, this.chatId);
     }
 
     /** 标记是否在 cron 作业回调中执行 */
@@ -114,6 +118,7 @@ public class CronTool extends Tool {
     @Override
     public CompletionStage<String> execute(Map<String, Object> args) {
         String action = str(args.get("action"));
+        log.info("执行工具: cron, 动作: {}", action);
 
         if ("add".equals(action)) {
             String message = str(args.get("message"));
@@ -137,6 +142,7 @@ public class CronTool extends Tool {
             return CompletableFuture.completedFuture(removeJob(jobId));
         }
 
+        log.warn("未知的 cron 动作: {}", action);
         return CompletableFuture.completedFuture("Unknown action: " + action);
     }
 
@@ -156,18 +162,22 @@ public class CronTool extends Tool {
 
         // 防止 cron 作业内部递归调度新作业
         if (inCronContext.get()) {
+            log.warn("拒绝在 cron 作业内部创建新任务");
             return "Error: cannot schedule new jobs from within a cron job execution";
         }
 
         if (message == null || message.isBlank()) {
+            log.warn("添加任务失败: 消息为空");
             return "Error: message is required for add";
         }
 
         if (channel.isBlank() || chatId.isBlank()) {
+            log.warn("添加任务失败: 缺少会话上下文");
             return "Error: no session context (channel/chat_id)";
         }
 
         if (tz != null && (cronExpr == null || cronExpr.isBlank())) {
+            log.warn("添加任务失败: tz 只能与 cron_expr 一起使用");
             return "Error: tz can only be used with cron_expr";
         }
 
@@ -175,6 +185,7 @@ public class CronTool extends Tool {
             try {
                 ZoneId.of(tz);
             } catch (Exception e) {
+                log.warn("添加任务失败: 未知时区 '{}'", tz);
                 return "Error: unknown timezone '" + tz + "'";
             }
         }
@@ -187,9 +198,11 @@ public class CronTool extends Tool {
         if (at != null && !at.isBlank()) modeCount++;
 
         if (modeCount == 0) {
+            log.warn("添加任务失败: 未指定时间模式");
             return "Error: one of in_seconds, every_seconds, cron_expr, or at is required";
         }
         if (modeCount > 1) {
+            log.warn("添加任务失败: 指定了多个时间模式");
             return "Error: only one of in_seconds, every_seconds, cron_expr, or at may be provided";
         }
 
@@ -199,6 +212,7 @@ public class CronTool extends Tool {
         try {
             if (inSeconds != null) {
                 if (inSeconds <= 0) {
+                    log.warn("添加任务失败: in_seconds 必须大于 0");
                     return "Error: in_seconds must be > 0";
                 }
 
@@ -210,6 +224,7 @@ public class CronTool extends Tool {
 
             } else if (everySeconds != null) {
                 if (everySeconds <= 0) {
+                    log.warn("添加任务失败: every_seconds 必须大于 0");
                     return "Error: every_seconds must be > 0";
                 }
 
@@ -229,10 +244,12 @@ public class CronTool extends Tool {
                     ZonedDateTime zdt = ldt.atZone(ZoneId.systemDefault());
                     atMs = zdt.toInstant().toEpochMilli();
                 } catch (Exception e) {
+                    log.warn("添加任务失败: 无效的 ISO 日期时间 '{}'", at);
                     return "Error: invalid ISO datetime for at: " + at;
                 }
 
                 if (atMs <= System.currentTimeMillis()) {
+                    log.warn("添加任务失败: at 必须是未来时间");
                     return "Error: at must be in the future";
                 }
 
@@ -251,8 +268,10 @@ public class CronTool extends Tool {
                     deleteAfter
             );
 
+            log.info("成功创建定时任务: '{}', id: {}", job.getName(), job.getId());
             return "Created job '" + job.getName() + "' (id: " + job.getId() + ")";
         } catch (Exception e) {
+            log.error("创建定时任务失败: {}", e.getMessage(), e);
             return "Error: failed to create cron job: " + e.getMessage();
         }
     }
@@ -260,6 +279,7 @@ public class CronTool extends Tool {
     private String listJobs() {
         List<CronJob> jobs = cron.listJobs(false);
         if (jobs == null || jobs.isEmpty()) {
+            log.debug("当前没有定时任务");
             return "No scheduled jobs.";
         }
 
@@ -271,16 +291,20 @@ public class CronTool extends Tool {
                     + ", kind: " + (j.getSchedule() != null ? j.getSchedule().getKind() : "unknown")
                     + ", nextRunAtMs: " + nextRun + ")");
         }
+        log.debug("列出 {} 个定时任务", jobs.size());
         return "Scheduled jobs:\n" + String.join("\n", lines);
     }
 
     private String removeJob(String jobId) {
         if (jobId == null || jobId.isBlank()) {
+            log.warn("删除任务失败: job_id 为空");
             return "Error: job_id is required for remove";
         }
         if (cron.removeJob(jobId)) {
+            log.info("成功删除定时任务: {}", jobId);
             return "Removed job " + jobId;
         }
+        log.warn("删除任务失败: 任务不存在 '{}'", jobId);
         return "Job " + jobId + " not found";
     }
 

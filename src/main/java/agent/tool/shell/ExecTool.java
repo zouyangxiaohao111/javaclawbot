@@ -9,6 +9,8 @@ import java.util.concurrent.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import lombok.extern.slf4j.Slf4j;
+
 /**
  * Shell execution tool: executes a bash command and returns its output.
  *
@@ -27,6 +29,7 @@ import java.util.regex.Pattern;
  *   - exit code non-0: append "\nExit code: N"
  *   - Final output truncated at 30,000 chars
  */
+@Slf4j
 public class ExecTool extends Tool {
 
     /**
@@ -302,15 +305,22 @@ public class ExecTool extends Tool {
             return CompletableFuture.completedFuture("Error: command is required");
         }
 
+        log.info("执行工具: Bash, 命令: {}, 描述: {}", command, description);
+
         // Safety guard
         String cwd = Shell.pwd();
         String guardError = guardCommand(command, cwd);
         if (guardError != null) {
+            log.warn("命令被安全检查拦截: {}, 错误: {}", command, guardError);
             return CompletableFuture.completedFuture(guardError);
         }
 
         // Inject javac encoding before passing to Shell
+        String originalCommand = command;
         command = injectJavacEncoding(command);
+        if (!command.equals(originalCommand)) {
+            log.debug("自动为javac命令注入UTF-8编码参数");
+        }
 
         // Inject PATH append via environment variable (Shell.exec will merge)
         if (!pathAppend.isBlank()) {
@@ -332,6 +342,8 @@ public class ExecTool extends Tool {
         final String finalCommand = command;
         final Boolean finalRunInBackground = runInBackground;
 
+        log.debug("执行命令: 超时={}ms, 后台执行={}", finalTimeoutMs, finalRunInBackground);
+
         // --- Call Shell.exec() ---
         // This uses BashProvider.buildExecCommand() which includes:
         // - extglob disable for security
@@ -346,6 +358,7 @@ public class ExecTool extends Tool {
         );
 
         if (finalRunInBackground != null && finalRunInBackground) {
+            log.debug("以后台模式执行命令");
             return Shell.execBackground(finalCommand, ShellProvider.ShellType.BASH, options)
                     .thenApply(result -> formatResult(result, finalRunInBackground));
         }
