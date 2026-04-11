@@ -143,7 +143,7 @@ public class ToolRegistry {
 
                         // 对齐 Python：如果 result 是字符串且以 "Error" 开头，追加 HINT
                         if (result != null && result.startsWith("Error")) {
-                            log.warn("工具执行返回错误结果: {}", name);
+                            log.warn("工具执行返回错误结果: {}，错误：{}", name, result);
                             return result + HINT;
                         }
 

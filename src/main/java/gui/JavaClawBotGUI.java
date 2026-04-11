@@ -1566,7 +1566,7 @@ public class JavaClawBotGUI extends JFrame {
 
                 bus.publishInbound(in).toCompletableFuture().join();
 
-                boolean ok = turn.doneLatch.await(5, java.util.concurrent.TimeUnit.MINUTES);
+                boolean ok = turn.doneLatch.await(30, java.util.concurrent.TimeUnit.MINUTES);
                 String resp = turn.response();
 
                 finishTurn(turn, ok, resp, null);
