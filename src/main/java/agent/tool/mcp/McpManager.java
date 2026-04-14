@@ -28,6 +28,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.*;
+import java.util.stream.Collectors;
 
 /**
  * MCP 连接管理器（官方 Java SDK 版）
@@ -254,16 +255,7 @@ public class McpManager {
                     for (String existing : existingNames) {
                         MCPServerConfig latestCfg = latestServers.get(existing);
                         if (latestCfg == null || !latestCfg.isEnable()) {
-                            try {
-                                removeServer(existing);
-                            } catch (Exception e) {
-                                sb.append("[MCP] 卸载服务失败: ")
-                                        .append(existing)
-                                        .append("，原因：")
-                                        .append(safeErrorMessage(e))
-                                        .append("\n");
-                                log.error("[MCP] 卸载服务失败: {}", existing, e);
-                            }
+                            forceRemoveServer(existing);
                         }
                     }
 
@@ -283,16 +275,9 @@ public class McpManager {
                                 // 新增 server：直接新建连接
                                 connectOneServer(serverName, newCfg);
                                 log.info("[MCP] 新增并连接 server: {}", serverName);
-                            } else if (needsReconnect(oldHandle.config(), newCfg)
-                                    || isStdioType(newCfg)) {
-                                // 连接参数发生变化，或 stdio 类型（进程可能已死）：必须完整重连
-                                forceRemoveServer(serverName);
-                                connectOneServer(serverName, newCfg);
-                                log.info("[MCP] server 已重连: {}", serverName);
                             } else {
-                                // HTTP 类型且配置没变：复用旧 client 刷新工具列表
-                                refreshOneServer(serverName, newCfg);
-                                log.info("[MCP] server 工具已刷新: {}", serverName);
+                                reconnectServer(serverName);
+                                log.info("[MCP] server 已重连: {}", serverName);
                             }
                         } catch (Exception e) {
                             // 单个 server 失败，保留旧状态或部分结果，不影响整体
@@ -377,22 +362,7 @@ public class McpManager {
         return connected;
     }
 
-    /**
-     * 判断配置是否为 stdio 类型。
-     *
-     * stdio 类型的底层进程死亡后，StdioClientTransport 的 Reactor scheduler
-     * 会进入不可恢复状态（SinkManyUnicast 只允许一次 subscribe），
-     * 即使 initialize() 可能成功，后续 callTool() 仍会失败。
-     */
-    private static boolean isStdioType(MCPServerConfig cfg) {
-        if (cfg == null) return false;
-        String type = cfg.getType();
-        if (type != null && !type.isBlank()) {
-            return "stdio".equalsIgnoreCase(type.trim());
-        }
-        // 未指定 type 但有 command → 推断为 stdio
-        return cfg.getCommand() != null && !cfg.getCommand().isBlank();
-    }
+
 
     /**
      * 检查单个服务器是否已连接
@@ -439,12 +409,53 @@ public class McpManager {
                     return "服务器已禁用: " + serverName;
                 }
 
-                // 先移除旧连接
-                removeServer(serverName);
+                // 强制移除
+                ServerHandle handle = handles.remove(serverName);
+                // 获取旧的引用
+                if (handle != null) {
+                    List<Tool> tools = handle.registeredTools();
 
-                // 重新连接
-                connectOneServer(serverName, cfg);
+                    // 关闭
+                    try {
+                        handle.client().closeGracefully().subscribe();
+                    } catch (Exception e) {
+                        StringBuilder sb = new StringBuilder();
+                        sb.append("[MCP] 卸载服务失败: ")
+                                .append(serverName)
+                                .append("，原因：")
+                                .append(safeErrorMessage(e))
+                                .append("\n");
+                        log.error(sb.toString(), e);
+                    }
 
+                    // 重新获取连接
+                    McpAsyncClient client = createClient(cfg);
+                    client.initialize().block(Duration.ofSeconds(20));
+                    McpSchema.ListToolsResult toolsResult = client.listTools().block(Duration.ofSeconds(20));
+                    List<Tool> registered = buildWrappedTools(serverName, client, cfg, toolsResult);
+
+                    // 将新链接的client 替换老的工具引用的client，实现本轮次也能生效
+                    for (Tool tool : registered) {
+                        if (tool instanceof OfficialMcpToolWrapper newTool) {
+                            String name = tool.name();
+                            Tool oldTool = mcpTools.get(name);
+                            OfficialMcpToolWrapper old = (OfficialMcpToolWrapper) oldTool;
+                            McpAsyncClient newClient = newTool.getClient();
+                            // 实现本轮次也能生效
+                            old.setClient(newClient);
+
+                            mcpTools.unregister(name);
+                            // 保证下个轮次，引用的是新的工具
+                            mcpTools.register(tool);
+                        }
+                        else {
+                            mcpTools.unregister(tool.name());
+                            mcpTools.register(tool);
+                        }
+                    }
+                }else {
+                    connectOneServer(serverName, cfg);
+                }
                 log.info("[MCP] 重连服务器成功: {}", serverName);
                 return null;
 
@@ -464,7 +475,7 @@ public class McpManager {
                 unregisterTools(handle.registeredTools());
 
                 try {
-                    handle.client().closeGracefully().block(Duration.ofSeconds(5));
+                    handle.client().closeGracefully().subscribe();
                 } catch (Exception ignored) {
                 }
             }
@@ -494,68 +505,6 @@ public class McpManager {
     }
 
     /**
-     * 刷新单个 server
-     *
-     * 策略：
-     * - 已有 handle：复用 client，只更新工具集
-     * - 没有 handle：按首次连接处理
-     * - 复用失败（进程死亡/连接断开）：降级为完整重连
-     *
-     * 注意：stdio 类型 server 在底层进程死亡后，client 的 Reactor scheduler
-     * 会进入 Terminated 状态且不可恢复。此时必须先 removeServer 彻底清理，
-     * 再创建全新 client，不能仅尝试 initialize 恢复。
-     */
-    private void refreshOneServer(String serverName, MCPServerConfig cfg) {
-        ServerHandle oldHandle = handles.get(serverName);
-
-        if (oldHandle == null) {
-            connectOneServer(serverName, cfg);
-            return;
-        }
-
-        McpAsyncClient client = oldHandle.client();
-
-        try {
-            // 有些服务端会在连接长期空闲后失效，这里保险起见重新 initialize 一次
-            client.initialize().block(Duration.ofSeconds(20));
-            McpSchema.ListToolsResult toolsResult = client.listTools().block(Duration.ofSeconds(20));
-
-            List<Tool> newRegistered = buildWrappedTools(serverName, client, cfg, toolsResult);
-
-            // 先卸旧，再注新
-            unregisterTools(oldHandle.registeredTools());
-
-            for (Tool tool : newRegistered) {
-                mcpTools.register(tool);
-            }
-
-            handles.put(serverName, new ServerHandle(serverName, client, newRegistered, copyCfg(cfg)));
-        } catch (Exception e) {
-            log.warn("[MCP] 复用 client 刷新失败，降级为重连: {}, 原因: {}", serverName, e.getMessage());
-            // 关键：必须先完整移除旧 client（包括清理 Reactor scheduler），再创建新的
-            forceRemoveServer(serverName);
-            connectOneServer(serverName, cfg);
-        }
-    }
-
-    /**
-     * 卸载并关闭某个 server
-     */
-    private void removeServer(String serverName) {
-        ServerHandle handle = handles.remove(serverName);
-        if (handle == null) {
-            return;
-        }
-
-        unregisterTools(handle.registeredTools());
-
-        try {
-            handle.client().closeGracefully().block(Duration.ofSeconds(5));
-        } catch (Exception ignored) {
-        }
-    }
-
-    /**
      * 强制移除某个 server。
      *
      * 与 removeServer 的区别：
@@ -572,10 +521,17 @@ public class McpManager {
         unregisterTools(handle.registeredTools());
 
         // 直接关闭，不等优雅握手的超时
+
         try {
-            handle.client().close();
-        } catch (Exception ignored) {
-            // transport 可能已损坏，忽略
+            handle.client().closeGracefully().subscribe();
+        } catch (Exception e) {
+            StringBuilder sb = new StringBuilder();
+            sb.append("[MCP] 卸载服务失败: ")
+                    .append(serverName)
+                    .append("，原因：")
+                    .append(safeErrorMessage(e))
+                    .append("\n");
+            log.error(sb.toString(), e);
         }
     }
 
@@ -654,11 +610,9 @@ public class McpManager {
                     builder.env(cfg.getEnv());
                 }
 
-                return new IdempotentStdioTransport(
-                        new StdioClientTransport(
-                                builder.build(),
-                                createJsonMapper()
-                        )
+                return new StdioClientTransport(
+                        builder.build(),
+                        createJsonMapper()
                 );
             }
             case "sse" -> {

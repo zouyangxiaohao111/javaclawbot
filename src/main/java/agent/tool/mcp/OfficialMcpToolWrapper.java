@@ -3,6 +3,8 @@ package agent.tool.mcp;
 import agent.tool.Tool;
 import io.modelcontextprotocol.client.McpAsyncClient;
 import io.modelcontextprotocol.spec.McpSchema;
+import lombok.Getter;
+import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 
 import java.time.Duration;
@@ -26,7 +28,9 @@ public class OfficialMcpToolWrapper extends Tool {
     private final String exposedName;
     private final String description;
     private final Map<String, Object> parameters;
-    private final McpAsyncClient client;
+    @Setter
+    @Getter
+    private McpAsyncClient client;
     private final Duration timeout;
 
     public OfficialMcpToolWrapper(
