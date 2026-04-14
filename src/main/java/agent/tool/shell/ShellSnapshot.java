@@ -70,7 +70,7 @@ public final class ShellSnapshot {
                 pb.redirectErrorStream(true);
 
                 Process process = pb.start();
-                boolean finished = process.waitFor(10, TimeUnit.SECONDS);
+                boolean finished = process.waitFor(60, TimeUnit.SECONDS);
 
                 if (!finished) {
                     process.destroyForcibly();

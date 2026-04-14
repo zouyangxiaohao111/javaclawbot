@@ -378,7 +378,7 @@ public class ExecTool extends Tool {
      * Detect javac command and auto-inject -encoding UTF-8
      */
     private String injectJavacEncoding(String command) {
-        if (command.contains("javac") && !command.contains("-encoding")) {
+        if (!command.contains("javaclawbot") && command.contains("javac") && !command.contains("-encoding")) {
             return command.replaceFirst("(javac\\s*)", "$1-encoding UTF-8 ");
         }
         return command;
