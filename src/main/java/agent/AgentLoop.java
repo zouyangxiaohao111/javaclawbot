@@ -410,6 +410,9 @@ public class AgentLoop {
         if (currentConfig().getAgents().getDefaults().isDevelopment()) {
             sharedTools.register(new CliAgentTool(cliAgentHandler));
         }
+
+        // MCP 重载工具：按名称刷新指定 MCP server
+        sharedTools.register(new agent.tool.mcp.McpReloadTool(mcpManager));
     }
 
     private ToolsConfig currentTools() {
