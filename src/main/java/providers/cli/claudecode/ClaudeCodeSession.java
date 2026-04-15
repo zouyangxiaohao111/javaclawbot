@@ -252,7 +252,7 @@ public class ClaudeCodeSession implements CliAgentSession {
                 return List.of();
             }
 
-            log.debug("[ClaudeCode] Received event: type={}", type);
+            log.debug("[ClaudeCode] Received event: type={}, 原始json:{}", type, GsonFactory.getGson().toJson(raw));
 
             return switch (type) {
                 case "system" -> List.of(parseSystemEvent(raw));
