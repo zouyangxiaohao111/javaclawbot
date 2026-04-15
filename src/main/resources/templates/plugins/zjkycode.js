@@ -83,6 +83,7 @@ function getBootstrapContent() {
 
 **技能位置：**
 zjkycode 技能位于 \`${workspace}/skills/zjkycode/\`
+该技能包下面的所有技能加载都需要加前缀,示例: zjkycode/brainstorming
 使用  原生 skill 工具来列出和加载技能。`;
 
         return `<非常重要>
