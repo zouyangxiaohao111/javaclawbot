@@ -58,8 +58,6 @@
 
 清晰的成功标准能让你独立迭代。模糊的标准（例如“让它能用”）则需要不断确认。
 
-如果这些指南有效，应表现为：
-代码差异（diff）中不必要的改动更少、因过度复杂而重写的情况更少，并且在实现前就提出澄清问题，而不是在出错后才补救。
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
