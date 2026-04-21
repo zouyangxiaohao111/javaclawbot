@@ -341,11 +341,10 @@ public final class GrepTool extends Tool {
                 List<String> finalLines = new ArrayList<>();
                 for (String line : limited.items) {
                     // Lines have format: /absolute/path:line_content or /absolute/path:num:content
-                    int colonIndex = line.indexOf(':');
-                    if (colonIndex > 0) {
-                        String filePath = line.substring(0, colonIndex);
-                        String rest = line.substring(colonIndex);
-                        finalLines.add(toRelativePath(filePath) + rest);
+                    // Handle Windows paths like C:/path/file.java:10:content
+                    LineSplitResult split = splitGrepOutputLine(line);
+                    if (!split.rest.isEmpty()) {
+                        finalLines.add(toRelativePath(split.path) + split.rest);
                     } else {
                         finalLines.add(line);
                     }
@@ -485,7 +484,7 @@ public final class GrepTool extends Tool {
 
         // Build command: rg [args] [target]
         List<String> command = new ArrayList<>();
-        command.add(config.getCommand());
+        command.add(config.getExecutablePath().toString());
         command.addAll(args);
         command.add(target);
 
@@ -551,7 +550,7 @@ public final class GrepTool extends Tool {
         RipgrepConfig config = RipgrepConfig.getRipgrepConfig();
 
         List<String> command = new ArrayList<>();
-        command.add(config.getCommand());
+        command.add(config.getExecutablePath().toString());
         command.add("-j");
         command.add("1");
         command.addAll(args);
@@ -664,6 +663,50 @@ public final class GrepTool extends Tool {
         } catch (Exception ignored) {
         }
         return absolutePath;
+    }
+
+    /**
+     * Split ripgrep content output line into path and rest (line number + content).
+     * Handles Windows drive letters (e.g., C:/path/file.java:10:content).
+     * On Unix: splits at first colon (after /path/file.java)
+     * On Windows: splits at colon after filename (skipping drive letter colon)
+     */
+    private static LineSplitResult splitGrepOutputLine(String line) {
+        // Try to extract filename to find the correct colon position
+        int filenameColonIndex = -1;
+        try {
+            // Handle both Unix and Windows path separators
+            String normalized = line.replace('\\', '/');
+            int lastSlash = Math.max(normalized.lastIndexOf('/'), normalized.lastIndexOf(':'));
+            if (lastSlash >= 0 && lastSlash < line.length() - 1) {
+                String filename = line.substring(lastSlash + 1);
+                int colonAfterFilename = line.indexOf(':', lastSlash + 1);
+                if (colonAfterFilename > lastSlash) {
+                    filenameColonIndex = colonAfterFilename;
+                }
+            }
+        } catch (Exception ignored) {
+        }
+
+        if (filenameColonIndex > 0) {
+            return new LineSplitResult(line.substring(0, filenameColonIndex), line.substring(filenameColonIndex));
+        }
+
+        // Fallback: use first colon
+        int colonIndex = line.indexOf(':');
+        if (colonIndex > 0) {
+            return new LineSplitResult(line.substring(0, colonIndex), line.substring(colonIndex));
+        }
+        return new LineSplitResult(line, "");
+    }
+
+    private static class LineSplitResult {
+        final String path;
+        final String rest;
+        LineSplitResult(String path, String rest) {
+            this.path = path;
+            this.rest = rest;
+        }
     }
 
     private static String asString(Object o) {

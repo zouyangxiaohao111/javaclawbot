@@ -729,6 +729,16 @@ public class AgentLoop {
                 sessionKey,
                 () -> {
                     try {
+                        // 先处理系统命令（这些命令不需要上下文压缩检测）
+                        CompletionStage<OutboundMessage> commandResult = preprocessSystemCommand(msg);
+                        if (commandResult != null) {
+                            OutboundMessage resp = commandResult.toCompletableFuture().get();
+                            if (resp != null) {
+                                bus.publishOutbound(resp).toCompletableFuture().join();
+                            }
+                            return null;
+                        }
+
                         // 入口处检测是否需要上下文压缩
                         checkAndExecuteContextCompress(msg);
 
@@ -767,6 +777,88 @@ public class AgentLoop {
                 },
                 "dispatch"
         );
+    }
+
+    /**
+     * 预处理系统命令，在上下文压缩检测之前处理
+     * @return 如果是系统命令则返回处理结果，否则返回 null
+     */
+    private CompletionStage<OutboundMessage> preprocessSystemCommand(InboundMessage msg) {
+        if (msg.getContent() == null) {
+            return null;
+        }
+        String cmd = msg.getContent().trim().toLowerCase(Locale.ROOT);
+
+        // /new 和 /clear 需要特殊处理，因为 system_cmd 不包含 /new
+        if ("/new".equalsIgnoreCase(cmd) || "/clear".equalsIgnoreCase(cmd)) {
+            String sessionKey = msg.getSessionKey();
+            Session session = sessions.getOrCreate(sessionKey);
+            commandManager.addLocalCommand(new LocalCommand(cmd, "新会话已开始"));
+            sessions.createNew(session.getKey());
+            return CompletableFuture.completedFuture(new OutboundMessage(
+                    msg.getChannel(),
+                    msg.getChatId(),
+                    "新会话已开始。",
+                    List.of(),
+                    Map.of()
+            ));
+        }
+
+        if ("/context-press".equalsIgnoreCase(cmd)) {
+            String output = "上下文压缩命令已触发";
+            commandManager.addLocalCommand(new LocalCommand(cmd, output));
+            return handleContextPress(msg, sessions.getOrCreate(msg.getSessionKey()));
+        }
+
+        if ("/memory".equalsIgnoreCase(cmd)) {
+            String output = "记忆整理命令已触发";
+            commandManager.addLocalCommand(new LocalCommand(cmd, output));
+            return handleMemoryCommand(msg, sessions.getOrCreate(msg.getSessionKey()));
+        }
+
+        if ("/help".equalsIgnoreCase(cmd)) {
+            String output = "🐱 javaclawbot 命令:\n\n" +
+                    "对话管理:\n" +
+                    "  /new — 开始新对话\n" +
+                    "  /clear — 清空当前对话\n" +
+                    "  /memory — 整理当前对话记忆\n" +
+                    "  /stop — 停止当前任务\n" +
+                    "  /help — 显示可用命令\n\n" +
+                    "项目绑定:\n" +
+                    "  /bind <名称>=<路径> — 绑定项目\n" +
+                    "  /bind --main <路径> — 直接设为主代理项目\n" +
+                    "  /unbind <名称> — 解绑项目\n" +
+                    "  /projects — 列出所有项目\n\n" +
+                    "CLI Agent:\n" +
+                    "  /cc <项目> <提示词> — 使用 Claude Code\n" +
+                    "  /oc <项目> <提示词> — 使用 OpenCode\n" +
+                    "  /status [项目] — 查看状态\n" +
+                    "  /stop <项目> [类型] — 停止 Agent\n" +
+                    "  /stopall — 停止所有 CLI Agent";
+            commandManager.addLocalCommand(new LocalCommand(cmd, output));
+            return CompletableFuture.completedFuture(new OutboundMessage(
+                    msg.getChannel(),
+                    msg.getChatId(),
+                    output,
+                    List.of(),
+                    Map.of()
+            ));
+        }
+
+        if ("/mcp-reload".equalsIgnoreCase(cmd) || "/mcp-init".equalsIgnoreCase(cmd)) {
+            String cmdResp = mcpManager.refreshTools().toCompletableFuture().join();
+            String output = StrUtil.isBlank(cmdResp) ? "🐱 MCP 插件已重新加载。" : cmdResp;
+            commandManager.addLocalCommand(new LocalCommand(cmd, output));
+            return CompletableFuture.completedFuture(new OutboundMessage(
+                    msg.getChannel(),
+                    msg.getChatId(),
+                    output,
+                    List.of(),
+                    Map.of()
+            ));
+        }
+
+        return null;
     }
 
     public static Set<String> system_cmd = Set.of("/context-press", "/help", "/init", "/clear", "/memory", "/mcp-reload", "/mcp-init" );
@@ -876,6 +968,12 @@ public class AgentLoop {
             sess.setLastCallOutput(savedLastCallOutput);
             sess.setLastCallCacheRead(savedLastCallCacheRead);
             sess.setLastCallCacheWrite(savedLastCallCacheWrite);
+
+            // 重置 usageAcc（压缩的 usage 不应混入后续实际消息的 usage）
+            UsageAccumulator compressUsageAcc = usageTrackers.get(sessionKey);
+            if (compressUsageAcc != null) {
+                compressUsageAcc.reset();
+            }
         }
     }
 
@@ -930,74 +1028,6 @@ public class AgentLoop {
         clearStopRequested(sessionKey);
 
         Session session = sessions.getOrCreate(sessionKey);
-
-
-        if ("/new".equalsIgnoreCase(cmd) || "/clear".equalsIgnoreCase(cmd)) {
-            commandManager.addLocalCommand(new LocalCommand(cmd, "新会话已开始"));
-            //sessions.save(session);
-            Session newSession = sessions.createNew(session.getKey());
-            return CompletableFuture.completedFuture(new OutboundMessage(
-                    msg.getChannel(),
-                    msg.getChatId(),
-                    "新会话已开始。",
-                    List.of(),
-                    Map.of()
-            ));
-        }
-
-        if ("/context-press".equalsIgnoreCase(cmd)) {
-            String output = "上下文压缩命令已触发";
-            commandManager.addLocalCommand(new LocalCommand(cmd, output));
-            return handleContextPress(msg, session);
-        }
-        // 触发记忆命令
-        if ("/memory".equalsIgnoreCase(cmd)) {
-            String output = "记忆整理命令已触发";
-            commandManager.addLocalCommand(new LocalCommand(cmd, output));
-            return handleMemoryCommand(msg, session);
-        }
-
-        if ("/help".equalsIgnoreCase(cmd)) {
-            String output = "🐱 javaclawbot 命令:\n\n" +
-                    "对话管理:\n" +
-                    "  /new — 开始新对话\n" +
-                    "  /clear — 清空当前对话\n" +
-                    "  /memory — 整理当前对话记忆\n" +
-                    "  /stop — 停止当前任务\n" +
-                    "  /help — 显示可用命令\n\n" +
-                    "项目绑定:\n" +
-                    "  /bind <名称>=<路径> [--main] — 绑定项目\n" +
-                    "  /bind --main <路径> — 直接设为主代理项目\n" +
-                    "  /unbind <名称> — 解绑项目\n" +
-                    "  /projects — 列出所有项目\n\n" +
-                    "CLI Agent:\n" +
-                    "  /cc <项目> <提示词> — 使用 Claude Code\n" +
-                    "  /oc <项目> <提示词> — 使用 OpenCode\n" +
-                    "  /status [项目] — 查看状态\n" +
-                    "  /stop <项目> [类型] — 停止 Agent\n" +
-                    "  /stopall — 停止所有 CLI Agent";
-            commandManager.addLocalCommand(new LocalCommand(cmd, output));
-            return CompletableFuture.completedFuture(new OutboundMessage(
-                    msg.getChannel(),
-                    msg.getChatId(),
-                    output,
-                    List.of(),
-                    Map.of()
-            ));
-        }
-
-        if ("/mcp-reload".equalsIgnoreCase(cmd) || "/mcp-init".equalsIgnoreCase(cmd)) {
-            String cmdResp = mcpManager.refreshTools().toCompletableFuture().join();
-            String output = StrUtil.isBlank(cmdResp) ? "🐱 MCP 插件已重新加载。" : cmdResp;
-            commandManager.addLocalCommand(new LocalCommand(cmd, output));
-            return CompletableFuture.completedFuture(new OutboundMessage(
-                    msg.getChannel(),
-                    msg.getChatId(),
-                    output,
-                    List.of(),
-                    Map.of()
-            ));
-        }
 
         ToolView requestTools = buildRequestToolsAndSetContext(
                 sessionKey, msg.getChannel(),
@@ -1145,7 +1175,8 @@ public class AgentLoop {
         List<Map<String, Object>> messages = new ArrayList<>(initialMessages);
         List<String> toolsUsed = new ArrayList<>();
 
-        UsageAccumulator usageAcc = usageTrackers.computeIfAbsent(msg.getSessionKey(), k -> new UsageAccumulator());
+        Session sess = sessions.getOrCreate(msg.getSessionKey());
+        UsageAccumulator usageAcc = usageTrackers.computeIfAbsent(msg.getSessionKey(), k -> sess.obtainLastUsage());
 
         // 从配置创建 ContextPruningSettings
         ContextPruningSettings pruningSettings = createPruningSettings();
@@ -1241,21 +1272,7 @@ public class AgentLoop {
                             // 不修剪 skill 工具的结果，因为其中包含技能内容，裁剪后 LLM 不知道该技能
                             toolName -> !"skill".equalsIgnoreCase(toolName)
                     );
-                    int beforeChars = ContextPruner.estimateContextChars(messages);
-                    int afterChars = ContextPruner.estimateContextChars(prunedMessages);
-                    long beforeTokens = usageAcc.hasData() ? usageAcc.getContextSize() : (long)(beforeChars / ContextPruningSettings.CHARS_PER_TOKEN_ESTIMATE);
-                    long afterTokens = (long)(afterChars / ContextPruningSettings.CHARS_PER_TOKEN_ESTIMATE);
-                    String beforeStr = beforeTokens >= 1_000_000
-                            ? String.format("%.1fM", beforeTokens / 1_000_000.0)
-                            : beforeTokens >= 1_000
-                                    ? String.format("%.1fK", beforeTokens / 1_000.0)
-                                    : String.valueOf(beforeTokens);
-                    String afterStr = afterTokens >= 1_000_000
-                            ? String.format("%.1fM", afterTokens / 1_000_000.0)
-                            : afterTokens >= 1_000
-                                    ? String.format("%.1fK", afterTokens / 1_000.0)
-                                    : String.valueOf(afterTokens);
-                    log.info("上下文修剪：{} tokens -> {} tokens", beforeStr, afterStr);
+
                     messages.clear();
                     messages.addAll(prunedMessages);
                     // 修剪场景：过滤后替换 session 的消息列表

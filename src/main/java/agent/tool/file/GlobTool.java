@@ -303,7 +303,7 @@ public final class GlobTool extends Tool {
         RipgrepConfig config = RipgrepConfig.getRipgrepConfig();
 
         List<String> command = new ArrayList<>();
-        command.add(config.getCommand());
+        command.add(config.getExecutablePath().toString());
         command.addAll(args);
         command.add(target);
 

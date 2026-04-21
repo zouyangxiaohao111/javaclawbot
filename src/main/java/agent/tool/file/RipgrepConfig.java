@@ -14,6 +14,8 @@ import java.nio.file.Paths;
  * Modes:
  * - system: Use system ripgrep (rg) if available
  * - builtin: Use vendored ripgrep binary bundled with the application
+ *
+ * Vendored binary is extracted to ~/.javaclawbot/vendor/ripgrep/ for persistence.
  */
 public class RipgrepConfig {
 
@@ -25,6 +27,9 @@ public class RipgrepConfig {
     private final Mode mode;
     private final String command;
     private final Path binaryPath;
+
+    // Cached extracted binary path (persists across calls)
+    private static Path cachedBuiltinPath = null;
 
     public RipgrepConfig(Mode mode, String command, Path binaryPath) {
         this.mode = mode;
@@ -50,7 +55,7 @@ public class RipgrepConfig {
      *
      * Strategy:
      * 1. Try to find system ripgrep (rg) in PATH
-     * 2. If not found, use vendored ripgrep binary
+     * 2. If not found, use vendored ripgrep binary (extracted to ~/.javaclawbot/vendor/ripgrep/)
      */
     public static RipgrepConfig getRipgrepConfig() {
         // Try to find system ripgrep
@@ -63,7 +68,7 @@ public class RipgrepConfig {
         }
 
         // Fall back to vendored ripgrep
-        Path vendorPath = getVendoredRipgrepPath();
+        Path vendorPath = getOrExtractVendoredRipgrep();
         if (vendorPath != null && Files.exists(vendorPath)) {
             return new RipgrepConfig(Mode.BUILTIN, vendorPath.toString(), vendorPath);
         }
@@ -94,50 +99,115 @@ public class RipgrepConfig {
     }
 
     /**
-     * Get the path to vendored ripgrep binary.
-     * Returns null if no vendored ripgrep is available.
+     * Get platform string (darwin, win32, linux).
      */
-    private static Path getVendoredRipgrepPath() {
-        // Determine platform and architecture
+    private static String getPlatform() {
         String os = System.getProperty("os.name").toLowerCase();
-        String arch = System.getProperty("os.arch").toLowerCase();
-
-        String platform;
         if (os.contains("mac") || os.contains("darwin")) {
-            platform = "darwin";
+            return "darwin";
         } else if (os.contains("windows")) {
-            platform = "win32";
+            return "win32";
         } else if (os.contains("linux")) {
-            platform = "linux";
-        } else {
-            return null;
+            return "linux";
         }
-
-        String archDir;
-        if (arch.contains("aarch64") || arch.contains("arm64")) {
-            archDir = "arm64-" + platform;
-        } else {
-            archDir = "x64-" + platform;
-        }
-
-        // Check filesystem directly first (development mode: src/main/resources/vendor/ripgrep/)
-        Path devPath = Path.of("src/main/resources/vendor/ripgrep/" + archDir + "/rg");
-        if (Files.exists(devPath)) {
-            return devPath;
-        }
-
-        // Check compiled classes/resources (target/classes/vendor/ripgrep/)
-        Path classesPath = Path.of("target/classes/vendor/ripgrep/" + archDir + "/rg");
-        if (Files.exists(classesPath)) {
-            return classesPath;
-        }
-
         return null;
     }
 
     /**
+     * Get arch directory string (x64-darwin, arm64-darwin, x64-win32, etc.).
+     */
+    private static String getArchDir(String platform) {
+        String arch = System.getProperty("os.arch").toLowerCase();
+        if (arch.contains("aarch64") || arch.contains("arm64")) {
+            return "arm64-" + platform;
+        }
+        return "x64-" + platform;
+    }
+
+    /**
+     * Get the data directory path (~/.javaclawbot).
+     */
+    private static Path getDataPath() {
+        return Paths.get(System.getProperty("user.home"), ".javaclawbot");
+    }
+
+    /**
+     * Get the vendored ripgrep binary path, extracting from JAR if needed.
+     * The binary is extracted to ~/.javaclawbot/vendor/ripgrep/<arch>/rg (or rg.exe)
+     */
+    private static Path getOrExtractVendoredRipgrep() {
+        String platform = getPlatform();
+        if (platform == null) {
+            return null;
+        }
+
+        String archDir = getArchDir(platform);
+        String exeName = platform.equals("win32") ? "rg.exe" : "rg";
+
+        // Return cached path if already extracted
+        if (cachedBuiltinPath != null && Files.exists(cachedBuiltinPath)) {
+            return cachedBuiltinPath;
+        }
+
+        // Check development mode paths first
+        Path devPath = Path.of("src/main/resources/vendor/ripgrep/" + archDir + "/" + exeName);
+        if (Files.exists(devPath)) {
+            cachedBuiltinPath = devPath;
+            return devPath;
+        }
+
+        // Target classes path (when running from IDE)
+        Path classesPath = Path.of("target/classes/vendor/ripgrep/" + archDir + "/" + exeName);
+        if (Files.exists(classesPath)) {
+            cachedBuiltinPath = classesPath;
+            return classesPath;
+        }
+
+        // Extract from JAR to ~/.javaclawbot/vendor/ripgrep/
+        try {
+            cachedBuiltinPath = extractVendoredRipgrep(platform, archDir, exeName);
+            return cachedBuiltinPath;
+        } catch (IOException e) {
+            System.err.println("Failed to extract vendored ripgrep: " + e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Extract vendored ripgrep binary from JAR to ~/.javaclawbot/vendor/ripgrep/
+     */
+    private static Path extractVendoredRipgrep(String platform, String archDir, String exeName) throws IOException {
+        String resourcePath = "/vendor/ripgrep/" + archDir + "/" + exeName;
+
+        // Create vendor directory: ~/.javaclawbot/vendor/ripgrep/<arch>/
+        Path vendorDir = getDataPath().resolve("vendor").resolve("ripgrep").resolve(archDir);
+        Files.createDirectories(vendorDir);
+
+        Path targetPath = vendorDir.resolve(exeName);
+
+        // Copy resource to target path
+        try (InputStream is = RipgrepConfig.class.getResourceAsStream(resourcePath)) {
+            if (is == null) {
+                throw new IOException("Vendored ripgrep not found in classpath: " + resourcePath);
+            }
+            try (OutputStream os = Files.newOutputStream(targetPath)) {
+                byte[] buffer = new byte[8192];
+                int bytesRead;
+                while ((bytesRead = is.read(buffer)) != -1) {
+                    os.write(buffer, 0, bytesRead);
+                }
+            }
+        }
+
+        // Make executable (not needed on Windows but doesn't hurt)
+        targetPath.toFile().setExecutable(true, false);
+
+        return targetPath;
+    }
+
+    /**
      * Get the resolved ripgrep binary path for execution.
-     * For BUILTIN mode, this extracts the resource to a temp file if running from jar.
+     * For BUILTIN mode, this returns the extracted binary path.
      */
     public Path getExecutablePath() throws IOException {
         if (mode == Mode.SYSTEM) {
@@ -148,68 +218,11 @@ public class RipgrepConfig {
             return Path.of(command);
         }
 
-        // If binaryPath is an absolute path and exists, use it directly
-        if (binaryPath.isAbsolute() && Files.exists(binaryPath)) {
+        // If binaryPath exists, use it
+        if (Files.exists(binaryPath)) {
             return binaryPath;
         }
 
-        // If binaryPath exists and is executable, use it
-        if (Files.exists(binaryPath) && Files.isExecutable(binaryPath)) {
-            return binaryPath;
-        }
-
-        // Need to extract from classpath to temp file
-        return extractToTempFile();
-    }
-
-    /**
-     * Extract vendored ripgrep binary to a temp file.
-     */
-    private Path extractToTempFile() throws IOException {
-        String os = System.getProperty("os.name").toLowerCase();
-        String arch = System.getProperty("os.arch").toLowerCase();
-
-        String platform;
-        if (os.contains("mac") || os.contains("darwin")) {
-            platform = "darwin";
-        } else if (os.contains("windows")) {
-            platform = "win32";
-        } else if (os.contains("linux")) {
-            platform = "linux";
-        } else {
-            throw new IOException("Unsupported platform: " + os);
-        }
-
-        String archDir;
-        if (arch.contains("aarch64") || arch.contains("arm64")) {
-            archDir = "arm64-" + platform;
-        } else {
-            archDir = "x64-" + platform;
-        }
-
-        String resourcePath = "/vendor/ripgrep/" + archDir + "/rg";
-        String exeName = platform.equals("win32") ? "rg.exe" : "rg";
-
-        // Create temp directory for the binary
-        Path tempDir = Files.createTempDirectory("javaclawbot-rg");
-        Path tempBin = tempDir.resolve(exeName);
-
-        try (InputStream is = RipgrepConfig.class.getResourceAsStream(resourcePath)) {
-            if (is == null) {
-                throw new IOException("Vendored ripgrep not found in classpath: " + resourcePath);
-            }
-            try (OutputStream os2 = Files.newOutputStream(tempBin)) {
-                byte[] buffer = new byte[8192];
-                int bytesRead;
-                while ((bytesRead = is.read(buffer)) != -1) {
-                    os2.write(buffer, 0, bytesRead);
-                }
-            }
-        }
-
-        // Make executable
-        tempBin.toFile().setExecutable(true, false);
-
-        return tempBin;
+        throw new IOException("Ripgrep binary not found: " + binaryPath);
     }
 }
