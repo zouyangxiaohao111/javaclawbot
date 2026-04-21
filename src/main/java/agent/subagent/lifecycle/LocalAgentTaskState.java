@@ -141,11 +141,15 @@ public class LocalAgentTaskState extends TaskState {
     public Object getResult() { return result; }
     public ProgressTracker getProgressTracker() { return progressTracker; }
     public List<Object> getMessages() { return messages; }
+    public void setMessages(List<Object> messages) { this.messages = messages; }
     public boolean isRetrieved() { return retrieved; }
     public int getLastReportedToolCount() { return lastReportedToolCount; }
     public int getLastReportedTokenCount() { return lastReportedTokenCount; }
     public boolean isBackgrounded() { return isBackgrounded; }
     public List<String> getPendingMessages() { return pendingMessages; }
+    public void setPendingMessages(List<String> messages) {
+        this.pendingMessages = new CopyOnWriteArrayList<>(messages);
+    }
     public boolean isRetain() { return retain; }
     public boolean isDiskLoaded() { return diskLoaded; }
     public Long getEvictAfter() { return evictAfter; }
