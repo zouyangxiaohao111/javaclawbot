@@ -45,12 +45,34 @@ public final class Helpers {
     }
 
     private static final Pattern THINK_BLOCK = Pattern.compile("\\<think\\>.*?\\<\\/think\\>", Pattern.DOTALL);
+    private static final Pattern THINKING_BLOCK = Pattern.compile("\\<thinking\\>.*?\\<\\/thinking\\>", Pattern.DOTALL);
 
 
     public static String stripThink(String text) {
         if (text == null || text.isBlank()) return null;
         String cleaned = THINK_BLOCK.matcher(text).replaceAll("").trim();
-        return cleaned.isBlank() ? null : cleaned;
+        String thinkCleaned = THINKING_BLOCK.matcher(text).replaceAll("").trim();
+        return cleaned.isBlank() ? thinkCleaned.isBlank()? null : thinkCleaned : cleaned;
+    }
+
+    /**
+     * 获取思考区块 -> <think></think>
+     * @param text
+     * @return
+     */
+    public static String obtainThinkBlock(String text) {
+        if (text == null || text.isBlank()) return null;
+        // 优先尝试 <think> 标签
+        var thinkMatcher = THINK_BLOCK.matcher(text);
+        if (thinkMatcher.find()) {
+            return thinkMatcher.group().replaceAll("\\<think\\>|\\</think\\>", "").trim();
+        }
+        // 其次尝试 <thinking> 标签
+        var thinkingMatcher = THINKING_BLOCK.matcher(text);
+        if (thinkingMatcher.find()) {
+            return thinkingMatcher.group().replaceAll("\\<thinking\\>|\\</thinking\\>", "").trim();
+        }
+        return null;
     }
 
     public static String toolHint(List<ToolCallRequest> toolCalls) {
