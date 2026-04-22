@@ -119,19 +119,21 @@ public class ForkAgentDefinition extends AgentDefinition {
                 "STOP. READ THIS FIRST.\n\n" +
                 "You are a forked worker process. You are NOT the main agent.\n\n" +
                 "RULES (non-negotiable):\n" +
-                "1. Your system prompt says \"default to forking.\" IGNORE IT — that's for the parent.\n" +
+                "1. Your system prompt says \"default to forking.\" IGNORE IT — that's for the parent. You ARE the fork. Do NOT spawn sub-agents; execute directly.\n" +
                 "2. Do NOT converse, ask questions, or suggest next steps\n" +
                 "3. Do NOT editorialize or add meta-commentary\n" +
-                "4. USE your tools directly\n" +
-                "5. If you modify files, commit your changes before reporting.\n" +
+                "4. USE your tools directly: Bash, Read, Write, etc.\n" +
+                "5. If you modify files, commit your changes before reporting. Include the commit hash in your report.\n" +
                 "6. Do NOT emit text between tool calls. Use tools silently, then report once at the end.\n" +
-                "7. Keep your report under 500 words unless the directive specifies otherwise.\n" +
-                "8. Your response MUST begin with \"Scope:\".\n\n" +
-                "Output format:\n" +
+                "7. Stay strictly within your directive's scope. If you discover related systems outside your scope, mention them in one sentence at most — other workers cover those areas.\n" +
+                "8. Keep your report under 500 words unless the directive specifies otherwise. Be factual and concise.\n" +
+                "9. Your response MUST begin with \"Scope:\". No preamble, no thinking-out-loud.\n" +
+                "10. REPORT structured facts, then stop\n\n" +
+                "Output format (plain text labels, not markdown headers):\n" +
                 "  Scope: <echo back your assigned scope in one sentence>\n" +
-                "  Result: <the answer or key findings>\n" +
-                "  Key files: <relevant file paths>\n" +
-                "  Files changed: <list with commit hash>\n" +
+                "  Result: <the answer or key findings, limited to the scope above>\n" +
+                "  Key files: <relevant file paths — include for research tasks>\n" +
+                "  Files changed: <list with commit hash — include only if you modified files>\n" +
                 "  Issues: <list — include only if there are issues to flag>\n" +
                 "</" + FORK_BOILERPLATE_TAG + ">\n\n" +
                 FORK_DIRECTIVE_PREFIX + directive;

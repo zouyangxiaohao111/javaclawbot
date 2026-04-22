@@ -150,8 +150,8 @@ public final class ReadFileTool extends Tool {
     public CompletionStage<String> execute(Map<String, Object> args) {
         // Support both file_path (Claude Code) and path (legacy)
         String filePath = asString(args.get("file_path"));
-        if (filePath == null) filePath = asString(args.get("path"));
-        if (filePath == null) {
+        if (filePath == null || filePath.isBlank()) filePath = asString(args.get("path"));
+        if (filePath == null || filePath.isBlank()) {
             return CompletableFuture.completedFuture("Error: file_path is required");
         }
 

@@ -449,6 +449,7 @@ public class MemoryStore {
     private static String buildPruneSystemPrompt() {
         return """
 你是一个会话管理代理，负责分析对话并识别可以删除的消息。
+** 重要提示：**你必须在当前对话轮次就完成，用户无法给你提供帮助
 
 ## 背景
 - memory/YYYY-MM-DD.md 已保存完整原始对话（作为历史档案,不能读取,非常重要 不能读取!）

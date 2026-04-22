@@ -344,7 +344,9 @@ public final class ModelFallbackManager {
                     }
 
                     LLMProvider provider = ProviderFactory.createProviderWithConfig(
-                            targetProvider, apiKey, apiBase, targetModel
+                            targetProvider, apiKey, apiBase, targetModel,
+                            config.getAgents() != null && config.getAgents().getDefaults() != null
+                                    ? config.getAgents().getDefaults().getTimeoutSeconds() : 120
                     );
 
                     fallbacks.add(new NamedProvider(targetProvider, targetModel, provider));

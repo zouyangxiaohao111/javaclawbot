@@ -47,6 +47,11 @@ public class AgentDefaults {
      */
     private double softTrimThreshold = 0.7;
 
+    /**
+     * HTTP 请求超时秒数（默认120秒）
+     */
+    private int timeoutSeconds = 120;
+
     private String reasoningEffort = null;
 
 

@@ -878,6 +878,12 @@ public class AgentLoop {
         Session session = sessions.getOrCreate(sessionKey);
         List<Map<String, Object>> history = session.getHistory();
 
+        // 如果 lastCall 为 0（刚完成压缩或首次对话），跳过检测
+        if (session.getLastCallInput() == 0 && session.getLastCallOutput() == 0
+                && session.getLastCallCacheRead() == 0 && session.getLastCallCacheWrite() == 0) {
+            return;
+        }
+
         // 使用 Session 中持久化的 usage 数据计算上下文比例
         // 注意：usageAcc 是内存中的，重启后为空，所以直接使用 session 的 usage 数据
         double threshold = currentConsolidateThreshold();
@@ -927,12 +933,7 @@ public class AgentLoop {
         var sessionKey = message.getSessionKey();
         var chatId = message.getChatId();
 
-        // 保存当前 lastCall（压缩的 usage 不应覆盖原本消息的 usage）
         Session sess = sessions.getOrCreate(sessionKey);
-        int savedLastCallInput = sess.getLastCallInput();
-        int savedLastCallOutput = sess.getLastCallOutput();
-        int savedLastCallCacheRead = sess.getLastCallCacheRead();
-        int savedLastCallCacheWrite = sess.getLastCallCacheWrite();
 
         try {
             // 构建压缩消息系统提示词
@@ -963,11 +964,12 @@ public class AgentLoop {
                     )
             ), false).toCompletableFuture().join();
         } finally {
-            // 恢复原本的 lastCall（压缩的 usage 不计入 session 的 lastCall）
-            sess.setLastCallInput(savedLastCallInput);
-            sess.setLastCallOutput(savedLastCallOutput);
-            sess.setLastCallCacheRead(savedLastCallCacheRead);
-            sess.setLastCallCacheWrite(savedLastCallCacheWrite);
+            // 压缩后重置 usage（消息已被修剪，上下文大小已改变）
+            // 重置后，下一次计算上下文比例时会用字符估算来反映实际的压缩后大小
+            sess.setLastCallInput(0);
+            sess.setLastCallOutput(0);
+            sess.setLastCallCacheRead(0);
+            sess.setLastCallCacheWrite(0);
 
             // 重置 usageAcc（压缩的 usage 不应混入后续实际消息的 usage）
             UsageAccumulator compressUsageAcc = usageTrackers.get(sessionKey);
@@ -1265,7 +1267,8 @@ public class AgentLoop {
                         String.format("%.1f", softTrimThreshold * 100), softThresholdStr);
 
                 // 执行上下文修剪（软裁剪，只裁剪过大的内容）
-                if (isContextPress && (contextRatio > consolidateThreshold || contextRatio > softTrimThreshold )) {
+                // 如果 usageAcc 没有数据（刚完成压缩），跳过软修剪
+                if (isContextPress && usageAcc.hasData() && (contextRatio > consolidateThreshold || contextRatio > softTrimThreshold )) {
                     var session = sessions.getOrCreate(msg.getSessionKey());
                     List<Map<String, Object>> prunedMessages = ContextPruner.pruneContextMessages(
                             messages, consolidateThreshold,  currentSoftTrimThreshold(), pruningSettings, contextWindow,

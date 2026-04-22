@@ -122,8 +122,8 @@ public class SkillTool extends Tool {
         }
 
         if (commandQueueManager.isLoaded(name)) {
-            log.info("技能已加载，跳过重复加载: {}", name);
-            return CompletableFuture.completedFuture("技能已加载, 请勿重复加载, 请查看上下文,帮助用户说明如何使用技能");
+            log.info("技能已加载，跳过重复加载，提醒AI需要使用reload工具强制加载，当前技能: {}", name);
+            return CompletableFuture.completedFuture("技能已加载, 请勿重复加载, 请查看上下文,帮助用户说明如何使用技能，如果需要强制加载，请使用 reload 工具");
         }
 
         log.info("加载技能: {}", name);

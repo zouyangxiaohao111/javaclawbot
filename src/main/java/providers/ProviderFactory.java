@@ -2,6 +2,7 @@ package providers;
 
 import config.Config;
 import config.ConfigSchema;
+import config.agent.AgentDefaults;
 import config.provider.ProviderConfig;
 
 import java.util.Objects;
@@ -36,10 +37,21 @@ public final class ProviderFactory {
         String apiKey = providerConfig != null ? providerConfig.getApiKey() : null;
         String apiBase = providerConfig != null ? providerConfig.getApiBase() : null;
 
+        // 获取超时配置（从 AgentDefaults）
+        int timeoutSeconds = getTimeoutSeconds(config);
+
         // 解析实际的 provider 名称
         String resolvedName = resolveProviderName(config, providerName, model);
 
-        return createProviderWithConfig(resolvedName, apiKey, apiBase, model);
+        return createProviderWithConfig(resolvedName, apiKey, apiBase, model, timeoutSeconds);
+    }
+
+    /**
+     * 获取超时秒数配置
+     */
+    private static int getTimeoutSeconds(Config config) {
+        AgentDefaults defaults = config.getAgents() != null ? config.getAgents().getDefaults() : null;
+        return defaults != null ? defaults.getTimeoutSeconds() : 120;
     }
 
     /**
@@ -49,9 +61,10 @@ public final class ProviderFactory {
      * @param apiKey       API Key（可为 null）
      * @param apiBase      API Base URL（可为 null）
      * @param model        模型名称
+     * @param timeoutSeconds 超时秒数
      * @return LLMProvider 实例
      */
-    public static LLMProvider createProviderWithConfig(String providerName, String apiKey, String apiBase, String model) {
+    public static LLMProvider createProviderWithConfig(String providerName, String apiKey, String apiBase, String model, int timeoutSeconds) {
         Objects.requireNonNull(providerName, "providerName");
         Objects.requireNonNull(model, "model");
 
@@ -59,7 +72,7 @@ public final class ProviderFactory {
         if ("custom".equals(providerName)) {
             if (apiBase == null || apiBase.isBlank()) apiBase = "http://localhost:8000/v1";
             if (apiKey == null || apiKey.isBlank()) apiKey = "no-key";
-            return new CustomProvider(apiKey, apiBase, model);
+            return new CustomProvider(apiKey, apiBase, model, timeoutSeconds);
         }
 
         // azure_openai：Azure OpenAI 直连
@@ -89,7 +102,7 @@ public final class ProviderFactory {
             apiKey = "no-key";
         }
 
-        return new CustomProvider(apiKey, apiBase, model);
+        return new CustomProvider(apiKey, apiBase, model, timeoutSeconds);
     }
 
     /**

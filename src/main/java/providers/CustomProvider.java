@@ -27,14 +27,19 @@ public final class CustomProvider extends LLMProvider {
     private final ObjectMapper objectMapper;
 
     public CustomProvider(String apiKey, String apiBase, String defaultModel) {
+        this(apiKey, apiBase, defaultModel, 120);
+    }
+
+    public CustomProvider(String apiKey, String apiBase, String defaultModel, int timeoutSeconds) {
         super(
                 (apiKey == null || apiKey.isBlank()) ? "no-key" : apiKey,
                 (apiBase == null || apiBase.isBlank()) ? "http://localhost:8000/v1" : apiBase
         );
         this.defaultModel = (defaultModel == null || defaultModel.isBlank()) ? "default" : defaultModel;
 
+        int timeout = timeoutSeconds > 0 ? timeoutSeconds : 120;
         this.httpClient = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(20))
+                .connectTimeout(Duration.ofSeconds(timeout))
                 .build();
 
         this.objectMapper = new ObjectMapper();

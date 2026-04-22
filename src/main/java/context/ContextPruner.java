@@ -69,15 +69,10 @@ public class ContextPruner {
             isToolPrunable = toolName -> true; // 默认所有工具都可修剪
         }
 
-        // 计算当前上下文大小
+        // 计算当前字符大小
         int totalCharsBefore = estimateContextChars(messages);
         int totalChars = totalCharsBefore;
         double ratio = (double) totalChars / charWindow;
-
-        // 如果低于软修剪阈值，不需要修剪
-        if (ratio < softTrimRatio) {
-            return new ArrayList<>(messages);
-        }
 
         // 收集可修剪的工具结果索引
         List<Integer> prunableToolIndexes = new ArrayList<>();
@@ -116,8 +111,8 @@ public class ContextPruner {
             log.debug("裁剪当前轮次工具：{} 个", prunedCurrentTurn);
         }
 
-        log.debug("上下文修剪完成：{} 条消息，修剪了 {} 个工具结果", 
-                result.size(), prunableToolIndexes.size());
+        log.debug("上下文修剪完成：{} 条消息，修剪了 {} 个工具结果, 修剪前后字符数量：{} -> {} ",
+                result.size(), prunableToolIndexes.size(), totalCharsBefore, totalChars);
 
         return result;
     }
@@ -148,7 +143,7 @@ public class ContextPruner {
 
         String trimmed = head + "\n...\n" + tail;
         String note = String.format(
-                "\n\n[Tool result trimmed: kept first %d chars and last %d chars of %d chars.if you need,please read raw memory: {workspace}/memory/yyyy-MM-dd.md]",
+                "\n\n[Tool result trimmed: kept first %d chars and last %d chars of %d chars.if you need,can Reread or read memory or read raw session: {workspace}/memory/yyyy-MM-dd.md](File too large)",
                 headChars, tailChars, contentStr.length());
 
         Map<String, Object> result = new LinkedHashMap<>(msg);
