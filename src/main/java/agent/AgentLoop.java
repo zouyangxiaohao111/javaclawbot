@@ -449,6 +449,9 @@ public class AgentLoop {
             sharedTools.register(new CliAgentTool(cliAgentHandler));
         }
 
+        // Subagent 工具（AgentTool - 新系统）
+        sharedTools.register(new agent.subagent.execution.AgentTool());
+
         // MCP 重载工具：按名称刷新指定 MCP server
         sharedTools.register(new agent.tool.mcp.McpReloadTool(mcpManager));
     }
