@@ -43,7 +43,7 @@ public class TaskUtils {
 
         StringBuilder id = new StringBuilder(prefix);
         for (int i = 0; i < 8; i++) {
-            id.append(TASK_ID_ALPHABET.charAt(bytes[i] & 0xFF % TASK_ID_ALPHABET.length()));
+            id.append(TASK_ID_ALPHABET.charAt((bytes[i] & 0xFF) % TASK_ID_ALPHABET.length()));
         }
         return id.toString();
     }
