@@ -2,6 +2,7 @@ package agent.subagent.types;
 
 import java.nio.file.Path;
 import java.security.SecureRandom;
+import java.time.Instant;
 
 /**
  * 任务工具类
@@ -79,9 +80,9 @@ public class TaskUtils {
             this.status = TaskStatus.PENDING;
             this.description = description;
             this.toolUseId = toolUseId;
-            this.startTime = System.currentTimeMillis();
+            this.startTime = Instant.now();
             this.outputFile = outputFile;
-            this.outputOffset = 0;
+            this.outputOffset = 0L;
             this.notified = false;
         }
     }

@@ -138,7 +138,7 @@ public class TaskRegistry {
     public void markCompleted(String taskId) {
         update(taskId, task -> {
             task.setStatus(TaskStatus.COMPLETED);
-            task.setEndTime(Instant.now().toEpochMilli());
+            task.setEndTime(Instant.now());
         });
         notifyObservers(tasks.get(taskId), TaskEvent.COMPLETED);
     }
@@ -149,7 +149,7 @@ public class TaskRegistry {
     public void markFailed(String taskId, String error) {
         update(taskId, task -> {
             task.setStatus(TaskStatus.FAILED);
-            task.setEndTime(Instant.now().toEpochMilli());
+            task.setEndTime(Instant.now());
             if (task instanceof LocalAgentTaskState) {
                 ((LocalAgentTaskState) task).setError(error);
             }
@@ -163,7 +163,7 @@ public class TaskRegistry {
     public void markKilled(String taskId) {
         update(taskId, task -> {
             task.setStatus(TaskStatus.KILLED);
-            task.setEndTime(Instant.now().toEpochMilli());
+            task.setEndTime(Instant.now());
             if (task instanceof LocalAgentTaskState) {
                 ((LocalAgentTaskState) task).markKilled();
             }
@@ -205,11 +205,11 @@ public class TaskRegistry {
      * 清理已完成的任务
      */
     public int cleanupCompleted(long maxAgeMs) {
-        long cutoff = Instant.now().toEpochMilli() - maxAgeMs;
+        Instant cutoff = Instant.now().minusMillis(maxAgeMs);
         List<String> toRemove = new ArrayList<>();
 
         tasks.forEach((id, task) -> {
-            if (task.isTerminal() && task.getEndTime() > 0 && task.getEndTime() < cutoff) {
+            if (task.isTerminal() && task.getEndTime() != null && task.getEndTime().isBefore(cutoff)) {
                 toRemove.add(id);
             }
         });

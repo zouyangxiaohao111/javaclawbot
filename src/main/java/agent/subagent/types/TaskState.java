@@ -4,16 +4,16 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 import java.time.Instant;
 
 public abstract class TaskState {
-    private String id;
-    private TaskType type;
-    private TaskStatus status;
-    private String description;
-    private String toolUseId;
-    private Instant startTime;
-    private Instant endTime;
-    private String outputFile;
-    private Long outputOffset;
-    private boolean notified;
+    protected String id;
+    protected TaskType type;
+    protected TaskStatus status;
+    protected String description;
+    protected String toolUseId;
+    protected Instant startTime;
+    protected Instant endTime;
+    protected String outputFile;
+    protected Long outputOffset;
+    protected boolean notified;
 
     public String getId() {
         return id;

@@ -5,6 +5,7 @@ import agent.subagent.types.TaskType;
 import agent.subagent.types.TaskStatus;
 import agent.subagent.framework.ProgressTracker;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -121,7 +122,7 @@ public class LocalAgentTaskState extends TaskState {
         state.toolUseId = toolUseId;
         state.prompt = prompt;
         state.agentType = agentType;
-        state.startTime = System.currentTimeMillis();
+        state.startTime = Instant.now();
         state.outputFile = getTaskOutputPath(id);
         return state;
     }
@@ -193,7 +194,7 @@ public class LocalAgentTaskState extends TaskState {
      */
     public void markStarted() {
         this.status = TaskStatus.RUNNING;
-        this.startTime = System.currentTimeMillis();
+        this.startTime = Instant.now();
     }
 
     /**
@@ -201,7 +202,7 @@ public class LocalAgentTaskState extends TaskState {
      */
     public void markCompleted(Object result) {
         this.status = TaskStatus.COMPLETED;
-        this.endTime = System.currentTimeMillis();
+        this.endTime = Instant.now();
         this.result = result;
     }
 
@@ -210,7 +211,7 @@ public class LocalAgentTaskState extends TaskState {
      */
     public void markFailed(String error) {
         this.status = TaskStatus.FAILED;
-        this.endTime = System.currentTimeMillis();
+        this.endTime = Instant.now();
         this.error = error;
     }
 
@@ -219,7 +220,7 @@ public class LocalAgentTaskState extends TaskState {
      */
     public void markKilled() {
         this.status = TaskStatus.KILLED;
-        this.endTime = System.currentTimeMillis();
+        this.endTime = Instant.now();
         if (this.abortController != null) {
             this.abortController.set(true);
         }
