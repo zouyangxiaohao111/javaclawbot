@@ -69,6 +69,22 @@ public class AgentDefinition {
     public boolean isReadOnly() { return readOnly; }
     public boolean isOmitClaudeMd() { return omitClaudeMd; }
 
+    // Setters for builder pattern
+    public void setAgentType(String agentType) { this.agentType = agentType; }
+    public void setWhenToUse(String whenToUse) { this.whenToUse = whenToUse; }
+    public void setTools(List<String> tools) { this.tools = tools; }
+    public void setDisallowedTools(List<String> disallowedTools) { this.disallowedTools = disallowedTools; }
+    public void setModel(String model) { this.model = model; }
+    public void setPermissionMode(PermissionMode permissionMode) { this.permissionMode = permissionMode; }
+    public void setMaxTurns(int maxTurns) { this.maxTurns = maxTurns; }
+    public void setBackground(boolean background) { this.background = background; }
+    public void setIsolation(Isolation isolation) { this.isolation = isolation; }
+    public void setGetSystemPrompt(Supplier<String> getSystemPrompt) { this.getSystemPrompt = getSystemPrompt; }
+    public void setSource(String source) { this.source = source; }
+    public void setBaseDir(String baseDir) { this.baseDir = baseDir; }
+    public void setReadOnly(boolean readOnly) { this.readOnly = readOnly; }
+    public void setOmitClaudeMd(boolean omitClaudeMd) { this.omitClaudeMd = omitClaudeMd; }
+
     /**
      * 判断是否为内置代理
      */
