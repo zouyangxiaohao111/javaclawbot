@@ -11,6 +11,9 @@ import javafx.scene.layout.VBox;
 
 public class CronPage extends VBox {
 
+    private VBox taskList;
+    private gui.ui.BackendBridge backendBridge;
+
     public CronPage() {
         setSpacing(0);
         setStyle("-fx-background-color: #f1ede1;");
@@ -33,7 +36,7 @@ public class CronPage extends VBox {
         titleBox.setAlignment(Pos.CENTER);
         titleBox.getChildren().addAll(title, subtitle);
 
-        VBox taskList = new VBox(12);
+        taskList = new VBox(12);
         taskList.setMaxWidth(800);
 
         String[][] tasks = {
@@ -108,5 +111,36 @@ public class CronPage extends VBox {
 
         card.getChildren().addAll(header, separator, footer);
         return card;
+    }
+
+    public void setBackendBridge(gui.ui.BackendBridge bridge) {
+        this.backendBridge = bridge;
+        refresh();
+    }
+
+    private void refresh() {
+        if (backendBridge == null) return;
+        taskList.getChildren().clear();
+
+        java.util.List<corn.CronJob> jobs = backendBridge.getCronService().listJobs(false);
+        for (corn.CronJob job : jobs) {
+            String expr = job.getSchedule().getExpr();
+            if (expr == null) {
+                corn.CronSchedule.Kind kind = job.getSchedule().getKind();
+                if (kind == corn.CronSchedule.Kind.every && job.getSchedule().getEveryMs() != null) {
+                    expr = "每 " + (job.getSchedule().getEveryMs() / 1000) + " 秒";
+                } else if (kind == corn.CronSchedule.Kind.at && job.getSchedule().getAtMs() != null) {
+                    expr = "@ " + java.time.Instant.ofEpochMilli(job.getSchedule().getAtMs()).toString();
+                } else {
+                    expr = String.valueOf(kind);
+                }
+            }
+            String status = job.isEnabled() ? "运行中" : "已暂停";
+            taskList.getChildren().add(createTaskCard(
+                job.getName() != null ? job.getName() : job.getId(),
+                job.getId(),
+                expr,
+                status));
+        }
     }
 }

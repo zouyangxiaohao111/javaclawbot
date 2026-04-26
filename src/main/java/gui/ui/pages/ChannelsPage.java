@@ -10,6 +10,9 @@ import javafx.scene.layout.VBox;
 
 public class ChannelsPage extends VBox {
 
+    private VBox channelList;
+    private gui.ui.BackendBridge backendBridge;
+
     public ChannelsPage() {
         setSpacing(0);
         setStyle("-fx-background-color: #f1ede1;");
@@ -32,7 +35,7 @@ public class ChannelsPage extends VBox {
         titleBox.setAlignment(Pos.CENTER);
         titleBox.getChildren().addAll(title, subtitle);
 
-        VBox channelList = new VBox(12);
+        channelList = new VBox(12);
         channelList.setMaxWidth(800);
 
         String[][] channels = {
@@ -78,5 +81,30 @@ public class ChannelsPage extends VBox {
 
         card.getChildren().add(header);
         return card;
+    }
+
+    public void setBackendBridge(gui.ui.BackendBridge bridge) {
+        this.backendBridge = bridge;
+        refresh();
+    }
+
+    private void refresh() {
+        if (backendBridge == null) return;
+        channelList.getChildren().clear();
+
+        config.channel.ChannelsConfig ch = backendBridge.getConfig().getChannels();
+        addChannelCard(channelList, "\uD83D\uDCF1", "Telegram",
+            ch.getTelegram().getToken(), backendBridge.getConfig());
+        addChannelCard(channelList, "\uD83D\uDCAC", "飞书",
+            ch.getFeishu().getAppId(), backendBridge.getConfig());
+        addChannelCard(channelList, "\uD83D\uDCE7", "Email",
+            ch.getEmail().getSmtpHost(), backendBridge.getConfig());
+    }
+
+    private void addChannelCard(VBox list, String icon, String name, String configValue, config.Config cfg) {
+        boolean configured = configValue != null && !configValue.isBlank();
+        list.getChildren().add(createChannelCard(icon, name,
+            configured ? "已配置" : "未配置",
+            configured ? "运行中" : "已停止"));
     }
 }

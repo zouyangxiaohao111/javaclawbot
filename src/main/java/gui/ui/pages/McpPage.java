@@ -16,6 +16,7 @@ import java.util.Arrays;
 public class McpPage extends VBox {
 
     private final VBox serverList;
+    private gui.ui.BackendBridge backendBridge;
 
     public McpPage(Stage stage) {
         setSpacing(0);
@@ -72,5 +73,27 @@ public class McpPage extends VBox {
         scrollPane.setContent(content);
         getChildren().add(scrollPane);
         VBox.setVgrow(scrollPane, Priority.ALWAYS);
+    }
+
+    public void setBackendBridge(gui.ui.BackendBridge bridge) {
+        this.backendBridge = bridge;
+        refresh();
+    }
+
+    private void refresh() {
+        if (backendBridge == null) return;
+        serverList.getChildren().clear();
+
+        java.util.Map<String, config.mcp.MCPServerConfig> servers =
+            backendBridge.getConfig().getTools().getMcpServers();
+        for (java.util.Map.Entry<String, config.mcp.MCPServerConfig> entry : servers.entrySet()) {
+            String name = entry.getKey();
+            config.mcp.MCPServerConfig sc = entry.getValue();
+            String cmd = sc.getCommand() != null && !sc.getCommand().isBlank()
+                ? sc.getCommand() + " " + String.join(" ", sc.getArgs())
+                : (sc.getUrl() != null ? sc.getUrl() : "");
+            serverList.getChildren().add(
+                new McpServerCard(name, cmd, sc.isEnable(), java.util.List.of(), null));
+        }
     }
 }

@@ -90,7 +90,11 @@ public class ChatPage extends VBox {
     }
 
     public void addToolCallCard(String toolName, String status, String params) {
-        ToolCallCard card = new ToolCallCard(toolName, status, params);
+        addToolCallCard(toolName, status, params, false);
+    }
+
+    public void addToolCallCard(String toolName, String status, String params, boolean startExpanded) {
+        ToolCallCard card = new ToolCallCard(toolName, status, params, startExpanded);
         messageContainer.getChildren().add(card);
         scrollToBottom();
     }
@@ -108,5 +112,38 @@ public class ChatPage extends VBox {
 
     public ChatInput getChatInput() {
         return chatInput;
+    }
+
+    public void setStatusText(String text) {
+        chatInput.setStatusText(text);
+    }
+
+    public void clearMessages() {
+        // Remove all messages except the welcome VBox
+        if (!messageContainer.getChildren().isEmpty()
+            && messageContainer.getChildren().get(0) instanceof VBox) {
+            // welcome is present, keep it
+            javafx.scene.Node welcome = messageContainer.getChildren().get(0);
+            messageContainer.getChildren().clear();
+            messageContainer.getChildren().add(welcome);
+        } else {
+            messageContainer.getChildren().clear();
+        }
+    }
+
+    public void loadMessages(java.util.List<java.util.Map<String, Object>> history) {
+        clearMessages();
+        if (history == null) return;
+        for (java.util.Map<String, Object> msg : history) {
+            String role = String.valueOf(msg.getOrDefault("role", ""));
+            Object contentObj = msg.get("content");
+            String content = contentObj instanceof String ? (String) contentObj : "";
+            if (content == null || content.isBlank()) continue;
+            if ("user".equals(role)) {
+                addUserMessage(content);
+            } else if ("assistant".equals(role)) {
+                addAssistantMessage(content);
+            }
+        }
     }
 }

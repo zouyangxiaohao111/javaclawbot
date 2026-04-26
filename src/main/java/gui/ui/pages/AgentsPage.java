@@ -11,6 +11,9 @@ import javafx.scene.layout.VBox;
 
 public class AgentsPage extends VBox {
 
+    private VBox agentList;
+    private gui.ui.BackendBridge backendBridge;
+
     public AgentsPage() {
         setSpacing(0);
         setStyle("-fx-background-color: #f1ede1;");
@@ -34,7 +37,7 @@ public class AgentsPage extends VBox {
         titleBox.getChildren().addAll(title, subtitle);
 
         // Agent 列表
-        VBox agentList = new VBox(12);
+        agentList = new VBox(12);
         agentList.setMaxWidth(800);
 
         // 示例卡片
@@ -88,5 +91,25 @@ public class AgentsPage extends VBox {
 
         card.getChildren().add(header);
         return card;
+    }
+
+    public void setBackendBridge(gui.ui.BackendBridge bridge) {
+        this.backendBridge = bridge;
+        refresh();
+    }
+
+    private void refresh() {
+        if (backendBridge == null) return;
+        agentList.getChildren().clear();
+
+        config.Config cfg = backendBridge.getConfig();
+        config.agent.AgentDefaults defaults = cfg.getAgents().getDefaults();
+        String model = defaults.getModel() != null ? defaults.getModel() : "未配置";
+        String provider = cfg.getProviderName(model);
+        if (provider == null) provider = "auto";
+
+        agentList.getChildren().add(createAgentCard("default",
+            "默认 Agent · 模型: " + model + " · 提供方: " + provider,
+            "已配置"));
     }
 }

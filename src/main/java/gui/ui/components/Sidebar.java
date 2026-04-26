@@ -23,7 +23,10 @@ public class Sidebar extends VBox {
     private final VBox navContainer;
     private final List<NavigationItem> navItems = new ArrayList<>();
     private final List<Consumer<String>> pageChangeListeners = new ArrayList<>();
+    private final List<Consumer<String>> resumeListeners = new ArrayList<>();
+    private final List<Runnable> newChatListeners = new ArrayList<>();
 
+    private VBox historyContainer;
     private Label titleLabel;
     private Button collapseBtn;
 
@@ -82,7 +85,10 @@ public class Sidebar extends VBox {
         btn.setStyle("-fx-background-color: rgba(0, 0, 0, 0.05); -fx-background-radius: 8px; -fx-font-size: 14px; -fx-font-weight: 500; -fx-padding: 10px 12px;");
         btn.setMaxWidth(Double.MAX_VALUE);
         VBox.setMargin(btn, new Insets(8));
-        btn.setOnAction(e -> notifyPageChange("chat"));
+        btn.setOnAction(e -> {
+            notifyPageChange("chat");
+            for (Runnable r : newChatListeners) r.run();
+        });
         return btn;
     }
 
@@ -117,7 +123,8 @@ public class Sidebar extends VBox {
     }
 
     private ScrollPane createHistorySection() {
-        VBox container = new VBox(4);
+        historyContainer = new VBox(4);
+        VBox container = historyContainer;
         container.setPadding(new Insets(12, 8, 8, 8));
 
         // 分隔线
@@ -220,5 +227,74 @@ public class Sidebar extends VBox {
         for (Consumer<String> listener : pageChangeListeners) {
             listener.accept(page);
         }
+    }
+
+    public void addNewChatListener(Runnable r) {
+        newChatListeners.add(r);
+    }
+
+    public void addResumeListener(Consumer<String> listener) {
+        resumeListeners.add(listener);
+    }
+
+    /**
+     * 用后端数据刷新历史对话列表
+     */
+    public void refreshHistory(java.util.List<java.util.Map<String, Object>> sessions) {
+        // 保留分隔线，清除其余历史项
+        java.util.List<javafx.scene.Node> keep = new java.util.ArrayList<>();
+        keep.add(historyContainer.getChildren().get(0)); // 分隔线
+        historyContainer.getChildren().retainAll(keep);
+
+        if (sessions == null || sessions.isEmpty()) return;
+
+        java.time.LocalDate today = java.time.LocalDate.now();
+        java.util.List<java.util.Map<String, Object>> todaySessions = new java.util.ArrayList<>();
+        java.util.List<java.util.Map<String, Object>> yesterdaySessions = new java.util.ArrayList<>();
+        java.util.List<java.util.Map<String, Object>> earlierSessions = new java.util.ArrayList<>();
+
+        for (java.util.Map<String, Object> s : sessions) {
+            String updated = String.valueOf(s.getOrDefault("updated_at", ""));
+            try {
+                java.time.LocalDate d = java.time.LocalDateTime.parse(updated).toLocalDate();
+                if (d.equals(today)) todaySessions.add(s);
+                else if (d.equals(today.minusDays(1))) yesterdaySessions.add(s);
+                else earlierSessions.add(s);
+            } catch (Exception e) {
+                earlierSessions.add(s);
+            }
+        }
+
+        if (!todaySessions.isEmpty()) addHistoryGroup(historyContainer, "今天", todaySessions);
+        if (!yesterdaySessions.isEmpty()) addHistoryGroup(historyContainer, "昨天", yesterdaySessions);
+        if (!earlierSessions.isEmpty()) addHistoryGroup(historyContainer, "更早", earlierSessions);
+    }
+
+    private void addHistoryGroup(VBox parent, String groupName, java.util.List<java.util.Map<String, Object>> items) {
+        Label groupTitle = new Label(groupName);
+        groupTitle.getStyleClass().add("group-title");
+        groupTitle.setPadding(new Insets(8, 10, 4, 10));
+        parent.getChildren().add(groupTitle);
+
+        for (java.util.Map<String, Object> item : items) {
+            String sessionId = String.valueOf(item.getOrDefault("session_id", ""));
+            String title = extractTitle(item);
+            HistoryItem historyItem = new HistoryItem(title != null ? title : sessionId, null);
+            historyItem.setOnMouseClicked(e -> {
+                for (Consumer<String> listener : resumeListeners) {
+                    listener.accept(sessionId);
+                }
+            });
+            parent.getChildren().add(historyItem);
+        }
+    }
+
+    private String extractTitle(java.util.Map<String, Object> sessionItem) {
+        Object meta = sessionItem.get("metadata");
+        if (meta instanceof java.util.Map) {
+            Object title = ((java.util.Map<?, ?>) meta).get("title");
+            if (title instanceof String s && !s.isBlank()) return s;
+        }
+        return null;
     }
 }

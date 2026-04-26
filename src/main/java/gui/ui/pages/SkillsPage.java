@@ -12,6 +12,9 @@ import javafx.scene.layout.VBox;
 
 public class SkillsPage extends VBox {
 
+    private javafx.scene.layout.GridPane skillGrid;
+    private gui.ui.BackendBridge backendBridge;
+
     public SkillsPage() {
         setSpacing(0);
         setStyle("-fx-background-color: #f1ede1;");
@@ -35,7 +38,7 @@ public class SkillsPage extends VBox {
         titleBox.getChildren().addAll(title, subtitle);
 
         // 技能网格
-        GridPane skillGrid = new GridPane();
+        skillGrid = new GridPane();
         skillGrid.setHgap(12);
         skillGrid.setVgap(12);
         skillGrid.setMaxWidth(800);
@@ -98,5 +101,28 @@ public class SkillsPage extends VBox {
 
         card.getChildren().add(header);
         return card;
+    }
+
+    public void setBackendBridge(gui.ui.BackendBridge bridge) {
+        this.backendBridge = bridge;
+        refresh();
+    }
+
+    private void refresh() {
+        if (backendBridge == null) return;
+        skillGrid.getChildren().clear();
+
+        java.util.List<java.util.Map<String, String>> skills =
+            backendBridge.getSkillsLoader().listSkills(false);
+        int col = 0, row = 0;
+        for (java.util.Map<String, String> s : skills) {
+            String name = s.get("name");
+            String source = s.get("source");
+            String status = "builtin".equals(source) ? "内置" : "工作区";
+            skillGrid.add(createSkillCard("\u26A1", name,
+                source != null ? source : "", status), col, row);
+            col++;
+            if (col >= 2) { col = 0; row++; }
+        }
     }
 }

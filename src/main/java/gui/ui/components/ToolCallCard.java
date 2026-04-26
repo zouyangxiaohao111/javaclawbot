@@ -9,13 +9,18 @@ import javafx.scene.layout.VBox;
 
 public class ToolCallCard extends VBox {
 
-    private boolean expanded = false;
+    private boolean expanded;
     private final VBox contentBox;
     private final Label expandIcon;
 
     public ToolCallCard(String toolName, String status, String params) {
+        this(toolName, status, params, false);
+    }
+
+    public ToolCallCard(String toolName, String status, String params, boolean startExpanded) {
         setSpacing(0);
         getStyleClass().add("tool-call-card");
+        this.expanded = startExpanded;
 
         // Header
         HBox header = new HBox(8);
@@ -32,17 +37,17 @@ public class ToolCallCard extends VBox {
         Label nameLabel = new Label(toolName);
         nameLabel.setStyle("-fx-font-family: monospace; -fx-font-size: 12px;");
 
-        expandIcon = new Label("\u25B6");
+        expandIcon = new Label(startExpanded ? "\u25BC" : "\u25B6");
         HBox.setHgrow(expandIcon, Priority.ALWAYS);
         expandIcon.setAlignment(Pos.CENTER_RIGHT);
 
         header.getChildren().addAll(statusIcon, toolIcon, nameLabel, expandIcon);
 
-        // Content (初始隐藏)
+        // Content
         contentBox = new VBox(8);
         contentBox.setPadding(new Insets(0, 12, 8, 12));
-        contentBox.setVisible(false);
-        contentBox.setManaged(false);
+        contentBox.setVisible(startExpanded);
+        contentBox.setManaged(startExpanded);
 
         if (params != null) {
             Label paramsLabel = new Label(params);
@@ -54,6 +59,13 @@ public class ToolCallCard extends VBox {
         header.setOnMouseClicked(e -> toggle());
 
         getChildren().addAll(header, contentBox);
+    }
+
+    public void addResult(String result) {
+        Label resultLabel = new Label(result);
+        resultLabel.setStyle("-fx-font-family: monospace; -fx-font-size: 11px; -fx-background-color: rgba(0, 0, 0, 0.02); -fx-background-radius: 6px; -fx-padding: 8px;");
+        resultLabel.setWrapText(true);
+        contentBox.getChildren().add(resultLabel);
     }
 
     private void toggle() {

@@ -2,6 +2,7 @@ package gui.ui;
 
 import gui.ui.components.Sidebar;
 import gui.ui.pages.*;
+import javafx.application.Platform;
 import javafx.scene.Scene;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.StackPane;
@@ -9,7 +10,9 @@ import javafx.stage.Stage;
 import javafx.stage.StageStyle;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 
 public class MainStage {
 
@@ -23,6 +26,10 @@ public class MainStage {
     private final StackPane contentStack;
     private final Map<String, javafx.scene.Node> pages = new HashMap<>();
 
+    private BackendBridge backendBridge;
+    private Sidebar sidebar;
+    private ChatPage chatPage;
+
     public MainStage(Stage stage) {
         this.stage = stage;
         this.root = new BorderPane();
@@ -32,6 +39,7 @@ public class MainStage {
         loadStylesheets();
         setupPages();
         setupSidebar();
+        initializeBackend();
     }
 
     private void configureStage() {
@@ -43,6 +51,10 @@ public class MainStage {
 
         Scene scene = new Scene(root, DEFAULT_WIDTH, DEFAULT_HEIGHT);
         stage.setScene(scene);
+
+        stage.setOnCloseRequest(e -> {
+            if (backendBridge != null) backendBridge.shutdown();
+        });
     }
 
     private void loadStylesheets() {
@@ -52,7 +64,8 @@ public class MainStage {
 
     private void setupPages() {
         // 创建所有页面
-        pages.put("chat", new ChatPage());
+        chatPage = new ChatPage();
+        pages.put("chat", chatPage);
         pages.put("models", new ModelsPage());
         pages.put("agents", new AgentsPage());
         pages.put("channels", new ChannelsPage());
@@ -75,8 +88,29 @@ public class MainStage {
     }
 
     private void setupSidebar() {
-        Sidebar sidebar = new Sidebar();
+        sidebar = new Sidebar();
         sidebar.addPageChangeListener(this::showPage);
+        sidebar.addNewChatListener(() -> {
+            if (backendBridge != null) {
+                backendBridge.resetTitleCounter();
+                CompletableFuture.runAsync(() -> backendBridge.newSession())
+                    .thenRun(() -> Platform.runLater(() -> {
+                        chatPage.clearMessages();
+                        sidebar.refreshHistory(backendBridge.getSessionManager().listSessions());
+                    }));
+            }
+        });
+        sidebar.addResumeListener(sessionId -> {
+            if (backendBridge != null) {
+                CompletableFuture.runAsync(() -> {
+                    List<Map<String, Object>> history = backendBridge.getSessionHistory(sessionId);
+                    Platform.runLater(() -> {
+                        chatPage.loadMessages(history);
+                        showPage("chat");
+                    });
+                });
+            }
+        });
         root.setLeft(sidebar);
     }
 
@@ -101,5 +135,92 @@ public class MainStage {
 
     public Stage getStage() {
         return stage;
+    }
+
+    private static String extractToolName(String toolHint) {
+        if (toolHint == null || toolHint.isBlank()) return "tool";
+        int paren = toolHint.indexOf('(');
+        if (paren > 0) return toolHint.substring(0, paren).trim();
+        return toolHint.trim();
+    }
+
+    private void injectBridgeToPage(Object page) {
+        if (page instanceof ModelsPage p) p.setBackendBridge(backendBridge);
+        else if (page instanceof AgentsPage p) p.setBackendBridge(backendBridge);
+        else if (page instanceof ChannelsPage p) p.setBackendBridge(backendBridge);
+        else if (page instanceof SkillsPage p) p.setBackendBridge(backendBridge);
+        else if (page instanceof McpPage p) p.setBackendBridge(backendBridge);
+        else if (page instanceof CronPage p) p.setBackendBridge(backendBridge);
+        else if (page instanceof SettingsPage p) p.setBackendBridge(backendBridge);
+    }
+
+    private void initializeBackend() {
+        backendBridge = new BackendBridge();
+        new Thread(() -> {
+            try {
+                backendBridge.initialize();
+                Platform.runLater(() -> {
+                    // Wire ChatInput send listener to backend
+                    chatPage.getChatInput().addSendListener(text -> {
+                        if (backendBridge.isWaitingForResponse()) return;
+                        java.util.List<String> images = chatPage.getChatInput().getAttachedImages();
+                        String displayText = text;
+                        if (!images.isEmpty()) {
+                            StringBuilder sb = new StringBuilder(text);
+                            for (String img : images) {
+                                sb.append("\n[image: ").append(img).append("]");
+                                displayText = displayText + " \uD83D\uDDBC";
+                            }
+                        }
+                        chatPage.addUserMessage(displayText.isEmpty() ? "\uD83D\uDDBC 图片" : displayText);
+                        chatPage.setStatusText("\u25CF 思考中...");
+                        backendBridge.sendMessage(
+                            text,
+                            images.isEmpty() ? null : images,
+                            progress -> {
+                                if (progress.isToolHint()) {
+                                    String toolName = extractToolName(progress.content());
+                                    chatPage.addToolCallCard(toolName, "running",
+                                        progress.content(), true);
+                                }
+                            },
+                            response -> {
+                                chatPage.addAssistantMessage(response);
+                                chatPage.setStatusText("\u25CF 模型就绪 \u00B7 "
+                                    + backendBridge.getConfig().getAgents().getDefaults().getModel());
+                                sidebar.refreshHistory(backendBridge.getSessionManager().listSessions());
+                            },
+                            error -> {
+                                chatPage.addAssistantMessage("\u26A0 " + error);
+                                chatPage.setStatusText("\u25CF 错误");
+                            }
+                        );
+                    });
+
+                    // Set workspace for @file completion
+                    chatPage.getChatInput().setWorkspacePath(
+                        backendBridge.getConfig().getWorkspacePath());
+
+                    // Initial status
+                    chatPage.setStatusText("\u25CF 模型就绪 \u00B7 "
+                        + backendBridge.getConfig().getAgents().getDefaults().getModel());
+
+                    // Load history
+                    sidebar.refreshHistory(backendBridge.getSessionManager().listSessions());
+
+                    // Inject BackendBridge into management pages
+                    injectBridgeToPage(pages.get("models"));
+                    injectBridgeToPage(pages.get("agents"));
+                    injectBridgeToPage(pages.get("channels"));
+                    injectBridgeToPage(pages.get("skills"));
+                    injectBridgeToPage(pages.get("mcp"));
+                    injectBridgeToPage(pages.get("crontasks"));
+                    injectBridgeToPage(pages.get("settings"));
+                });
+            } catch (Exception e) {
+                Platform.runLater(() ->
+                    chatPage.setStatusText("\u25CF 初始化失败: " + e.getMessage()));
+            }
+        }, "javaclawbot-fx-init").start();
     }
 }

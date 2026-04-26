@@ -11,6 +11,9 @@ import javafx.scene.layout.VBox;
 
 public class ModelsPage extends VBox {
 
+    private VBox modelList;
+    private gui.ui.BackendBridge backendBridge;
+
     public ModelsPage() {
         setSpacing(0);
         setStyle("-fx-background-color: #f1ede1;");
@@ -35,7 +38,7 @@ public class ModelsPage extends VBox {
         titleBox.getChildren().addAll(title, subtitle);
 
         // 模型列表
-        VBox modelList = new VBox(12);
+        modelList = new VBox(12);
         modelList.setMaxWidth(800);
 
         modelList.getChildren().addAll(
@@ -55,5 +58,40 @@ public class ModelsPage extends VBox {
         scrollPane.setContent(content);
         getChildren().add(scrollPane);
         VBox.setVgrow(scrollPane, Priority.ALWAYS);
+    }
+
+    public void setBackendBridge(gui.ui.BackendBridge bridge) {
+        this.backendBridge = bridge;
+        refresh();
+    }
+
+    private void refresh() {
+        if (backendBridge == null) return;
+        modelList.getChildren().clear();
+
+        config.Config cfg = backendBridge.getConfig();
+        String defaultModel = cfg.getAgents().getDefaults().getModel();
+        config.provider.ProvidersConfig provCfg = cfg.getProviders();
+
+        String[] names = {"anthropic", "openai", "deepseek", "openrouter", "groq",
+            "zhipu", "dashscope", "gemini", "moonshot", "minimax", "aihubmix",
+            "siliconflow", "volcengine", "vllm", "githubCopilot"};
+        String[] labels = {"Anthropic", "OpenAI", "DeepSeek", "OpenRouter", "Groq",
+            "智谱 GLM", "阿里云 DashScope", "Google Gemini", "Moonshot", "MiniMax", "AIHubMix",
+            "SiliconFlow", "火山引擎", "vLLM", "GitHub Copilot"};
+
+        for (int i = 0; i < names.length; i++) {
+            String n = names[i];
+            String label = labels[i];
+            config.provider.ProviderConfig pc = provCfg.getByName(n);
+            if (pc == null) continue;
+            boolean isConfigured = pc.getApiKey() != null && !pc.getApiKey().isBlank();
+            providers.ProviderRegistry.ProviderSpec spec = providers.ProviderRegistry.findByName(n);
+            boolean isOauth = spec != null && spec.isOauth();
+            boolean isReady = isConfigured || isOauth;
+            boolean isDefault = defaultModel != null && cfg.getProviderName(defaultModel) != null
+                && cfg.getProviderName(defaultModel).equals(n);
+            modelList.getChildren().add(new ModelCard(label, n, isDefault, isReady));
+        }
     }
 }

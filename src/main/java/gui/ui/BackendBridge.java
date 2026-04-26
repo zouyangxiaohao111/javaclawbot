@@ -1,0 +1,436 @@
+package gui.ui;
+
+import agent.AgentLoop;
+import bus.InboundMessage;
+import bus.MessageBus;
+import bus.OutboundMessage;
+import cli.RuntimeComponents;
+import config.Config;
+import config.ConfigIO;
+import config.ConfigReloader;
+import config.channel.ChannelsConfig;
+import config.mcp.MCPServerConfig;
+import corn.CronService;
+import javafx.application.Platform;
+import providers.CustomProvider;
+import providers.LLMProvider;
+import providers.ProviderRegistry;
+import session.Session;
+import session.SessionManager;
+import skills.SkillsLoader;
+
+import java.nio.file.Path;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
+
+/**
+ * BackendBridge — JavaFX GUI 与 javaclawbot 后端的桥接层。
+ *
+ * 职责：
+ * 1. 初始化 Config / SessionManager / LLMProvider / MessageBus / AgentLoop / CronService
+ * 2. 启动 bus adapter（busTask + outboundTask）
+ * 3. 提供异步消息收发接口（Platform.runLater 回调）
+ * 4. 提供各页面所需的后端组件 getter
+ */
+public class BackendBridge {
+
+    /** 进度事件：区分思考内容和工具调用 */
+    public record ProgressEvent(String content, boolean isToolHint) {}
+
+    // ── 后端组件 ──
+    private Config config;
+    private SessionManager sessionManager;
+    private LLMProvider provider;
+    private MessageBus bus;
+    private AgentLoop agentLoop;
+    private CronService cron;
+    private SkillsLoader skillsLoader;
+
+    // ── Bus 模式 ──
+    private final AtomicBoolean busLoopRunning = new AtomicBoolean(false);
+    private CompletableFuture<Void> busTask;
+    private CompletableFuture<Void> outboundTask;
+    private final ExecutorService executor = Executors.newFixedThreadPool(4, r -> {
+        Thread t = new Thread(r, "javaclawbot-fx-bridge");
+        t.setDaemon(true);
+        return t;
+    });
+
+    // ── 会话 ──
+    private static final String CLI_CHANNEL = "cli";
+    private static final String CLI_CHAT_ID = "direct";
+    private final String sessionKey = CLI_CHANNEL + ":" + CLI_CHAT_ID;
+
+    // ── 当前消息回调（一次只处理一条消息）──
+    private final AtomicReference<Consumer<ProgressEvent>> currentProgressCallback = new AtomicReference<>();
+    private final AtomicReference<Consumer<String>> currentResponseCallback = new AtomicReference<>();
+    private volatile boolean waitingForResponse = false;
+
+    // ── 标题生成计数器 ──
+    private final AtomicBoolean titleGenerationPending = new AtomicBoolean(false);
+    private int userMessageCount = 0;
+
+    /**
+     * 初始化所有后端组件（阻塞调用，需在后台线程执行）。
+     */
+    public void initialize() {
+        // 1) 加载配置
+        RuntimeComponents rt = ConfigReloader.createRuntimeComponents();
+        this.config = rt.getConfig();
+
+        // 2) SessionManager
+        this.sessionManager = new SessionManager(this.config.getWorkspacePath());
+
+        // 3) LLMProvider
+        this.provider = makeProvider(this.config);
+
+        // 4) CronService
+        Path cronStorePath = ConfigIO.getDataDir().resolve("cron").resolve("jobs.json");
+        this.cron = new CronService(cronStorePath, null);
+
+        // 5) MessageBus
+        this.bus = new MessageBus();
+
+        // 6) AgentLoop
+        this.agentLoop = new AgentLoop(
+                this.bus,
+                this.provider,
+                this.config.getWorkspacePath(),
+                this.config.getAgents().getDefaults().getModel(),
+                this.config.getAgents().getDefaults().getMaxToolIterations(),
+                this.config.obtainTemperature(this.provider.getDefaultModel()),
+                this.config.obtainMaxTokens(this.provider.getDefaultModel()),
+                this.config.obtainContextWindow(this.provider.getDefaultModel()),
+                this.config.getAgents().getDefaults().getMemoryWindow(),
+                this.config.getAgents().getDefaults().getReasoningEffort(),
+                this.cron,
+                this.config.getTools().isRestrictToWorkspace(),
+                this.sessionManager,
+                this.config.getTools().getMcpServers(),
+                this.config.getChannels(),
+                rt.getRuntimeSettings()
+        );
+
+        // 7) SkillsLoader
+        this.skillsLoader = new SkillsLoader(this.config.getWorkspacePath());
+
+        // 8) 启动 bus 交互模式
+        startBusInteractiveMode();
+
+        // 9) 恢复 plan mode 状态
+        try {
+            Session session = sessionManager.getOrCreate(sessionKey);
+            agentLoop.ensurePlanModeState(sessionKey, session);
+        } catch (Exception ignored) {
+        }
+    }
+
+    /**
+     * 启动 bus 适配器（busTask + outboundTask）
+     */
+    private void startBusInteractiveMode() {
+        if (busLoopRunning.get()) return;
+        busLoopRunning.set(true);
+
+        // busTask: 运行 AgentLoop 消费 inbound
+        busTask = CompletableFuture.runAsync(() -> {
+            try {
+                agentLoop.run();
+            } catch (Exception e) {
+                Platform.runLater(() -> System.err.println("AgentLoop 异常: " + e.getMessage()));
+            }
+        }, executor);
+
+        // outboundTask: 轮询 outbound 并回调 JavaFX UI
+        outboundTask = CompletableFuture.runAsync(() -> {
+            while (busLoopRunning.get()) {
+                try {
+                    OutboundMessage out = bus.consumeOutbound(1, TimeUnit.SECONDS);
+                    if (out == null) continue;
+
+                    // 过滤非本会话消息
+                    if (!isTargetCliOutbound(out)) continue;
+
+                    Map<String, Object> meta = out.getMetadata() != null ? out.getMetadata() : Map.of();
+                    boolean isProgress = Boolean.TRUE.equals(meta.get("_progress"));
+                    boolean isToolHint = Boolean.TRUE.equals(meta.get("_tool_hint"));
+
+                    if (isProgress) {
+                        String content = out.getContent() != null ? out.getContent() : "";
+                        Consumer<ProgressEvent> cb = currentProgressCallback.get();
+                        if (cb != null) {
+                            Platform.runLater(() -> cb.accept(new ProgressEvent(content, isToolHint)));
+                        }
+                    } else {
+                        // 最终回复
+                        String content = out.getContent() != null ? out.getContent() : "";
+                        Consumer<String> cb = currentResponseCallback.getAndSet(null);
+                        waitingForResponse = false;
+                        Platform.runLater(() -> {
+                            if (cb != null) {
+                                cb.accept(content);
+                            }
+                        });
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                } catch (Exception ignored) {
+                }
+            }
+        }, executor);
+    }
+
+    /**
+     * 判断 outbound 消息是否属于当前 CLI 会话
+     */
+    private boolean isTargetCliOutbound(OutboundMessage out) {
+        try {
+            String ch = out.getChannel();
+            String cid = out.getChatId();
+            return CLI_CHANNEL.equals(ch) && CLI_CHAT_ID.equals(cid);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /**
+     * 异步发送消息。
+     *
+     * @param text         用户输入文本
+     * @param onProgress   进度回调（工具调用、中间步骤），在 JavaFX 线程中执行
+     * @param onResponse   最终回复回调，在 JavaFX 线程中执行
+     * @param onError      错误回调，在 JavaFX 线程中执行
+     */
+    public void sendMessage(String text,
+                            Consumer<ProgressEvent> onProgress,
+                            Consumer<String> onResponse,
+                            Consumer<String> onError) {
+        sendMessage(text, null, onProgress, onResponse, onError);
+    }
+
+    public void sendMessage(String text,
+                            List<String> mediaPaths,
+                            Consumer<ProgressEvent> onProgress,
+                            Consumer<String> onResponse,
+                            Consumer<String> onError) {
+        if (text == null || text.isBlank()) return;
+        if (bus == null || agentLoop == null) {
+            if (onError != null) Platform.runLater(() -> onError.accept("bus 或 agentLoop 未初始化"));
+            return;
+        }
+
+        currentProgressCallback.set(onProgress);
+        currentResponseCallback.set(onResponse);
+        waitingForResponse = true;
+
+        CompletableFuture.runAsync(() -> {
+            try {
+                InboundMessage in = new InboundMessage(
+                        CLI_CHANNEL, "user", CLI_CHAT_ID, text, mediaPaths, null);
+                bus.publishInbound(in).toCompletableFuture().join();
+            } catch (Exception e) {
+                waitingForResponse = false;
+                currentResponseCallback.set(null);
+                if (onError != null) {
+                    Platform.runLater(() -> onError.accept(e.getMessage()));
+                }
+            }
+        }, executor);
+
+        // 标题生成计数
+        userMessageCount++;
+        if (userMessageCount >= 3 && titleGenerationPending.compareAndSet(false, true)) {
+            triggerTitleGeneration();
+        }
+    }
+
+    /**
+     * 发送 /stop 命令
+     */
+    public void stopMessage() {
+        if (!waitingForResponse) return;
+
+        CompletableFuture.runAsync(() -> {
+            try {
+                InboundMessage stopMsg = new InboundMessage(
+                        CLI_CHANNEL, "user", CLI_CHAT_ID, "/stop", null, null);
+                bus.publishInbound(stopMsg).toCompletableFuture().join();
+            } catch (Exception ignored) {
+            }
+        }, executor);
+    }
+
+    public boolean isReady() {
+        return sessionManager != null && bus != null && agentLoop != null;
+    }
+
+    /**
+     * 获取当前会话
+     */
+    public Session getCurrentSession() {
+        if (sessionManager == null) return null;
+        return sessionManager.getOrCreate(sessionKey);
+    }
+
+    /**
+     * 创建新会话
+     */
+    public Session newSession() {
+        if (sessionManager == null) return null;
+        userMessageCount = 0;
+        titleGenerationPending.set(false);
+        return sessionManager.createNew(sessionKey);
+    }
+
+    /**
+     * 恢复到指定会话
+     */
+    public void resumeSession(String sessionId) {
+        if (sessionManager == null) return;
+        userMessageCount = 0;
+        titleGenerationPending.set(false);
+        sessionManager.resumeSession(sessionKey, sessionId);
+    }
+
+    /**
+     * 获取会话历史消息
+     */
+    public List<Map<String, Object>> getSessionHistory(String sessionId) {
+        if (sessionManager == null) return List.of();
+        sessionManager.resumeSession(sessionKey, sessionId);
+        Session session = sessionManager.getOrCreate(sessionKey);
+        return session.getHistory();
+    }
+
+    /**
+     * 异步生成会话标题
+     */
+    private void triggerTitleGeneration() {
+        if (provider == null || sessionManager == null) return;
+        CompletableFuture.runAsync(() -> {
+            try {
+                Session session = getCurrentSession();
+                if (session == null) return;
+                String title = TitleGenerator.generateTitle(provider, session);
+                if (title != null && !title.isBlank()) {
+                    sessionManager.save(session);
+                }
+            } catch (Exception ignored) {
+            }
+        }, executor);
+    }
+
+    /**
+     * 重置标题生成计数器（切换会话时调用）
+     */
+    public void resetTitleCounter() {
+        userMessageCount = 0;
+        titleGenerationPending.set(false);
+    }
+
+    // ── Getters ──
+
+    public Config getConfig() {
+        return config;
+    }
+
+    public SessionManager getSessionManager() {
+        return sessionManager;
+    }
+
+    public LLMProvider getProvider() {
+        return provider;
+    }
+
+    public AgentLoop getAgentLoop() {
+        return agentLoop;
+    }
+
+    public CronService getCronService() {
+        return cron;
+    }
+
+    public SkillsLoader getSkillsLoader() {
+        return skillsLoader;
+    }
+
+    public String getSessionKey() {
+        return sessionKey;
+    }
+
+    public boolean isWaitingForResponse() {
+        return waitingForResponse;
+    }
+
+    // ── 资源清理 ──
+
+    public void shutdown() {
+        busLoopRunning.set(false);
+
+        if (outboundTask != null) outboundTask.cancel(true);
+        if (busTask != null) busTask.cancel(true);
+
+        if (agentLoop != null) {
+            try { agentLoop.stop(); } catch (Exception ignored) {}
+            try { agentLoop.closeMcp().toCompletableFuture().join(); } catch (Exception ignored) {}
+        }
+
+        if (cron != null) {
+            try { cron.stop(); } catch (Exception ignored) {}
+        }
+
+        executor.shutdown();
+        try { executor.awaitTermination(3, TimeUnit.SECONDS); } catch (InterruptedException ignored) {}
+    }
+
+    // ── Private helpers ──
+
+    private static LLMProvider makeProvider(Config config) {
+        String model = config.getAgents().getDefaults().getModel();
+        String providerName = config.getProviderName(model);
+        var p = config.getProvider(model);
+
+        if ("openai_codex".equals(providerName) || (model != null && model.startsWith("openai-codex/"))) {
+            throw new RuntimeException("Error: OpenAI Codex is not supported in this Java build.");
+        }
+
+        String apiKey = (p != null && p.getApiKey() != null) ? p.getApiKey() : null;
+        String apiBase = config.getApiBase(model);
+
+        if ("custom".equals(providerName)) {
+            if (apiBase == null || apiBase.isBlank()) apiBase = "http://localhost:8000/v1";
+            if (apiKey == null || apiKey.isBlank()) apiKey = "no-key";
+            return new CustomProvider(apiKey, apiBase, model);
+        }
+
+        if (apiBase != null && !apiBase.isBlank()) {
+            if (apiKey == null || apiKey.isBlank()) apiKey = "no-key";
+            return new CustomProvider(apiKey, apiBase, model);
+        }
+
+        ProviderRegistry.ProviderSpec spec = ProviderRegistry.findByName(providerName);
+        boolean isOauth = spec != null && spec.isOauth();
+        boolean hasKey = apiKey != null && !apiKey.isBlank();
+
+        if (!hasKey && !isOauth) {
+            throw new RuntimeException("未找到模型 " + model + " 的 API Key。请配置 providers." + providerName + ".api_key");
+        }
+
+        String effectiveBase = apiBase;
+        if (effectiveBase == null || effectiveBase.isBlank()) {
+            if (spec != null && spec.getDefaultApiBase() != null && !spec.getDefaultApiBase().isBlank()) {
+                effectiveBase = spec.getDefaultApiBase();
+            }
+        }
+
+        return new CustomProvider(hasKey ? apiKey : "no-key", effectiveBase, model);
+    }
+}

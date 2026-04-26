@@ -18,7 +18,11 @@ public class ChatInput extends VBox {
 
     private final TextArea inputArea;
     private final Button sendButton;
+    private final Label statusBar;
+    private final CompletionPopup completionPopup;
     private final List<Consumer<String>> sendListeners = new ArrayList<>();
+    private final List<java.nio.file.Path> attachedImages = new ArrayList<>();
+    private final HBox imagePreviewRow;
 
     public ChatInput() {
         setSpacing(0);
@@ -48,11 +52,22 @@ public class ChatInput extends VBox {
         buttonRow.setAlignment(Pos.CENTER_LEFT);
         buttonRow.setPadding(new Insets(0, 0, 0, 0));
 
+        // 图片预览行
+        imagePreviewRow = new HBox(6);
+        imagePreviewRow.setPadding(new Insets(0, 0, 0, 0));
+        imagePreviewRow.setVisible(false);
+        imagePreviewRow.setManaged(false);
+
         Button attachBtn = new Button("\uD83D\uDCCE");
         attachBtn.setStyle("-fx-background-color: transparent; -fx-pref-width: 32px; -fx-pref-height: 32px; -fx-background-radius: 8px;");
+        attachBtn.setOnAction(e -> selectImages());
 
         Button mentionBtn = new Button("@");
         mentionBtn.setStyle("-fx-background-color: transparent; -fx-pref-width: 32px; -fx-pref-height: 32px; -fx-background-radius: 8px;");
+        mentionBtn.setOnAction(e -> {
+            inputArea.insertText(inputArea.getCaretPosition(), "@");
+            inputArea.requestFocus();
+        });
 
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
@@ -62,7 +77,7 @@ public class ChatInput extends VBox {
 
         buttonRow.getChildren().addAll(attachBtn, mentionBtn, spacer, sendButton);
 
-        inputCard.getChildren().addAll(grabber, inputArea, buttonRow);
+        inputCard.getChildren().addAll(grabber, inputArea, imagePreviewRow, buttonRow);
 
         // 间距：保持状态栏到卡片和到底部距离一致（各 8px）
         Region gap = new Region();
@@ -70,22 +85,24 @@ public class ChatInput extends VBox {
         gap.setMinHeight(4);
 
         // 状态栏
-        Label statusBar = new Label("\u25CF 模型就绪 \u00B7 Claude Sonnet 4");
+        statusBar = new Label("\u25CF 模型就绪 \u00B7 Claude Sonnet 4");
         statusBar.setStyle("-fx-font-size: 11px; -fx-text-fill: rgba(0, 0, 0, 0.36);");
         statusBar.setPadding(new Insets(0, 16, 0, 16));
         statusBar.setAlignment(Pos.CENTER);
+
+        // Completion popup (after inputArea created)
+        completionPopup = new CompletionPopup(inputArea);
 
         getChildren().addAll(inputCard, gap, statusBar);
 
         // 发送按钮事件
         sendButton.setOnAction(e -> sendMessage());
         inputArea.setOnKeyPressed(e -> {
+            if (completionPopup.isShowing()) return;
             if (e.getCode() == javafx.scene.input.KeyCode.ENTER) {
                 if (e.isShiftDown()) {
-                    // Shift+Enter：在光标处插入换行
                     inputArea.insertText(inputArea.getCaretPosition(), "\n");
                 } else {
-                    // Enter：发送消息
                     sendMessage();
                 }
                 e.consume();
@@ -95,12 +112,59 @@ public class ChatInput extends VBox {
 
     private void sendMessage() {
         String text = inputArea.getText().trim();
-        if (!text.isEmpty()) {
+        if (!text.isEmpty() || !attachedImages.isEmpty()) {
             for (Consumer<String> listener : sendListeners) {
                 listener.accept(text);
             }
             inputArea.clear();
+            clearImages();
         }
+    }
+
+    private void selectImages() {
+        javafx.stage.FileChooser chooser = new javafx.stage.FileChooser();
+        chooser.setTitle("选择图片");
+        chooser.getExtensionFilters().add(
+            new javafx.stage.FileChooser.ExtensionFilter("图片文件", "*.png", "*.jpg", "*.jpeg", "*.gif", "*.webp", "*.bmp"));
+        java.util.List<java.io.File> files = chooser.showOpenMultipleDialog(getScene().getWindow());
+        if (files != null) {
+            for (java.io.File f : files) {
+                attachedImages.add(f.toPath());
+                addImagePreview(f.toPath());
+            }
+        }
+    }
+
+    private void addImagePreview(java.nio.file.Path path) {
+        Label preview = new Label("\uD83D\uDDBC " + path.getFileName().toString());
+        preview.setStyle("-fx-background-color: rgba(0,0,0,0.05); -fx-background-radius: 8px; "
+            + "-fx-padding: 4px 8px; -fx-font-size: 12px;");
+        preview.setOnMouseClicked(e -> {
+            attachedImages.remove(path);
+            imagePreviewRow.getChildren().remove(preview);
+            if (attachedImages.isEmpty()) {
+                imagePreviewRow.setVisible(false);
+                imagePreviewRow.setManaged(false);
+            }
+        });
+        imagePreviewRow.getChildren().add(preview);
+        imagePreviewRow.setVisible(true);
+        imagePreviewRow.setManaged(true);
+    }
+
+    private void clearImages() {
+        attachedImages.clear();
+        imagePreviewRow.getChildren().clear();
+        imagePreviewRow.setVisible(false);
+        imagePreviewRow.setManaged(false);
+    }
+
+    public java.util.List<String> getAttachedImages() {
+        java.util.List<String> paths = new ArrayList<>();
+        for (java.nio.file.Path p : attachedImages) {
+            paths.add(p.toString());
+        }
+        return paths;
     }
 
     public void addSendListener(Consumer<String> listener) {
@@ -109,5 +173,13 @@ public class ChatInput extends VBox {
 
     public String getText() {
         return inputArea.getText();
+    }
+
+    public void setStatusText(String text) {
+        statusBar.setText(text);
+    }
+
+    public void setWorkspacePath(java.nio.file.Path path) {
+        completionPopup.setWorkspacePath(path);
     }
 }
