@@ -36,6 +36,14 @@ public class AgentDefaults {
     private int skillMaxLoad = 5;
 
     /**
+     * 是否启用自动上下文压缩（对齐 Open-ClaudeCode autoCompactEnabled）
+     * 当为 false 时，即使 token 超过阈值也不会自动触发压缩。
+     * 可通过环境变量 DISABLE_COMPACT 或 DISABLE_AUTO_COMPACT 覆盖。
+     * 默认启用。
+     */
+    private boolean autoCompactEnabled = true;
+
+    /**
      * 上下文压缩触发阈值（默认 0.95）
      * 当上下文使用率超过此阈值时，阻塞执行 consolidate 压缩
      */
@@ -69,6 +77,22 @@ public class AgentDefaults {
      * 心跳配置
      */
     private HeartbeatConfig heartbeat = new HeartbeatConfig();
+
+    /**
+     * Session Memory 配置
+     * 对齐 Open-ClaudeCode: src/services/SessionMemory/sessionMemoryUtils.ts:32-36
+     */
+    private SessionMemoryConfig sessionMemory = new SessionMemoryConfig();
+
+    /**
+     * AwaySummary 配置
+     */
+    private AwaySummaryConfig awaySummary = new AwaySummaryConfig();
+
+    /**
+     * Skillify 配置
+     */
+    private SkillifyConfig skillify = new SkillifyConfig();
 
     /**
      * 队列配置

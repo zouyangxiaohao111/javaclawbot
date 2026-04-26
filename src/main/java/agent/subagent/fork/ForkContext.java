@@ -33,6 +33,9 @@ public class ForkContext {
     /** 系统上下文 */
     private final Map<String, String> systemContext;
 
+    /** 可选的标签/描述 */
+    private final String label;
+
     private ForkContext(Builder builder) {
         this.parentAgentId = builder.parentAgentId;
         this.directive = builder.directive;
@@ -41,6 +44,7 @@ public class ForkContext {
         this.parentMessages = builder.parentMessages;
         this.userContext = builder.userContext;
         this.systemContext = builder.systemContext;
+        this.label = builder.label;
     }
 
     public String getParentAgentId() { return parentAgentId; }
@@ -50,6 +54,7 @@ public class ForkContext {
     public java.util.List<Map<String, Object>> getParentMessages() { return parentMessages; }
     public Map<String, String> getUserContext() { return userContext; }
     public Map<String, String> getSystemContext() { return systemContext; }
+    public String getLabel() { return label; }
 
     public static Builder builder() {
         return new Builder();
@@ -63,6 +68,7 @@ public class ForkContext {
         private java.util.List<Map<String, Object>> parentMessages;
         private Map<String, String> userContext;
         private Map<String, String> systemContext;
+        private String label;
 
         public Builder parentAgentId(String parentAgentId) {
             this.parentAgentId = parentAgentId;
@@ -96,6 +102,11 @@ public class ForkContext {
 
         public Builder systemContext(Map<String, String> systemContext) {
             this.systemContext = systemContext;
+            return this;
+        }
+
+        public Builder label(String label) {
+            this.label = label;
             return this;
         }
 

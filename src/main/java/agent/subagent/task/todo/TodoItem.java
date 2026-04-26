@@ -1,6 +1,7 @@
 package agent.subagent.task.todo;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import java.time.Instant;
 
 /**
  * Todo item.
@@ -17,6 +18,7 @@ public class TodoItem {
     private String content;
     private TodoStatus status;
     private String activeForm;
+    private Instant updatedAt;
 
     public TodoItem() {
     }
@@ -25,6 +27,7 @@ public class TodoItem {
         this.content = content;
         this.status = status;
         this.activeForm = activeForm;
+        this.updatedAt = Instant.now();
     }
 
     // Getters and Setters
@@ -52,6 +55,14 @@ public class TodoItem {
         this.activeForm = activeForm;
     }
 
+    public Instant getUpdatedAt() {
+        return updatedAt;
+    }
+
+    public void setUpdatedAt(Instant updatedAt) {
+        this.updatedAt = updatedAt;
+    }
+
     @JsonIgnore
     public boolean isPending() {
         return status == TodoStatus.PENDING;
@@ -71,7 +82,9 @@ public class TodoItem {
      * Create a copy of this TodoItem for immutable updates.
      */
     public TodoItem copy() {
-        return new TodoItem(content, status, activeForm);
+        TodoItem copy = new TodoItem(content, status, activeForm);
+        copy.updatedAt = this.updatedAt;
+        return copy;
     }
 
     @Override

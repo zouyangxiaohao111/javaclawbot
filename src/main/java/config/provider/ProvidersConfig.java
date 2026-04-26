@@ -204,7 +204,7 @@ public class ProvidersConfig {
     private ProviderConfig githubCopilot;
 
     public ProviderConfig getByName(String name) {
-        if (name == null) return null;
+        if (name == null) return custom;
         return switch (name) {
             case "custom" -> custom;
             case "anthropic" -> anthropic;

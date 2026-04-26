@@ -134,7 +134,7 @@ public class ContextPruningSettings {
      * 软修剪配置
      */
     public static class SoftTrimConfig {
-        private int maxChars = 1500;
+        private int maxChars = 3500;
         private int headChars = 200;
         private int tailChars = 100;
 

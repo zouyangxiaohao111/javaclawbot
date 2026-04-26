@@ -51,7 +51,22 @@ public class RemoteBackend implements Backend {
     }
 
     @Override
-    public String createPane(String name, String color) {
+    public String displayName() {
+        return "remote";
+    }
+
+    @Override
+    public boolean supportsHideShow() {
+        return false;  // 远程 teammate 不能隐藏/显示
+    }
+
+    @Override
+    public boolean isRunningInside() {
+        return false;  // 不是本地运行
+    }
+
+    @Override
+    public CreatePaneResult createPane(String name, String color) {
         log.info("Creating remote pane: name={}, color={}", name, color);
 
         // 远程后端不需要真正的 pane，创建 RemoteTeammate
@@ -63,7 +78,7 @@ public class RemoteBackend implements Backend {
         teammates.put(teammate.getId(), teammate);
 
         log.info("Created remote pane: id={}, name={}", teammate.getId(), name);
-        return teammate.getId();
+        return CreatePaneResult.first(teammate.getId());
     }
 
     @Override
@@ -164,5 +179,41 @@ public class RemoteBackend implements Backend {
         for (String id : java.util.List.copyOf(teammates.keySet())) {
             killPane(id);
         }
+    }
+
+    @Override
+    public void setPaneBorderColor(String paneId, String color) {
+        // 远程 teammate 不支持设置边框颜色
+        log.debug("setPaneBorderColor: no-op for remote backend");
+    }
+
+    @Override
+    public void setPaneTitle(String paneId, String name, String color) {
+        // 远程 teammate 不支持设置标题
+        log.debug("setPaneTitle: no-op for remote backend");
+    }
+
+    @Override
+    public void enablePaneBorderStatus() {
+        // 远程 teammate 不支持
+        log.debug("enablePaneBorderStatus: no-op for remote backend");
+    }
+
+    @Override
+    public void rebalancePanes(boolean hasLeader) {
+        // 远程 teammate 不支持
+        log.debug("rebalancePanes: no-op for remote backend");
+    }
+
+    @Override
+    public boolean hidePane(String paneId) {
+        log.debug("hidePane: no-op for remote backend");
+        return false;
+    }
+
+    @Override
+    public boolean showPane(String paneId, String targetWindowOrPane) {
+        log.debug("showPane: no-op for remote backend");
+        return false;
     }
 }

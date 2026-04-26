@@ -37,7 +37,7 @@ public class PlanAgent {
         "   - Understand the current architecture\n" +
         "   - Identify similar features as reference\n" +
         "   - Trace through relevant code paths\n" +
-        "   - Use Bash ONLY for read-only operations (ls, git status, git log, git diff, find, cat, head, tail)\n" +
+        "   - Use Bash ONLY for read-only operations (ls, git status, git log, git diff, find, grep, cat, head, tail)\n" +
         "   - NEVER use Bash for: mkdir, touch, rm, cp, mv, git add, git commit, npm install, pip install, or any file creation/modification\n\n" +
         "3. **Design Solution**:\n" +
         "   - Create implementation approach based on your assigned perspective\n" +
@@ -60,6 +60,8 @@ public class PlanAgent {
     /**
      * 获取计划代理定义
      * 对应: PLAN_AGENT
+     *
+     * 注意: tools 引用 EXPLORE_AGENT.tools，与 Explore 使用相同的工具集
      */
     public static AgentDefinition get() {
         AgentDefinition agent = new AgentDefinition();
@@ -68,8 +70,8 @@ public class PlanAgent {
             "Software architect agent for designing implementation plans. Use this when you need " +
             "to plan the implementation strategy for a task. Returns step-by-step plans, " +
             "identifies critical files, and considers architectural trade-offs.");
-        agent.setTools(List.of("*"));  // 与 Explore 相同
-        // 禁用写操作工具
+        // tools 引用 ExploreAgent 的工具集（全部工具减去禁用工具）
+        // 注意: 与 Explore 一样，不设置 tools 意味着全部可用，通过 disallowedTools 过滤
         agent.setDisallowedTools(List.of(
             "Agent",           // 不能嵌套调用 Agent
             "ExitPlanMode",    // 不能退出 Plan 模式

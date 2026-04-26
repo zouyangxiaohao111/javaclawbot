@@ -50,6 +50,14 @@ public class CommandQueueManager {
         return loadSkills.contains(skillName);
     }
 
+    /**
+     * Get the set of user-loaded skill names (via tool or prefix).
+     * Used by post-compact attachment collection to preserve invoked skills.
+     */
+    public Set<String> getUserLoadedSkills() {
+        return Collections.unmodifiableSet(new HashSet<>(userLoadedSkills));
+    }
+
     // ── 入队 ──
 
     public LocalCommand addLocalCommand(LocalCommand command) {

@@ -1760,6 +1760,12 @@ public class JavaClawBotGUI extends JFrame {
         try {
             // 获取 cli:direct 会话
             session.Session session = sessionManager.getOrCreate(cliChannel + ":" + cliChatId);
+
+            // 恢复 plan mode 状态（进程重启后 PlanModeState 为空，需从 session JSONL 恢复）
+            if (agentLoop != null) {
+                agentLoop.ensurePlanModeState(cliChannel + ":" + cliChatId, session);
+            }
+
             java.util.List<Map<String, Object>> history = session.getHistory();
 
             if (history == null || history.isEmpty()) {

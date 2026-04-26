@@ -16,9 +16,10 @@ import java.util.concurrent.CompletionStage;
 public interface ToolView {
     List<Map<String, Object>> getDefinitions();
 
-    CompletionStage<String> execute(String name, Map<String, Object> args);
+    CompletionStage<String> execute(String name, Map<String, Object> args, ToolUseContext parentUseContext);
 
-    Object get(String name);
+    Tool get(String name);
+    List<Tool> getTools();
 
     void addTool(Tool tool);
 

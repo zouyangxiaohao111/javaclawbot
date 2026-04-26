@@ -6,7 +6,7 @@
 
     <groupId>com.zjky.ai</groupId>
     <artifactId>javaclawbot</artifactId>
-    <version>1.2.0</version>
+    <version>2.0.0</version>
     <packaging>jar</packaging>
 
     <!--  仓库 spring.ai 相关仓库  -->

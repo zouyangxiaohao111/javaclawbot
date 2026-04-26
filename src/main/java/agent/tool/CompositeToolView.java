@@ -23,7 +23,7 @@ public final class CompositeToolView implements ToolView {
 
     @Override
     public List<Map<String, Object>> getDefinitions() {
-        LinkedHashMap<String, Map<String, Object>> merged = new LinkedHashMap<>();
+        Map<String, Map<String, Object>> merged = new LinkedHashMap<>();
 
         for (ToolRegistry registry : registries) {
             if (registry == null) continue;
@@ -41,12 +41,12 @@ public final class CompositeToolView implements ToolView {
     }
 
     @Override
-    public CompletionStage<String> execute(String name, Map<String, Object> args) {
+    public CompletionStage<String> execute(String name, Map<String, Object> args, ToolUseContext parentUseContext) {
         for (int i = registries.size() - 1; i >= 0; i--) {
             ToolRegistry registry = registries.get(i);
             if (registry != null && registry.get(name) != null) {
                 log.debug("在注册表[{}]中找到工具: {}", i, name);
-                return registry.execute(name, args);
+                return registry.execute(name, args, parentUseContext);
             }
         }
         log.warn("工具未找到: {}", name);
@@ -56,17 +56,27 @@ public final class CompositeToolView implements ToolView {
     }
 
     @Override
-    public Object get(String name) {
+    public Tool get(String name) {
         for (int i = registries.size() - 1; i >= 0; i--) {
             ToolRegistry registry = registries.get(i);
             if (registry != null) {
-                Object tool = registry.get(name);
+                Tool tool = registry.get(name);
                 if (tool != null) {
                     return tool;
                 }
             }
         }
         return null;
+    }
+
+    @Override
+    public List<Tool> getTools() {
+        List<Tool> tools = new ArrayList<>();
+        for (int i = registries.size() - 1; i >= 0; i--) {
+            ToolRegistry registry = registries.get(i);
+            tools.addAll(registry.getTools());
+        }
+        return tools;
     }
 
     @Override

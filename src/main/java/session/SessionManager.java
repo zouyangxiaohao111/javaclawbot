@@ -125,6 +125,26 @@ public final class SessionManager {
     }
 
     /**
+     * 恢复指定会话（用于 /resume 命令）
+     *
+     * 更新 sessionKey -> sessionId 映射，让当前 channel 指向指定的 sessionId
+     *
+     * @param sessionKey 当前会话键（如 channel:chatId）
+     * @param sessionId 要恢复的 sessionId
+     */
+    public void resumeSession(String sessionKey, String sessionId) {
+        if (sessionKey == null || sessionId == null) {
+            throw new IllegalArgumentException("sessionKey and sessionId cannot be null");
+        }
+
+        // 更新映射
+        keyToIdMap.put(sessionKey, sessionId);
+        saveKeyToIdMap();
+
+        log.info("Session resume: sessionKey={} now points to sessionId={}", sessionKey, sessionId);
+    }
+
+    /**
      * 保存会话（原子写入 + 清洗非法字符 + 同 key 加锁）
      */
     public void save(Session session) {

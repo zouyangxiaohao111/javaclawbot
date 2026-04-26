@@ -130,8 +130,8 @@ public class ContextPruner {
                     result.set(i, trimmed);
                 }
             }
-            int prunedCurrentTurn = pruneCurrentTurnTools(result, cutoffIndex, settings, isToolPrunable, charWindow, consolidateThreshold);
-            log.debug("裁剪当前轮次工具：{} 个", prunedCurrentTurn);
+            //int prunedCurrentTurn = pruneCurrentTurnTools(result, cutoffIndex, settings, isToolPrunable, charWindow, consolidateThreshold);
+            //log.debug("裁剪当前轮次工具：{} 个", prunedCurrentTurn);
         }
 
         log.debug("上下文修剪完成：{} 条消息，修剪了 {} 个工具结果, 修剪前后字符数量：{} -> {} ",
@@ -184,7 +184,7 @@ public class ContextPruner {
         Object content = msg.get("content");
         String contentStr = content instanceof String ? (String) content : "";
 
-        if (contentStr.length() <= 800) {
+        if (contentStr.length() <= 2500) {
             return null; // 不需要修剪
         }
 

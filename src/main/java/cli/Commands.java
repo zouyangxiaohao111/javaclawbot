@@ -46,6 +46,7 @@ import static config.ConfigReloader.createRuntimeComponents;
                 Commands.OnboardCmd.class,
                 Commands.GatewayCmd.class,
                 Commands.AgentCmd.class,
+                Commands.AgentsCmd.class,
                 Commands.StatusCmd.class,
                 Commands.ChannelsCmd.class,
                 Commands.CronCmd.class,
@@ -313,6 +314,92 @@ public class Commands implements Runnable {
                     }
                 }
             }
+        }
+    }
+
+    @Command(name = "agents", description = "List all available agents.")
+    static class AgentsCmd implements Runnable {
+
+        @Option(names = {"-w", "--workspace"}, description = "Workspace directory")
+        String workspace;
+
+        @Override
+        public void run() {
+            // 获取 workspace 路径
+            Path workspacePath;
+            if (workspace != null && !workspace.isBlank()) {
+                workspacePath = Paths.get(workspace).toAbsolutePath().normalize();
+            } else {
+                Config config = ConfigIO.loadConfig(null);
+                workspacePath = config.getWorkspacePath();
+            }
+
+            // 加载代理定义
+            agent.subagent.definition.AgentDefinitionLoader loader =
+                    new agent.subagent.definition.AgentDefinitionLoader();
+            java.util.List<agent.subagent.definition.AgentDefinition> allAgents =
+                    loader.getAgentDefinitionsWithOverrides(workspacePath);
+
+            // 去重获取活跃代理
+            java.util.List<agent.subagent.definition.AgentDefinition> activeAgents =
+                    loader.getAgentDefinitionsWithOverrides(workspacePath);
+
+            System.out.println("\n🐱 Available Agents\n");
+
+            if (allAgents.isEmpty()) {
+                System.out.println("No agents found.");
+                return;
+            }
+
+            // 按 source 分组
+            java.util.Map<String, java.util.List<agent.subagent.definition.AgentDefinition>> bySource = new java.util.LinkedHashMap<>();
+            for (agent.subagent.definition.AgentDefinition agent : allAgents) {
+                String source = agent.getSource() != null ? agent.getSource() : "unknown";
+                bySource.computeIfAbsent(source, k -> new java.util.ArrayList<>()).add(agent);
+            }
+
+            // 定义 source 顺序和标签
+            java.util.List<String> sourceOrder = java.util.List.of(
+                    "built-in", "plugin", "userSettings", "projectSettings", "flagSettings"
+            );
+            java.util.Map<String, String> sourceLabels = java.util.Map.of(
+                    "built-in", "Built-in",
+                    "plugin", "Plugin",
+                    "userSettings", "User",
+                    "projectSettings", "Project",
+                    "flagSettings", "Flag"
+            );
+
+            int totalActive = 0;
+            for (String source : sourceOrder) {
+                java.util.List<agent.subagent.definition.AgentDefinition> agents = bySource.get(source);
+                if (agents == null || agents.isEmpty()) {
+                    continue;
+                }
+
+                String label = sourceLabels.getOrDefault(source, source);
+                System.out.println(label + ":");
+
+                for (agent.subagent.definition.AgentDefinition agent : agents) {
+                    String model = agent.getModel();
+                    String modelInfo = (model != null && !model.isEmpty()) ? " · " + model : "";
+                    System.out.println("  " + agent.getAgentType() + modelInfo);
+
+                    String whenToUse = agent.getWhenToUse();
+                    if (whenToUse != null && !whenToUse.isEmpty()) {
+                        // 截断过长的描述
+                        String desc = whenToUse.replace("\n", " ").trim();
+                        if (desc.length() > 80) {
+                            desc = desc.substring(0, 77) + "...";
+                        }
+                        System.out.println("    " + desc);
+                    }
+                }
+                System.out.println();
+                totalActive += agents.size();
+            }
+
+            System.out.println(totalActive + " active agents\n");
         }
     }
 

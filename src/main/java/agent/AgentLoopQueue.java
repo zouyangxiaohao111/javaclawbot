@@ -89,6 +89,12 @@ public class AgentLoopQueue {
     private final QueueConfig defaultConfig;
 
     /**
+     * 任务开始执行前的回调，用于清除会话的停止标记
+     * 由 AgentLoop 设置，确保每次任务开始时清除之前的停止状态
+     */
+    private java.util.function.Consumer<String> onTaskStart;
+
+    /**
      * 队列执行器（独立线程池，避免与 AgentLoop 共享导致死锁）
      *
      * 为什么需要独立线程池：
@@ -132,6 +138,14 @@ public class AgentLoopQueue {
 
     public AgentLoopQueue() {
         this(DEFAULT_MAX_CONCURRENT, null);
+    }
+
+    /**
+     * 设置任务开始执行前的回调
+     * @param onTaskStart 回调函数，参数为 sessionKey
+     */
+    public void setOnTaskStart(java.util.function.Consumer<String> onTaskStart) {
+        this.onTaskStart = onTaskStart;
     }
 
     /**
@@ -313,6 +327,13 @@ public class AgentLoopQueue {
         // 使用共享的 executor，避免 ForkJoinPool.commonPool() 被阻塞
         CompletableFuture.runAsync(() -> {
             lane.currentThread = Thread.currentThread();
+
+            // 任务开始前回调，清除该会话的停止标记
+            // 确保新任务不受之前 /stop 命令影响
+            // 注意：dispatch 中也会清除，但通过 queue 排队的任务需要在这里清除
+            if (onTaskStart != null) {
+                onTaskStart.accept(sessionKey);
+            }
             long startedAt = System.currentTimeMillis();
 
             try {

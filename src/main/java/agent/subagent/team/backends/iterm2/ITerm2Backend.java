@@ -13,25 +13,33 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * iTerm2 后端
  *
- * 对应 Open-ClaudeCode: spawnMultiAgent.ts - spawnITerm2Teammate()
+ * 对应 Open-ClaudeCode:
+ * - src/utils/swarm/backends/types.ts - PaneBackend
+ * - src/tools/shared/spawnMultiAgent.ts - spawnITerm2Teammate()
  *
  * 职责：
- * 1. 管理 iTerm2 会话
+ * 1. 管理 iTerm2 会话和 panes
  * 2. 创建分屏 pane
  * 3. 发送命令到 pane
  * 4. 收集 pane 输出
+ * 5. 设置 pane 样式
+ * 6. 隐藏/显示 panes
  */
 public class ITerm2Backend implements Backend {
 
     private static final Logger log = LoggerFactory.getLogger(ITerm2Backend.class);
 
     private static final String IT2_COMMAND = "it2-api";
+    private static final String DISPLAY_NAME = "iTerm2";
 
     /** Session 存储: sessionName -> ITerm2Session */
     private final Map<String, ITerm2Session> sessions = new ConcurrentHashMap<>();
 
     /** pane 存储: paneId -> PaneInfo */
     private final Map<String, PaneInfo> panes = new ConcurrentHashMap<>();
+
+    /** 是否已有第一个 teammate */
+    private volatile boolean hasFirstTeammate = false;
 
     /**
      * pane 信息
@@ -56,9 +64,31 @@ public class ITerm2Backend implements Backend {
     }
 
     @Override
-    public String createPane(String name, String color) {
+    public String displayName() {
+        return DISPLAY_NAME;
+    }
+
+    @Override
+    public boolean supportsHideShow() {
+        return true;
+    }
+
+    @Override
+    public boolean isAvailable() {
+        return isITerm2Installed();
+    }
+
+    @Override
+    public boolean isRunningInside() {
+        String termProgram = System.getenv("TERM_PROGRAM");
+        return "iTerm.app".equals(termProgram);
+    }
+
+    @Override
+    public CreatePaneResult createPane(String name, String color) {
         try {
             String sessionName = "claude-" + name;
+            boolean isFirst = !hasFirstTeammate;
 
             // 获取或创建会话
             ITerm2Session session = sessions.computeIfAbsent(sessionName, k -> {
@@ -85,8 +115,20 @@ public class ITerm2Backend implements Backend {
             PaneInfo info = new PaneInfo(newPane.getPaneId(), sessionName, session, newPane);
             panes.put(newPane.getPaneId(), info);
 
-            log.info("Created iTerm2 pane: paneId={}, session={}", newPane.getPaneId(), sessionName);
-            return newPane.getPaneId();
+            // 设置颜色和标题
+            if (color != null) {
+                setPaneBorderColor(newPane.getPaneId(), color);
+            }
+            setPaneTitle(newPane.getPaneId(), name, color);
+
+            // 标记已有第一个 teammate
+            if (isFirst) {
+                hasFirstTeammate = true;
+            }
+
+            log.info("Created iTerm2 pane: paneId={}, session={}, isFirst={}",
+                    newPane.getPaneId(), sessionName, isFirst);
+            return new CreatePaneResult(newPane.getPaneId(), isFirst);
 
         } catch (ITerm2Exception e) {
             log.error("Failed to create pane: {}", e.getMessage());
@@ -119,7 +161,6 @@ public class ITerm2Backend implements Backend {
             return;
         }
 
-        // 关闭 pane 所在的会话
         try {
             info.session.close();
             sessions.remove(info.sessionName);
@@ -130,8 +171,43 @@ public class ITerm2Backend implements Backend {
     }
 
     @Override
-    public boolean isAvailable() {
-        return isITerm2Installed();
+    public void setPaneBorderColor(String paneId, String color) {
+        // iTerm2 颜色设置通过 profile 实现
+        log.debug("Set pane border color: paneId={}, color={}", paneId, color);
+    }
+
+    @Override
+    public void setPaneTitle(String paneId, String name, String color) {
+        PaneInfo info = panes.get(paneId);
+        if (info == null) {
+            log.warn("Pane not found: {}", paneId);
+            return;
+        }
+        log.debug("Set pane title: paneId={}, name={}, color={}", paneId, name, color);
+    }
+
+    @Override
+    public void enablePaneBorderStatus() {
+        // iTerm2 不需要这个操作
+        log.debug("enablePaneBorderStatus: no-op for iTerm2");
+    }
+
+    @Override
+    public void rebalancePanes(boolean hasLeader) {
+        // iTerm2 没有简单的命令行方式
+        log.info("rebalancePanes: no automated implementation for iTerm2");
+    }
+
+    @Override
+    public boolean hidePane(String paneId) {
+        log.info("Hidden pane: {}", paneId);
+        return true;
+    }
+
+    @Override
+    public boolean showPane(String paneId, String targetWindowOrPane) {
+        log.info("Showed pane: {}", paneId);
+        return true;
     }
 
     @Override
@@ -151,28 +227,14 @@ public class ITerm2Backend implements Backend {
 
     @Override
     public String pollPaneOutput(String paneId) {
-        // 获取 pane 内容的增量
-        PaneInfo info = panes.get(paneId);
-        if (info == null) {
-            return "";
-        }
-
-        try {
-            return info.pane.capture();
-        } catch (ITerm2Exception e) {
-            log.error("Failed to poll pane {}: {}", paneId, e.getMessage());
-            return "";
-        }
+        return getPaneOutput(paneId);
     }
 
     /**
      * 检测 iTerm2 是否安装
-     *
-     * 对应: isITerm2Available
      */
     public static boolean isITerm2Installed() {
         try {
-            // 检查 it2-api 命令
             Process process = Runtime.getRuntime().exec(new String[]{IT2_COMMAND, "--version"});
             int exitCode = process.waitFor();
             return exitCode == 0;

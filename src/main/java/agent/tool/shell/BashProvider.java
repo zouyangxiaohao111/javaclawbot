@@ -116,7 +116,6 @@ public final class BashProvider implements ShellProvider {
                 }
 
                 // Original: bashProvider.ts lines 85-103
-                // Check if snapshot still exists — not applicable without snapshot
                 lastSnapshotFilePath = snapshotFilePath;
 
                 // Stash sandboxTmpDir for use in getEnvironmentOverrides
@@ -141,9 +140,9 @@ public final class BashProvider implements ShellProvider {
                 // Original: bashProvider.ts lines 124-127
                 String normalizedCommand = rewriteWindowsNullRedirect(command);
 
-                // Build command parts
+                // Build command parts with && joining (matching Open-ClaudeCode bashProvider.ts)
                 // Original: bashProvider.ts lines 156-187
-                StringBuilder scriptContent = new StringBuilder();
+                java.util.List<String> commandParts = new java.util.ArrayList<>();
 
                 // 1. Source snapshot file (aliases, functions, shell options, PATH)
                 // Original: bashProvider.ts lines 161-167
@@ -151,43 +150,49 @@ public final class BashProvider implements ShellProvider {
                     String finalPath = isWindows()
                             ? windowsPathToPosixPath(snapshotFilePath)
                             : snapshotFilePath;
-                    scriptContent.append("source ").append(quote(new String[]{finalPath})).append(" 2>/dev/null || true\n");
+                    commandParts.add("source " + quote(new String[]{finalPath}) + " 2>/dev/null || true");
                 }
 
-                // 2. Disable extended glob patterns for security
+                // 2. Session environment script — skipped (no session env vars in Java)
+                // Original: bashProvider.ts lines 170-173
+
+                // 3. Disable extended glob patterns for security
                 // Original: bashProvider.ts lines 176-179
                 String disableExtglobCmd = getDisableExtglobCommand(shellPath);
                 if (disableExtglobCmd != null) {
-                    scriptContent.append(disableExtglobCmd).append("\n");
+                    commandParts.add(disableExtglobCmd);
                 }
 
-                // 3. The user command (no eval wrapping needed when using script file)
-                scriptContent.append(normalizedCommand).append("\n");
+                // 4. Quote the user command and wrap in eval
+                // Original: bashProvider.ts lines 128-154, 184
+                boolean addStdinRedirect = shouldAddStdinRedirect(normalizedCommand);
+                String quotedCommand = quoteShellCommand(normalizedCommand, addStdinRedirect);
 
-                // 4. Track cwd via pwd -P
+                // Special handling for pipes: move stdin redirect after first command
+                // Original: bashProvider.ts lines 152-154
+                if (normalizedCommand.contains("|") && addStdinRedirect) {
+                    quotedCommand = PipeCommandProcessor.rearrangePipeCommand(normalizedCommand);
+                }
+
+                commandParts.add("eval " + quotedCommand);
+
+                // 5. Track cwd via pwd -P
                 // Original: bashProvider.ts lines 185-186
-                scriptContent.append("pwd -P >| ").append(quote(new String[]{shellCwdFilePath})).append("\n");
+                commandParts.add("pwd -P >| " + quote(new String[]{shellCwdFilePath}));
 
-                // 将脚本写入临时文件，避免 -c 参数中的引号转义问题
-                Path tempScript = Files.createTempFile("bash-cmd-", ".sh");
-                Files.writeString(tempScript, scriptContent.toString(), StandardCharsets.UTF_8);
+                // Join with && — matching Open-ClaudeCode bashProvider.ts line 186
+                String commandString = String.join(" && ", commandParts);
 
-                // 删除临时文件的钩子
-                tempScript.toFile().deleteOnExit();
+                // Apply CLAUDE_CODE_SHELL_PREFIX if set
+                // Original: bashProvider.ts lines 189-195
+                if (System.getenv("CLAUDE_CODE_SHELL_PREFIX") != null) {
+                    commandString = formatShellPrefixCommand(
+                        System.getenv("CLAUDE_CODE_SHELL_PREFIX"), commandString);
+                }
 
-                // 返回脚本文件路径作为命令（使用 source 或直接执行）
-                String scriptPath = isWindows() ? windowsPathToPosixPath(tempScript.toString()) : tempScript.toString();
+                log.debug("Bash command: {}", commandString);
 
-                // 使用 source 执行脚本（而不是直接执行，这样可以保持环境变量）
-                String commandString = "source " + quote(new String[]{scriptPath});
-
-                // === 调试日志 ===
-                log.debug("=== BashProvider 调试 ===");
-                log.debug("原始命令: {}", command);
-                log.debug("脚本内容:\n{}", scriptContent);
-                log.debug("命令字符串: {}", commandString);
-
-                return new ExecCommandResult(commandString, cwdFilePath, tempScript);
+                return new ExecCommandResult(commandString, cwdFilePath);
 
             } catch (Exception e) {
                 throw new RuntimeException("Failed to build bash command", e);
@@ -327,28 +332,88 @@ public final class BashProvider implements ShellProvider {
         return sb.toString();
     }
 
+    // ========================================================================
+    // Shell command quoting (matching Open-ClaudeCode shellQuoting.ts)
+    // ========================================================================
+
     /**
-     * Quote a command for eval wrapping.
+     * Detects if a command contains a heredoc pattern.
+     * Matches patterns like: <<EOF, <<'EOF', <<"EOF", <<-EOF, etc.
+     * Excludes bit-shift operators and arithmetic expressions.
+     *
+     * Original source: src/utils/bash/shellQuoting.ts → containsHeredoc()
+     */
+    private static boolean containsHeredoc(String command) {
+        // Exclude bit-shift operators: digit << digit, [[ digit << digit ]], $((...<<...))
+        if (java.util.regex.Pattern.compile("\\d\\s*<<\\s*\\d").matcher(command).find()) return false;
+        if (java.util.regex.Pattern.compile("\\[\\[\\s*\\d+\\s*<<\\s*\\d+\\s*\\]\\]").matcher(command).find()) return false;
+        if (command.contains("$((") && java.util.regex.Pattern.compile("\\$\\(\\(.*<<.*\\)\\)").matcher(command).find()) return false;
+
+        return java.util.regex.Pattern.compile("<<-?\\s*(?:(['\"]?)(\\w+)\\1|\\\\(\\w+))").matcher(command).find();
+    }
+
+    /**
+     * Detects if a command contains multiline strings in quotes.
+     *
+     * Original source: src/utils/bash/shellQuoting.ts → containsMultilineString()
+     */
+    private static boolean containsMultilineString(String command) {
+        return java.util.regex.Pattern.compile("'(?:[^'\\\\]|\\\\.)*\\n(?:[^'\\\\]|\\\\.)*'").matcher(command).find()
+            || java.util.regex.Pattern.compile("\"(?:[^\"\\\\]|\\\\.)*\\n(?:[^\"\\\\]|\\\\.)*\"").matcher(command).find();
+    }
+
+    /**
+     * Detects if a command already has a stdin redirect.
+     * Match patterns like: < file, </path/to/file, < /dev/null
+     * But not <<EOF (heredoc), << (bit shift), or <(process substitution).
+     *
+     * Original source: src/utils/bash/shellQuoting.ts → hasStdinRedirect()
+     */
+    private static boolean hasStdinRedirect(String command) {
+        return java.util.regex.Pattern.compile("(?:^|[\\s;&|])<(?![<(])\\s*\\S+").matcher(command).find();
+    }
+
+    /**
+     * Checks if stdin redirect should be added to a command.
+     *
+     * Original source: src/utils/bash/shellQuoting.ts → shouldAddStdinRedirect()
+     */
+    static boolean shouldAddStdinRedirect(String command) {
+        if (containsHeredoc(command)) return false;
+        if (hasStdinRedirect(command)) return false;
+        return true;
+    }
+
+    /**
+     * Quotes a shell command appropriately, preserving heredocs and multiline strings.
      *
      * Original source: src/utils/bash/shellQuoting.ts → quoteShellCommand()
      *
-     * Uses $'...' syntax which:
-     * - Allows proper escaping of special characters
-     * - Preserves double quotes inside the command
-     * - Works correctly with eval
-     *
-     * The backslash escaping ensures:
-     * - Single quotes become \'
-     * - Backslashes become \\
-     * - Double quotes are preserved (no escaping needed inside $'...')
+     * @param command The command to quote
+     * @param addStdinRedirect Whether to add < /dev/null
+     * @return The properly quoted command string
      */
-    private static String quoteForEval(String command) {
-        // Use $'...' syntax with proper backslash escaping
-        // This allows double quotes to be preserved inside the command
-        String escaped = command
-                .replace("\\", "\\\\")  // Escape backslashes first
-                .replace("'", "\\'");    // Escape single quotes
-        return "$'" + escaped + "'";
+    static String quoteShellCommand(String command, boolean addStdinRedirect) {
+        // If command contains heredoc or multiline strings, handle specially
+        // Avoids the shell-quote library's aggressive escaping of ! to \!
+        if (containsHeredoc(command) || containsMultilineString(command)) {
+            String escaped = command.replace("'", "'\"'\"'");
+            String quoted = "'" + escaped + "'";
+
+            // Don't add stdin redirect for heredocs as they provide their own input
+            if (containsHeredoc(command)) {
+                return quoted;
+            }
+
+            // For multiline strings without heredocs, add stdin redirect if needed
+            return addStdinRedirect ? quoted + " < /dev/null" : quoted;
+        }
+
+        // For regular commands, use standard shell quoting
+        if (addStdinRedirect) {
+            return quote(new String[]{command, "<", "/dev/null"});
+        }
+        return quote(new String[]{command});
     }
 
     /**

@@ -38,7 +38,7 @@ public class CliAgentTool extends Tool {
     @Override
     public String description() {
         return """
-                管理 CLI Agent (Claude Code / OpenCode)，让主代理能够启动和管理 CLI 子代理。
+                使用第三方工具 (Claude Code / OpenCode)完成子任务。
 
                 支持的操作:
                 - bind: 绑定项目路径到项目名称

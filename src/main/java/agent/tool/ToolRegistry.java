@@ -1,9 +1,6 @@
 package agent.tool;
 
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
 
 import lombok.extern.slf4j.Slf4j;
@@ -83,6 +80,10 @@ public class ToolRegistry {
         return tools.containsKey(name);
     }
 
+    public Collection<? extends Tool> getTools() {
+        return tools.values();
+    }
+
     /**
      * 获取所有工具定义（对齐 Python: get_definitions）
      *
@@ -106,7 +107,7 @@ public class ToolRegistry {
      * @param params 工具参数（可为空）
      * @return 工具执行结果（字符串）
      */
-    public CompletableFuture<String> execute(String name, Map<String, Object> params) {
+    public CompletableFuture<String> execute(String name, Map<String, Object> params, ToolUseContext parentUseContext) {
         Tool tool = tools.get(name);
         if (tool == null) {
             // 对齐 Python：报错并给出可用工具名列表
@@ -135,7 +136,7 @@ public class ToolRegistry {
 
             // 执行工具（对齐 Python: await tool.execute(**params)）
             // Java：Tool.execute(Map) 返回 CompletionStage<String>，这里转 CompletableFuture 方便链式处理
-            return tool.execute(safeParams)
+            return tool.execute(safeParams, parentUseContext)
                     .handle((result, ex) -> {
                         // 对齐 Python：异常进入 except，返回 Error executing ... + HINT
                         if (ex != null) {

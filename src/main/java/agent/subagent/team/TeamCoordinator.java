@@ -32,6 +32,9 @@ public class TeamCoordinator {
     /** Teammate 信箱 */
     private final TeammateMailbox mailbox;
 
+    /** 当前使用的后端类型 */
+    private BackendType currentBackendType;
+
     public TeamCoordinator() {
         this.backendRouter = new BackendRouter();
         this.registry = new TeammateRegistry();
@@ -56,24 +59,29 @@ public class TeamCoordinator {
 
         // 1. 检测后端
         Backend backend = backendRouter.detectBackend();
+        this.currentBackendType = backend.type();
 
         // 2. 创建 pane
-        String paneId = backend.createPane(config.name, config.color);
+        Backend.CreatePaneResult result = backend.createPane(config.name, config.color);
+        String paneId = result.getPaneId();
 
-        // 3. 注册 teammate
-        TeammateInfo info = new TeammateInfo(
-            paneId,
-            config.name,
-            config.teamName,
-            backend.type(),
-            config.prompt
-        );
+        // 3. 构建 teammate 信息
+        TeammateInfo info = TeammateInfo.builder()
+                .name(config.name)
+                .teamName(config.teamName)
+                .color(config.color)
+                .paneId(paneId)
+                .isFirstTeammate(result.isFirstTeammate())
+                .status("running")
+                .build();
+
+        // 4. 注册 teammate
         registry.register(info);
 
-        // 4. 发送初始命令
+        // 5. 发送初始命令
         backend.sendCommand(paneId, config.prompt);
 
-        log.info("Spawned teammate: id={}, name={}, backend={}", info.getId(), info.getName(), info.getBackendType());
+        log.info("Spawned teammate: id={}, name={}, backend={}", info.getTeammateId(), info.getName(), currentBackendType);
         return info;
     }
 
@@ -88,7 +96,7 @@ public class TeamCoordinator {
 
         TeammateInfo info = registry.get(teammateId);
         if (info != null) {
-            Backend backend = backendRouter.createBackend(info.getBackendType().getValue());
+            Backend backend = backendRouter.createBackend(currentBackendType.getValue());
             backend.killPane(info.getPaneId());
             registry.unregister(teammateId);
             log.info("Killed teammate: id={}", teammateId);
@@ -138,6 +146,13 @@ public class TeamCoordinator {
      */
     public TeammateRegistry getRegistry() {
         return registry;
+    }
+
+    /**
+     * 获取当前后端类型
+     */
+    public BackendType getCurrentBackendType() {
+        return currentBackendType;
     }
 
     /**

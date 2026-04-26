@@ -6,13 +6,15 @@ import agent.subagent.task.AppState;
 import agent.subagent.task.TaskControlService;
 import agent.subagent.task.TaskRegistry;
 import agent.subagent.fork.ForkAgentExecutor;
-import agent.subagent.fork.ForkSubagentTool;
 import agent.subagent.fork.ForkContext;
 import agent.subagent.context.SubagentContext;
 import agent.tool.*;
 import agent.tool.cli.CliAgentTool;
 import agent.tool.cron.CronTool;
-import agent.subagent.task.todo.TodoWriteTool;
+import agent.tool.plan.AskUserQuestionTool;
+import agent.tool.plan.EnterPlanModeTool;
+import agent.tool.plan.ExitPlanModeTool;
+import agent.tool.task.TodoWriteTool;
 import agent.tool.file.*;
 import agent.tool.mcp.McpManager;
 import agent.tool.message.MessageTool;
@@ -20,6 +22,7 @@ import agent.tool.message.PruneMessagesTool;
 import agent.tool.shell.ExecTool;
 import agent.tool.shell.Shell;
 import agent.tool.skill.SkillTool;
+import agent.tool.task.TaskStopTool;
 import agent.tool.web.WebFetchTool;
 import agent.tool.web.WebSearchTool;
 import bus.InboundMessage;
@@ -30,6 +33,7 @@ import cn.hutool.core.io.resource.ResourceUtil;
 import cn.hutool.core.util.StrUtil;
 import config.Config;
 import config.agent.AgentRuntimeSettings;
+import config.agent.SessionMemoryConfig;
 
 import config.channel.ChannelsConfig;
 import config.mcp.MCPServerConfig;
@@ -39,18 +43,32 @@ import config.tool.WebSearchConfig;
 import context.ContextBuilder;
 import context.ContextOverflowDetector;
 import context.ContextWindowDiscovery;
+import context.auto.AutoCompactService;
+import context.auto.AutoCompactThreshold;
+import context.auto.CompactBoundary;
+import context.auto.CompactPrompt;
+import context.auto.CompactService;
+import context.auto.CompactionResult;
+import context.auto.MicroCompactService;
+import context.auto.PlanFileManager;
+import context.auto.PostCompactCleanup;
+import context.auto.ReadFileState;
+import context.auto.SessionMemoryCompactService;
 import corn.CronService;
 import memory.MemoryStore;
 import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import providers.LLMProvider;
+import providers.CancelChecker;
 import providers.ToolCallRequest;
 import providers.cli.CliAgentCommandHandler;
 import context.ContextPruner;
 import context.ContextPruningSettings;
 import session.Session;
 import session.SessionManager;
+import session.SessionMemoryService;
+import session.SessionMemoryUtils;
 import skills.SkillsLoader;
 import utils.GsonFactory;
 import utils.Helpers;
@@ -59,9 +77,11 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.function.Consumer;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.nio.file.Files;
+import java.nio.file.Path;
 
 import static utils.Helpers.stripThink;
 import static utils.Helpers.toolHint;
@@ -108,6 +128,15 @@ public class AgentLoop {
      * Fork 代理执行器（Phase 4 集成）
      */
     private final ForkAgentExecutor forkAgentExecutor;
+    /**
+     * Session Memory 服务
+     */
+    private final SessionMemoryService sessionMemoryService;
+    /**
+     * Read file state tracking (for post-compact file restoration)
+     * Aligned with Open-ClaudeCode readFileState in ToolUseContext
+     */
+    private final ReadFileState readFileState = new ReadFileState();
     private final AgentRuntimeSettings runtimeSettings;
     private final ExecutorService executor;
     private final MemoryStore memoryStore;
@@ -225,14 +254,7 @@ public class AgentLoop {
         this.appState = new AppState();
         this.taskRegistry = TaskRegistry.getInstance();
         this.taskControl = new TaskControlService(taskRegistry);
-        // Phase 4: 初始化 ForkAgentExecutor（传入 AppState 和 Setter）
-        this.forkAgentExecutor = new ForkAgentExecutor(provider, workspace, maxIterations,
-            (runId, directive, result) -> {
-                // Fork 完成回调 - 通知任务完成
-                log.info("Fork [{}] completed: {}", runId, directive);
-            },
-            appState,
-            appState.setter());
+
         this.mcpServers = (mcpServers != null) ? mcpServers : Map.of();
         this.mcpManager = new McpManager(workspace, mcpServers, executor);
 
@@ -309,15 +331,33 @@ public class AgentLoop {
             handleCliAgentCompletion(completionEvent);
         });
 
-        // 注册工具
+        // 创建共享工具和文件缓存（需要在 registerSharedTools 之前）
         this.sharedTools = new ToolRegistry();
         this.sharedFileCache = new FileStateCache();
+
+        // 注册工具
+        registerSharedTools();
 
         // 技能工具
         this.skillsLoader = new SkillsLoader(workspace);
         this.commandManager = new CommandQueueManager(skillsLoader);
 
         registerSharedTools();
+
+        // Phase 4: 初始化 ForkAgentExecutor（传入 sharedTools 作为 ToolView）
+        java.nio.file.Path sessionsDir = workspace.resolve("sessions");
+        this.forkAgentExecutor = new ForkAgentExecutor(provider, workspace, sessionsDir,
+            (runId, directive, result) -> {
+                // Fork 完成回调 - 通知任务完成
+                log.info("Fork [{}] completed: {}", runId, directive);
+            },
+            appState,
+            appState.setter(),
+            new agent.tool.CompositeToolView(sharedTools));
+
+        // 初始化 Session Memory 服务
+        config.agent.SessionMemoryConfig smConfig = currentConfig().getAgents().getDefaults().getSessionMemory();
+        this.sessionMemoryService = new SessionMemoryService(smConfig, workspace, provider, forkAgentExecutor);
 
         int maxConcurrent = 4;
         if (runtimeSettings != null) {
@@ -328,6 +368,8 @@ public class AgentLoop {
         this.memoryStore = new MemoryStore(workspace);
         // AgentLoopQueue 使用独立线程池，避免 executeImmediately 中的 join() 阻塞共享线程池导致死锁
         this.queue = new AgentLoopQueue(maxConcurrent);
+        // 设置任务开始回调，清除停止标记，确保队列任务不受之前 /stop 命令影响
+        this.queue.setOnTaskStart(sessionKey -> clearStopRequested(sessionKey));
         this.cronToolFacade = (cronService != null) ? new CronTool(cronService) : null;
     }
 
@@ -396,9 +438,85 @@ public class AgentLoop {
         return runtimeSnapshot().maxTokens();
     }
 
+    // ==================== New Auto-Compact Methods (aligned with Open-ClaudeCode) ====================
+
+    /**
+     * 计算有效的上下文窗口（对齐 Open-ClaudeCode）
+     * effectiveContextWindow = contextWindow - maxOutputTokens - reservedForSummary
+     */
+    private int currentEffectiveContextWindow() {
+        int maxOutput = currentMaxTokens();
+        return AutoCompactThreshold.calculateEffectiveContextWindow(contextWindow, maxOutput);
+    }
+
+    /**
+     * 获取自动压缩触发阈值（对齐 Open-ClaudeCode）
+     * 触发条件: tokenCount >= (effectiveContextWindow - 13,000)
+     */
+    private int currentAutoCompactThreshold() {
+        return AutoCompactThreshold.getAutoCompactThreshold(currentEffectiveContextWindow());
+    }
+
+    /**
+     * 检查是否应该触发自动压缩（对齐 Open-ClaudeCode）
+     */
+    private boolean shouldAutoCompact(long tokenUsage, String querySource, AutoCompactService.AutoCompactTrackingState tracking) {
+        return shouldAutoCompact(tokenUsage, querySource, tracking, 0);
+    }
+
+    /**
+     * 检查是否应该触发自动压缩（带 snipTokensFreed 参数）
+     */
+    private boolean shouldAutoCompact(long tokenUsage, String querySource, AutoCompactService.AutoCompactTrackingState tracking, long snipTokensFreed) {
+        return AutoCompactService.shouldAutoCompact(
+                null, // messages not needed with token usage
+                tokenUsage,
+                currentEffectiveContextWindow(),
+                isAutoCompactEnabled(),
+                querySource,
+                tracking,
+                snipTokensFreed
+        );
+    }
+
+    /**
+     * 检查 autoCompact 是否启用
+     * 对齐: Open-ClaudeCode/src/services/compact/autoCompact.ts:147-158
+     *
+     * 检查顺序:
+     * 1. DISABLE_COMPACT 环境变量 — 完全禁用所有压缩
+     * 2. DISABLE_AUTO_COMPACT 环境变量 — 仅禁用自动压缩（手动 /compact 仍可用）
+     * 3. config.agents.defaults.autoCompactEnabled — 用户配置
+     */
+    private boolean isAutoCompactEnabled() {
+        // 1. Check DISABLE_COMPACT — completely disables all compaction
+        String disableCompact = System.getenv("DISABLE_COMPACT");
+        if ("1".equals(disableCompact) || "true".equalsIgnoreCase(disableCompact)) {
+            return false;
+        }
+        // 2. Check DISABLE_AUTO_COMPACT — disables only auto-compact
+        String disableAutoCompact = System.getenv("DISABLE_AUTO_COMPACT");
+        if ("1".equals(disableAutoCompact) || "true".equalsIgnoreCase(disableAutoCompact)) {
+            return false;
+        }
+        // 3. Check user config — defaults to true
+        return currentConfig().getAgents().getDefaults().isAutoCompactEnabled();
+    }
+
+    /**
+     * 获取 token 使用警告状态
+     */
+    private AutoCompactThreshold.TokenWarningState getTokenWarningState(long tokenUsage) {
+        return AutoCompactService.getTokenWarningState(
+                tokenUsage,
+                currentEffectiveContextWindow(),
+                isAutoCompactEnabled()
+        );
+    }
+
     /**
      * 计算当前上下文比例（使用真实 token 数据，不再估算）
-     * 
+     *
      * @param usageAcc   Usage 累积器
      * @param messages   当前消息列表（仅在第一轮无真实数据时使用）
      * @return 上下文比例 (0.0 ~ 1.0)
@@ -440,13 +558,11 @@ public class AgentLoop {
         sharedTools.register(new FileSystemTools.ReadWordStructuredTool(workspace, allowedDir));
 
         sharedTools.register(new ListFilesTool(workspace, allowedDir, cliAgentHandler.getProjectRegistry()));
-//        sharedTools.register(new FileSystemTools.ReadPptTool(workspace, allowedDir));
-//        sharedTools.register(new FileSystemTools.ReadPptStructuredTool(workspace, allowedDir));
-//        sharedTools.register(new FileSystemTools.ReadWordTool(workspace, allowedDir));
-//        sharedTools.register(new FileSystemTools.ReadWordStructuredTool(workspace, allowedDir));
         // 校验git环境
-        Shell.setWindowsBashPath(runtimeSnapshot().windowsBashPath());
-        Shell.getShellConfig();
+        if (Shell.isWindows()) {
+            Shell.setWindowsBashPath(runtimeSnapshot().windowsBashPath());
+            Shell.getShellConfig();
+        }
         sharedTools.register(new ExecTool(
                 currentTools().getExec().getTimeout() * 1000,
                 workspace.toString(),
@@ -479,10 +595,23 @@ public class AgentLoop {
         }
 
         // Subagent 工具（AgentTool - 新系统）
-        sharedTools.register(new agent.subagent.execution.AgentTool());
+        agent.subagent.execution.AgentTool agentTool = new agent.subagent.execution.AgentTool();
+        agentTool.setForkExecutor(forkAgentExecutor);
+        agentTool.setSessionsDir(workspace.resolve("sessions"));
+        agentTool.setSessions(sessions);
+        // Background agent executor for built-in agents (Explore, Plan, general-purpose)
+        agent.subagent.execution.BackgroundAgentExecutor bgExecutor =
+            new agent.subagent.execution.BackgroundAgentExecutor(appState, appState.setter(), bus, new agent.tool.CompositeToolView(sharedTools));
+        agentTool.setBackgroundExecutor(bgExecutor);
+        sharedTools.register(agentTool);
 
         // MCP 重载工具：按名称刷新指定 MCP server
         sharedTools.register(new agent.tool.mcp.McpReloadTool(mcpManager));
+
+        // Plan Mode 工具
+        sharedTools.register(new agent.tool.plan.EnterPlanModeTool());
+        sharedTools.register(new agent.tool.plan.ExitPlanModeTool());
+        sharedTools.register(new agent.tool.plan.AskUserQuestionTool());
     }
 
     private ToolsConfig currentTools() {
@@ -504,45 +633,8 @@ public class AgentLoop {
         // 每次请求独立创建 MessageTool，避免串会话
         localTools.register(new MessageTool(bus::publishOutbound, channel, chatId, messageId));
 
-        // ========== Phase 4: Fork 子代理工具 ==========
-        // 创建 ForkExecutorCallback - 用于执行 Fork 子代理
-        ForkSubagentTool.ForkExecutorCallback forkCallback = (task, label, runInBackground) -> {
-            try {
-                // 获取当前会话的消息历史
-                Session session = sessions.getOrCreate(sessionKy);
-                List<Map<String, Object>> parentMessages = session != null ? session.getMessages() : List.of();
-
-                // 构建 ForkContext
-                ForkContext forkContext = ForkContext.builder()
-                        .parentAgentId("main")
-                        .directive(task)
-                        .parentMessages(parentMessages)
-                        .build();
-
-                // 创建 SubagentContext（简化版本）
-                SubagentContext subagentContext = SubagentContext.builder()
-                        .progressTracker(null)
-                        .parentAbortSignal(null)
-                        .build();
-
-                // 执行 Fork
-                String runId = UUID.randomUUID().toString().substring(0, 8);
-                forkAgentExecutor.execute(forkContext, subagentContext);
-
-                return ForkSubagentTool.ForkExecutionResult.success(runId, "Fork started");
-            } catch (Exception e) {
-                log.error("Fork execution failed", e);
-                return ForkSubagentTool.ForkExecutionResult.failure(e.getMessage());
-            }
-        };
-
-        // 注册 ForkSubagentTool (sessions_spawn)
-        ForkSubagentTool forkTool = new ForkSubagentTool(forkCallback, sessions);
-        forkTool.setSessionKey(sessionKy);
-        localTools.register(forkTool);
-
         // TaskStopTool: 允许 Agent 停止任务
-        localTools.register(new agent.subagent.task.TaskStopTool(
+        localTools.register(new TaskStopTool(
                 taskControl,
                 () -> appState,
                 appState.setter()
@@ -567,7 +659,69 @@ public class AgentLoop {
         // MCP 动态工具快照
         ToolRegistry mcpTools = mcpManager.snapshotRegistry();
 
-        return new CompositeToolView(sharedTools, mcpTools, localTools);
+        ToolView toolView = new CompositeToolView(sharedTools, mcpTools, localTools);
+
+        // Plan mode: filter out write/edit tools so the LLM can only explore
+        if (agent.tool.plan.PlanModeState.isPlanMode(sessionKy)) {
+            toolView = new PlanModeToolView(toolView);
+        }
+
+        return toolView;
+    }
+
+    /**
+     * ToolView wrapper that filters out write/edit tools during plan mode.
+     * The wrapped view retains all tools for execution (so ExitPlanMode etc. work),
+     * but getDefinitions() hides write_file and edit_file from the LLM.
+     */
+    private static class PlanModeToolView implements ToolView {
+        private static final java.util.Set<String> PLAN_MODE_DISALLOWED = java.util.Set.of(
+            "write_file", "edit_file"
+        );
+
+        private final ToolView delegate;
+
+        PlanModeToolView(ToolView delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public java.util.List<java.util.Map<String, Object>> getDefinitions() {
+            java.util.List<java.util.Map<String, Object>> all = delegate.getDefinitions();
+            java.util.List<java.util.Map<String, Object>> filtered = new java.util.ArrayList<>();
+            for (java.util.Map<String, Object> def : all) {
+                String name = extractToolName(def);
+                if (name != null && PLAN_MODE_DISALLOWED.contains(name)) {
+                    continue;
+                }
+                filtered.add(def);
+            }
+            return filtered;
+        }
+
+        @SuppressWarnings("unchecked")
+        private String extractToolName(java.util.Map<String, Object> def) {
+            Object fn = def.get("function");
+            if (fn instanceof java.util.Map<?, ?> map) {
+                Object name = map.get("name");
+                return name == null ? null : String.valueOf(name);
+            }
+            return null;
+        }
+
+        @Override
+        public java.util.concurrent.CompletionStage<String> execute(String name, java.util.Map<String, Object> args, ToolUseContext parentUseContext) {
+            return delegate.execute(name, args, parentUseContext);
+        }
+
+        @Override
+        public Tool get(String name) { return delegate.get(name); }
+
+        @Override
+        public java.util.List<Tool> getTools() { return delegate.getTools(); }
+
+        @Override
+        public void addTool(Tool tool) { delegate.addTool(tool); }
     }
 
     /**
@@ -781,7 +935,15 @@ public class AgentLoop {
             // 移除同步等待，直接继续
         }
 
-        // 3) 使用 TaskControlService 杀死所有 Agent 任务（Phase 4 集成）
+        // 3) 重置会话的 token 计数，避免后续对话误触发压缩检测
+        Session sess = sessions.getOrCreate(sessionKey);
+        sess.setTotalTokens(0);
+        sess.setLastCallInput(0);
+        sess.setLastCallOutput(0);
+        sess.setLastCallCacheRead(0);
+        sess.setLastCallCacheWrite(0);
+
+        // 4) 使用 TaskControlService 杀死所有 Agent 任务（Phase 4 集成）
         int agentTasksKilled = 0;
         if (taskControl != null && appState != null) {
             agentTasksKilled = taskControl.killAllAgentTasks(appState, appState.setter());
@@ -896,24 +1058,36 @@ public class AgentLoop {
             return handleMemoryCommand(msg, sessions.getOrCreate(msg.getSessionKey()));
         }
 
+        // ========== /fork 命令 ==========
+        if (cmd.startsWith("/fork")) {
+            return handleForkCommand(msg);
+        }
+
         if ("/help".equalsIgnoreCase(cmd)) {
             String output = "🐱 javaclawbot 命令:\n\n" +
                     "对话管理:\n" +
-                    "  /new — 开始新对话\n" +
-                    "  /clear — 清空当前对话\n" +
+                    "  /new — 开始新会话\n" +
+                    "  /clear — 清空当前会话\n" +
+                    "  /resume <sessionId> — 恢复指定会话\n" +
+                    "  /init — 初始化项目\n" +
                     "  /memory — 整理当前对话记忆\n" +
+                    "  /context-press — 触发上下文压缩\n" +
                     "  /stop — 停止当前任务\n" +
-                    "  /help — 显示可用命令\n\n" +
-                    "项目绑定:\n" +
+                    "  /help — 显示本帮助\n\n" +
+                    "Fork 子代理:\n" +
+                    "  /fork <指令> — Fork 并行子代理执行任务（fire-and-forget）\n\n" +
+                    "MCP:\n" +
+                    "  /mcp-reload — 重新加载 MCP 插件\n\n" +
+                    "项目绑定 (开发模式):\n" +
                     "  /bind <名称>=<路径> — 绑定项目\n" +
                     "  /bind --main <路径> — 直接设为主代理项目\n" +
                     "  /unbind <名称> — 解绑项目\n" +
-                    "  /projects — 列出所有项目\n\n" +
-                    "CLI Agent:\n" +
-                    "  /cc <项目> <提示词> — 使用 Claude Code\n" +
-                    "  /oc <项目> <提示词> — 使用 OpenCode\n" +
-                    "  /status [项目] — 查看状态\n" +
-                    "  /stop <项目> [类型] — 停止 Agent\n" +
+                    "  /projects — 列出所有已绑定项目\n\n" +
+                    "CLI Agent (开发模式):\n" +
+                    "  /cc <项目> <提示词> — 使用 Claude Code 执行任务\n" +
+                    "  /oc <项目> <提示词> — 使用 OpenCode 执行任务\n" +
+                    "  /status [项目] — 查看 Agent 状态\n" +
+                    "  /stop <项目> [类型] — 停止指定 Agent\n" +
                     "  /stopall — 停止所有 CLI Agent";
             commandManager.addLocalCommand(new LocalCommand(cmd, output));
             return CompletableFuture.completedFuture(new OutboundMessage(
@@ -941,9 +1115,21 @@ public class AgentLoop {
         return null;
     }
 
-    public static Set<String> system_cmd = Set.of("/context-press", "/help", "/init", "/clear", "/memory", "/mcp-reload", "/mcp-init" );
+    public static Set<String> system_cmd = Set.of("/context-press", "/help", "/init", "/clear", "/memory", "/mcp-reload", "/mcp-init", "/resume", "/fork");
+
     /**
-     * 入口处检测并执行上下文压缩
+     * Auto-compact tracking state (circuit breaker)
+     */
+    private final java.util.concurrent.ConcurrentHashMap<String, AutoCompactService.AutoCompactTrackingState> autoCompactTracking =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * 入口处检测并执行上下文压缩（对齐 Open-ClaudeCode）
+     *
+     * Key changes from old implementation:
+     * - Uses token-based threshold: tokenCount >= (effectiveContextWindow - 13,000)
+     * - Circuit breaker: stops after 3 consecutive failures
+     * - Uses session.getTotalTokens() for accurate token count
      */
     private void checkAndExecuteContextCompress(InboundMessage msg) {
         // 跳过系统消息和命令
@@ -956,7 +1142,6 @@ public class AgentLoop {
 
         String sessionKey = msg.getSessionKey();
         Session session = sessions.getOrCreate(sessionKey);
-        List<Map<String, Object>> history = session.getHistory();
 
         // 如果 lastCall 为 0（刚完成压缩或首次对话），跳过检测
         if (session.getLastCallInput() == 0 && session.getLastCallOutput() == 0
@@ -964,22 +1149,42 @@ public class AgentLoop {
             return;
         }
 
-        // 使用 Session 中持久化的 usage 数据计算上下文比例
-        // 注意：usageAcc 是内存中的，重启后为空，所以直接使用 session 的 usage 数据
-        double threshold = currentConsolidateThreshold();
+        // 使用 Session 中持久化的 usage 数据
+        // 注意：这里用 totalTokens 而不是 lastCallPromptTokens，因为需要累积的上下文大小
         long totalUsedTokens = session.getTotalTokens();
-        UsageAccumulator usageAcc = session.obtainLastUsage();
+        long currentUsedTokens = session.getLastCallInput() + session.getLastCallOutput();
 
-        double contextRatio = getContextRatioByUsage(usageAcc, history);
+        // 获取/创建 tracking state
+        AutoCompactService.AutoCompactTrackingState tracking = autoCompactTracking.computeIfAbsent(
+                sessionKey, k -> new AutoCompactService.AutoCompactTrackingState()
+        );
+
+        // 检查是否应该触发压缩
+        int threshold = currentAutoCompactThreshold();
+
         String totalUsedStr = totalUsedTokens >= 1_000_000
                 ? String.format("%.1fM", totalUsedTokens / 1_000_000.0)
                 : totalUsedTokens >= 1_000
                         ? String.format("%.1fK", totalUsedTokens / 1_000.0)
                         : String.valueOf(totalUsedTokens);
-        if (contextRatio > threshold) {
-            log.info("入口检测：上下文使用率 {}% (已用 {} tokens)，执行压缩",
-                    String.format("%.1f", contextRatio * 100),
-                    totalUsedStr);
+
+        String currentUsageTotalUsedStr = currentUsedTokens >= 1_000_000
+                ? String.format("%.1fM", currentUsedTokens / 1_000_000.0)
+                : currentUsedTokens >= 1_000
+                        ? String.format("%.1fK", currentUsedTokens / 1_000.0)
+                        : String.valueOf(currentUsedTokens);
+
+        // 使用新的 token-based 检查
+        if (currentUsedTokens >= threshold) {
+            // 检查 circuit breaker
+            if (tracking.consecutiveFailures >= AutoCompactThreshold.MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES) {
+                log.info("入口检测：跳过压缩（circuit breaker 已触发，{} 次连续失败）",
+                        tracking.consecutiveFailures);
+                return;
+            }
+
+            log.info("入口检测：当前上下文使用 {} tokens >= 阈值 {}，执行压缩",
+                    currentUsageTotalUsedStr, threshold);
 
             // 通知用户
             bus.publishOutbound(new OutboundMessage(
@@ -991,24 +1196,42 @@ public class AgentLoop {
             )).toCompletableFuture().join();
 
             // 执行上下文压缩
-            executeContextCompress(msg);
+            boolean success = executeContextCompress(msg);
+
+            if (success) {
+                // 成功，重置失败计数
+                tracking.consecutiveFailures = 0;
+                tracking.compacted = true;
+                tracking.turnCounter = 0;
+            } else {
+                // 失败，增加失败计数
+                tracking.consecutiveFailures++;
+                log.warn("上下文压缩失败，连续失败次数: {}", tracking.consecutiveFailures);
+            }
 
             // 通知用户
             bus.publishOutbound(new OutboundMessage(
                     msg.getChannel(),
                     msg.getChatId(),
-                    "上下文压缩完成, 请继续对话",
+                    success ? "上下文压缩完成, 请继续对话" : "上下文压缩失败",
                     List.of(),
                     Map.of()
             )).toCompletableFuture().join();
-            log.info("上下文压缩完成");
+            log.info("上下文压缩完成: success={}", success);
         }
     }
 
     /**
-     * 执行上下文压缩（只压缩消息，不整理记忆）
+     * 执行上下文压缩（对齐 Open-ClaudeCode）
+     *
+     * 使用新的 CompactService 进行压缩，支持:
+     * - Direct LLM API call (streamCompactSummary) without tools
+     * - Proper boundary markers
+     * - Post-compact cleanup
+     *
+     * @return true if compaction succeeded, false otherwise
      */
-    private void executeContextCompress(InboundMessage message) {
+    private boolean executeContextCompress(InboundMessage message) {
         var channel = message.getChannel();
         var sessionKey = message.getSessionKey();
         var chatId = message.getChatId();
@@ -1016,40 +1239,185 @@ public class AgentLoop {
         Session sess = sessions.getOrCreate(sessionKey);
 
         try {
-            // 构建压缩消息系统提示词
-            List<Map<String, Object>> initial = context.buildContextCompressMessages(
-//                sessions.getOrCreate(sessionKey).getHistory(),
-                    List.of(),
-                    MemoryStore.PRUNE_SYSTEM_PROMPT.replaceAll("\\{workspace}", workspace.toAbsolutePath().toString()),
-                    null, channel, chatId
+            // 获取当前消息历史
+            List<Map<String, Object>> messages = sess.getHistory();
+
+            if (messages.isEmpty()) {
+                log.warn("executeContextCompress: no messages to compress");
+                return false;
+            }
+
+            // Snapshot read file state before compaction (for post-compact restoration)
+            Map<String, Long> preCompactReadFileSnapshot = readFileState.snapshot();
+
+            // 估计压缩前的 token 数
+            long preCompactTokenCount = CompactService.estimatePreCompactTokenCount(messages);
+
+            // 尝试快速压缩路径：使用 session memory（无需 LLM 调用）
+            // 对齐 Open-ClaudeCode: shouldUseSessionMemoryCompaction() 检查两个 flag
+            config.agent.SessionMemoryConfig smConfig = currentConfig().getAgents().getDefaults().getSessionMemory();
+            boolean sessionMemoryEnabled = smConfig != null && smConfig.isEffectivelyEnabled();
+            boolean smCompactEnabled = smConfig != null && smConfig.isSmCompactEnabled();
+
+            if (SessionMemoryCompactService.shouldUseSessionMemoryCompaction(sessionMemoryEnabled, smCompactEnabled)) {
+                SessionMemoryCompactService.CompactionResult smResult =
+                        SessionMemoryCompactService.trySessionMemoryCompaction(
+                                sessionMemoryService,
+                                sessionKey,
+                                messages,
+                                (long) currentAutoCompactThreshold()
+                        );
+
+                if (smResult != null) {
+                    // 快速路径成功：使用 session memory 作为摘要
+                    log.info("executeContextCompress: using session memory fast path, {} messages to keep",
+                            smResult.messagesToKeep.size());
+
+                    // 收集 post-compact attachments
+                    List<Map<String, Object>> attachments = collectPostCompactAttachments(
+                            sessionKey, preCompactReadFileSnapshot, smResult.messagesToKeep);
+
+                    // 构建压缩后的消息列表
+                    List<Map<String, Object>> compactedMessages = new java.util.ArrayList<>();
+                    compactedMessages.add(smResult.boundaryMarker);
+                    compactedMessages.addAll(smResult.summaryMessages);
+                    compactedMessages.addAll(smResult.messagesToKeep);
+                    compactedMessages.addAll(attachments);
+
+                    // 更新 session
+                    sess.setMessages(compactedMessages);
+                    sess.setUpdatedAt(java.time.LocalDateTime.now());
+                    // 重置当前结果
+                    sess.setLastCallCacheRead(0);
+                    sess.setLastCallInput(0);
+                    sess.setLastConsolidated(0);
+                    sess.setLastCallOutput(0);
+
+                    sessions.save(sess);
+
+                    // Clear read file state after compaction (files will be re-tracked on next read)
+                    readFileState.clear();
+
+                    PostCompactCleanup.runPostCompactCleanup();
+                    PostCompactCleanup.notifyCompaction("auto", null);
+                    PostCompactCleanup.markPostCompaction();
+
+                    return true;
+                }
+            }
+
+            // Fallback: 传统 LLM 压缩
+
+            // 准备要摘要的消息（去掉 images）
+            List<Map<String, Object>> messagesToSummarize =
+                    MicroCompactService.stripImagesFromMessages(messages);
+
+            // 创建 cancel checker
+            CancelChecker cancelChecker = () -> isStopRequested(sessionKey);
+
+            // 创建进度回调
+            Consumer<String> progressCallback = (delta) -> {
+                if (delta != null && !delta.isEmpty()) {
+                    bus.publishOutbound(new OutboundMessage(
+                            message.getChannel(),
+                            message.getChatId(),
+                            "(上下文压缩) " + delta,
+                            List.of(),
+                            Map.of()
+                    ));
+                }
+            };
+
+            // 使用 streamCompactSummary 直接调用 LLM API 生成摘要
+            CompactService.CompactSummaryResult result =
+                    CompactService.streamCompactSummary(
+                            provider,
+                            messagesToSummarize,
+                            null,  // customInstructions
+                            progressCallback,
+                            cancelChecker
+                    );
+
+            if (!result.isSuccess()) {
+                log.warn("executeContextCompress: streamCompactSummary failed: {}", result.getError());
+                return false;
+            }
+
+            // 格式化摘要（去除 analysis 标签等）
+            String formattedSummary = CompactPrompt.formatCompactSummary(result.getSummary());
+
+            // 创建摘要消息
+            Map<String, Object> summaryMsg = new java.util.LinkedHashMap<>();
+            summaryMsg.put("role", "user");
+            summaryMsg.put("content", CompactPrompt.getCompactUserSummaryMessage(
+                    formattedSummary, true, null, true));
+            summaryMsg.put("isCompactSummary", true);
+            summaryMsg.put("timestamp", java.time.LocalDateTime.now().toString());
+
+            // 获取最后一条消息的 UUID
+            String lastUuid = null;
+            if (!messages.isEmpty()) {
+                Object uuid = messages.get(messages.size() - 1).get("uuid");
+                if (uuid instanceof String s) lastUuid = s;
+            }
+
+            // 创建边界标记
+            Map<String, Object> boundary = CompactBoundary.createCompactBoundaryMessage(
+                    "auto",
+                    preCompactTokenCount,
+                    lastUuid
             );
-            ToolView tools = buildContextCompressRequestTools(sessionKey, channel, chatId, null);
 
-            // 创建临时消息用于 runAgentLoop
-            InboundMessage compressMsg = new InboundMessage();
-            compressMsg.setChannel(channel);
-            compressMsg.setSenderId(message.getSenderId());
-            compressMsg.setContent("");
-            compressMsg.setSessionKeyOverride(sessionKey);
+            // 添加摘要消息
+            List<Map<String, Object>> summaryMessages = List.of(summaryMsg);
 
-            // 同步执行（不需要保存到 session）
-            runAgentLoop(compressMsg, initial
-                    , tools, false
-                    , (context, toolHit) -> bus.publishOutbound(new OutboundMessage(
-                    message.getChannel()
-                            , message.getChatId()
-                            , "(上下文压缩进程) " + context
-                            , List.of()
-                            , Map.of()
-                    )
-            ), false).toCompletableFuture().join();
+            // 收集 post-compact attachments
+            List<Map<String, Object>> attachments = collectPostCompactAttachments(
+                    sessionKey, preCompactReadFileSnapshot, List.of());
+
+            // 构建压缩后的消息列表
+            List<Map<String, Object>> compactedMessages = new java.util.ArrayList<>();
+            compactedMessages.add(boundary);
+            compactedMessages.addAll(summaryMessages);
+            compactedMessages.addAll(attachments);
+
+            // 更新 session
+            sess.setMessages(compactedMessages);
+            sess.setUpdatedAt(java.time.LocalDateTime.now());
+
+            // 重置当前结果
+            sess.setLastCallCacheRead(0);
+            sess.setLastCallInput(0);
+            sess.setLastConsolidated(0);
+            sess.setLastCallOutput(0);
+            sessions.save(sess);
+
+            // Clear read file state after compaction
+            readFileState.clear();
+
+            // 运行 post-compact cleanup
+            PostCompactCleanup.runPostCompactCleanup();
+            PostCompactCleanup.notifyCompaction("auto", null);
+            PostCompactCleanup.markPostCompaction();
+
+            log.info("executeContextCompress: compressed {} messages into summary, boundary added, attachments={}, ptlRetryCount={}",
+                    messages.size(), attachments.size(), result.getPtlRetryCount());
+
+            return true;
+        } catch (Exception e) {
+            log.error("executeContextCompress failed", e);
+            return false;
         } finally {
             // 压缩后重置 usage（消息已被修剪，上下文大小已改变）
             // 重置后，下一次计算上下文比例时会用字符估算来反映实际的压缩后大小
-            sess.setLastCallInput(0);
+            /*sess.setLastCallInput(0);
             sess.setLastCallOutput(0);
             sess.setLastCallCacheRead(0);
             sess.setLastCallCacheWrite(0);
+            sess.setTotalTokens(0);
+
+            // 重置后需要保存，否则重置值不会被持久化
+            sessions.save(sess);*/
 
             // 重置 usageAcc（压缩的 usage 不应混入后续实际消息的 usage）
             UsageAccumulator compressUsageAcc = usageTrackers.get(sessionKey);
@@ -1072,6 +1440,7 @@ public class AgentLoop {
             ToolView requestTools = buildRequestToolsAndSetContext(sessionKy, channel, chatId, extractMessageId(msg.getMetadata()));
 
             Session session = sessions.getOrCreate(sessionKy);
+            lazyRestorePlanMode(sessionKy, session);
             List<Map<String, Object>> history = session.getHistory();
             List<Map<String, Object>> initial = context.buildMessages(
                     history, msg.getContent(), null, channel, chatId
@@ -1110,6 +1479,9 @@ public class AgentLoop {
         clearStopRequested(sessionKey);
 
         Session session = sessions.getOrCreate(sessionKey);
+
+        // 惰性恢复 plan mode 状态（处理进程重启后继续对话的场景）
+        lazyRestorePlanMode(sessionKey, session);
 
         ToolView requestTools = buildRequestToolsAndSetContext(
                 sessionKey, msg.getChannel(),
@@ -1200,6 +1572,185 @@ public class AgentLoop {
         }
     }
 
+    /**
+     * 处理 /resume <sessionId> 命令：恢复指定会话
+     *
+     * 流程：
+     * 1. 解析 sessionId
+     * 2. 检查 session 文件是否存在
+     * 3. 不存在则通知用户
+     * 4. 存在则更新 sessions.json 映射，清除缓存，加载 todos
+     */
+    private CompletionStage<OutboundMessage> handleResumeCommand(InboundMessage msg) {
+        String channel = msg.getChannel();
+        String chatId = msg.getChatId();
+        String sessionKey = msg.getSessionKey();
+        String content = msg.getContent();
+
+        // 解析 sessionId
+        String sessionId = content != null ? content.replaceFirst("(?i)/resume\\s*", "").trim() : "";
+
+        if (sessionId.isEmpty()) {
+            return CompletableFuture.completedFuture(new OutboundMessage(
+                    channel, chatId, "❌ 请提供要恢复的 sessionId，如：/resume amber-atlas", List.of(), Map.of()
+            ));
+        }
+
+        // 检查 session 文件是否存在
+        java.nio.file.Path sessionsDir = workspace.resolve("sessions");
+        java.nio.file.Path sessionPath = sessionsDir.resolve(sessionId + ".jsonl");
+
+        if (!Files.exists(sessionPath)) {
+            log.info("Resume session not found: {} at {}", sessionId, sessionPath);
+            return CompletableFuture.completedFuture(new OutboundMessage(
+                    channel, chatId, "❌ 会话不存在或已过期: " + sessionId, List.of(), Map.of()
+            ));
+        }
+
+        try {
+            // 更新 sessions.json 映射 (sessionKey -> sessionId)
+            sessions.resumeSession(sessionKey, sessionId);
+
+            // 清除缓存，强制重新加载
+            sessions.invalidate(sessionKey);
+
+            // 加载 todos
+            loadTodosForSession(sessionsDir, sessionId);
+
+            // 恢复计划模式状态
+            restorePlanModeFromSession(sessionKey, sessionsDir, sessionId);
+
+            // 通知用户
+            String output = "✅ 已恢复会话: " + sessionId + "\n之前的上下文已加载。";
+            commandManager.addLocalCommand(new LocalCommand(content, output));
+
+            log.info("Session resumed: sessionKey={}, sessionId={}", sessionKey, sessionId);
+
+            return CompletableFuture.completedFuture(new OutboundMessage(
+                    channel, chatId, output, List.of(), Map.of()
+            ));
+        } catch (Exception e) {
+            log.warn("Resume session failed: {}", sessionId, e);
+            return CompletableFuture.completedFuture(new OutboundMessage(
+                    channel, chatId, "❌ 恢复会话失败: " + e.getMessage(), List.of(), Map.of()
+            ));
+        }
+    }
+
+    /**
+     * 处理 /fork <指令> 命令：Fork 并行子代理执行任务
+     *
+     * 对齐 Open-ClaudeCode: /fork 是 fire-and-forget，结果通过 REPL 显示
+     *
+     * 流程：
+     * 1. 解析指令
+     * 2. 获取当前会话消息作为父上下文
+     * 3. 后台执行 fork
+     * 4. 立即返回"已启动"给用户
+     * 5. fork 完成后发送结果给用户
+     */
+    private CompletionStage<OutboundMessage> handleForkCommand(InboundMessage msg) {
+        String channel = msg.getChannel();
+        String chatId = msg.getChatId();
+        String sessionKey = msg.getSessionKey();
+        String content = msg.getContent();
+
+        // 解析指令
+        String directive = content != null ? content.replaceFirst("(?i)/fork\\s*", "").trim() : "";
+
+        if (directive.isEmpty()) {
+            return CompletableFuture.completedFuture(new OutboundMessage(
+                    channel, chatId, "❌ 请提供 Fork 指令，如：/fork 帮我搜索这个问题的解决方案", List.of(), Map.of()
+            ));
+        }
+
+        // 获取当前会话
+        Session session = sessions.getOrCreate(sessionKey);
+        List<Map<String, Object>> parentMessages = session != null ? session.getMessages() : List.of();
+
+        // 获取最后一条 assistant 消息
+        Map<String, Object> lastAssistantMessage = null;
+        for (int i = parentMessages.size() - 1; i >= 0; i--) {
+            Map<String, Object> m = parentMessages.get(i);
+            if ("assistant".equals(m.get("role"))) {
+                lastAssistantMessage = m;
+                break;
+            }
+        }
+
+        // 构建 ForkContext
+        ForkContext forkContext = ForkContext.builder()
+                .parentAgentId("main")
+                .directive(directive)
+                .parentMessages(parentMessages)
+                .parentAssistantMessage(lastAssistantMessage)
+                .build();
+
+        // 创建 SubagentContext
+        SubagentContext subagentContext = SubagentContext.builder().build();
+
+        // 生成 fork ID
+        String forkId = UUID.randomUUID().toString().substring(0, 8);
+
+        // 获取 sessionId
+        String sessionId = session != null ? session.getSessionId() : sessionKey;
+
+        log.info("Fork command: forkId={}, directive={}", forkId, directive);
+
+        // Fire-and-forget: 后台执行
+        CompletableFuture.runAsync(() -> {
+            try {
+                // 执行 fork
+                CompletableFuture<ForkAgentExecutor.ForkResult> future =
+                        forkAgentExecutor.execute(sessionId, forkContext, subagentContext);
+
+                // 设置完成回调 - 发送结果给用户
+                future.whenComplete((result, ex) -> {
+                    String output;
+                    if (result != null && result.success) {
+                        output = String.format("✅ Fork [%s] 完成:\n\n%s", forkId, result.result);
+                    } else if (result != null && result.killed) {
+                        output = String.format("⚠️ Fork [%s] 被终止", forkId);
+                    } else {
+                        String error = result != null ? result.error : (ex != null ? ex.getMessage() : "unknown");
+                        output = String.format("❌ Fork [%s] 失败:\n\n%s", forkId, error);
+                    }
+
+                    // 发送到渠道
+                    bus.publishOutbound(new OutboundMessage(
+                            channel,
+                            chatId,
+                            output,
+                            List.of(),
+                            Map.of()
+                    ));
+                });
+            } catch (Exception e) {
+                log.error("Fork execution failed", e);
+                bus.publishOutbound(new OutboundMessage(
+                        channel,
+                        chatId,
+                        "❌ Fork 执行失败: " + e.getMessage(),
+                        List.of(),
+                        Map.of()
+                ));
+            }
+        });
+
+        // 立即返回"已启动"
+        String startMsg = String.format("🚀 Fork 已启动: [%s]\n指令: %s\n\n结果将完成后发送...", forkId, truncate(directive, 50));
+        commandManager.addLocalCommand(new LocalCommand(content, startMsg));
+
+        return CompletableFuture.completedFuture(new OutboundMessage(
+                channel, chatId, startMsg, List.of(), Map.of()
+        ));
+    }
+
+    private String truncate(String text, int maxLen) {
+        if (text == null) return "";
+        return text.length() > maxLen ? text.substring(0, maxLen) + "..." : text;
+    }
+
     @NotNull
     private ProgressCallback getBusProgressCallback(InboundMessage msg, ProgressCallback onProgress) {
         ProgressCallback busProgress = (content1, toolHint) -> {
@@ -1265,7 +1816,6 @@ public class AgentLoop {
         int contextWindow = ContextWindowDiscovery.resolveContextTokensForModel(
                 null, model, null, this.contextWindow, runtimeSettings.getCurrentConfig());
 
-        final int maxOverflowCompactionAttempts = 3;
 
         State st = new State();
 
@@ -1597,6 +2147,14 @@ public class AgentLoop {
                         }
                     }
 
+                    // PostSamplingHook: 在 LLM 响应后触发（如 Session Memory 提取）
+                    runPostSamplingHooks(
+                            msg.getSessionKey(),
+                            messages,
+                            hasToolCallsInLastAssistantMessage(messages),
+                            context.buildSystemPrompt()
+                    );
+
                     st.finalContent = clean;
                     st.done.set(true);
                     out.complete(new RunResult(st.finalContent, toolsUsed, messages, usageAcc.getTotal()));
@@ -1622,6 +2180,16 @@ public class AgentLoop {
 
         CompletionStage<Void> chain = CompletableFuture.completedFuture(null);
 
+        // 构建子agent的上下文
+        ToolUseContext toolContext = ToolUseContext.builder()
+                .sessionId(sessionKey)
+                .workspace(workspace.toString())
+                .tools(tools.getDefinitions())
+                .toolView(tools)
+                .messages(messages)
+                .queryTracking(new ToolUseContext.QueryTracking())
+                .build();
+
         for (var tc : toolCalls) {
             chain = chain.thenCompose(v -> {
                 if (isStopRequested(sessionKey)) {
@@ -1638,9 +2206,9 @@ public class AgentLoop {
                 // 设置当前 sessionKey 供 Tool 使用
                 cliAgentHandler.setCurrentSessionKey(sessionKey);
 
-                return tools.execute(tc.getName(), tc.getArguments())
+                return tools.execute(tc.getName(), tc.getArguments(), toolContext)
                         .whenComplete((result, ex) -> {
-                            // 清除 sessionKey
+                            // 清除 sessionKey 和 ToolUseContext
                             cliAgentHandler.clearCurrentSessionKey();
                         })
                         .thenAccept(rawResult -> {
@@ -1661,6 +2229,9 @@ public class AgentLoop {
 
                             // 检查工具结果大小，过大则持久化到磁盘
                             String result = maybePersistToolResult(tools, tc.getName(), tc.getId(), rawResult);
+
+                            // Track file reads for post-compact restoration
+                            trackFileReadIfNeeded(tc, result);
 
                             List<Map<String, Object>> updated =
                                     context.addToolResult(messages, tc.getId(), tc.getName(), result);
@@ -1785,6 +2356,143 @@ public class AgentLoop {
      * 工具结果预览大小（字符数）
      */
     private static final int TOOL_RESULT_PREVIEW_CHARS = 2_000;
+
+    /**
+     * Collect post-compact attachments to preserve context across compaction.
+     * Aligned with Open-ClaudeCode: compactConversation() post-compact attachment collection.
+     *
+     * Attachments collected:
+     * 1. File attachments: re-read recently accessed files
+     * 2. Plan attachment: if a plan file exists
+     * 3. Plan mode attachment: if currently in plan mode
+     * 4. Skill attachment: if skills were invoked
+     * 5. Async agent attachments: if background agents are running
+     *
+     * @param sessionKey Session identifier
+     * @param readFileSnapshot Pre-compact read file state snapshot
+     * @param messagesToKeep Messages preserved after compaction
+     * @return List of attachment messages
+     */
+    private List<Map<String, Object>> collectPostCompactAttachments(
+            String sessionKey,
+            Map<String, Long> readFileSnapshot,
+            List<Map<String, Object>> messagesToKeep) {
+
+        List<Map<String, Object>> attachments = new java.util.ArrayList<>();
+
+        // 1. File attachments: restore recently read files
+        String planFilePath = PlanFileManager.getPlanFilePath(sessionKey) != null
+                ? PlanFileManager.getPlanFilePath(sessionKey).toString()
+                : null;
+
+        List<Map<String, Object>> fileAttachments =
+                CompactService.createPostCompactFileAttachments(
+                        readFileSnapshot, planFilePath, messagesToKeep);
+        attachments.addAll(fileAttachments);
+
+        // 2. Plan attachment: if a plan file exists
+        Map<String, Object> planAttachment = CompactService.createPlanAttachmentIfNeeded(sessionKey, null);
+        if (planAttachment != null) {
+            attachments.add(planAttachment);
+        }
+
+        // 3. Plan mode attachment: if currently in plan mode
+        // TODO: wire up to actual plan mode state when plan mode feature is implemented.
+        // Open-ClaudeCode checks: appState.toolPermissionContext.mode === 'plan'
+        // (see compact.ts:1542-1548). javaclawbot needs a PermissionMode tracking
+        // equivalent — likely in ToolUseContext or AppState.
+        // Map<String, Object> planModeAttachment =
+        //         CompactService.createPlanModeAttachmentIfNeeded(sessionKey, null, isPlanMode);
+        // if (planModeAttachment != null) {
+        //     attachments.add(planModeAttachment);
+        // }
+
+        // 4. Skill attachment: if skills were invoked
+        Map<String, String> invokedSkills = getInvokedSkillsForSession(sessionKey);
+        Map<String, Object> skillAttachment =
+                CompactService.createSkillAttachmentIfNeeded(invokedSkills);
+        if (skillAttachment != null) {
+            attachments.add(skillAttachment);
+        }
+
+        // 5. Async agent attachments: if background agents are running
+        Map<String, ?> tasks = getRunningTasks(sessionKey);
+        List<Map<String, Object>> agentAttachments =
+                CompactService.createAsyncAgentAttachmentsIfNeeded(tasks, null);
+        attachments.addAll(agentAttachments);
+
+        return attachments;
+    }
+
+    /**
+     * Get invoked skills for a session.
+     * Returns a map of skill name to skill content, combining:
+     * - Always-loaded (resident) skills: loaded at conversation start
+     * - User-loaded skills: loaded via the skill tool or /prefix during conversation
+     *
+     * Aligned with Open-ClaudeCode: getInvokedSkillsForAgent() in bootstrap/state.ts:1530-1541
+     */
+    private Map<String, String> getInvokedSkillsForSession(String sessionKey) {
+        Map<String, String> skills = new java.util.LinkedHashMap<>();
+        if (skillsLoader == null) return skills;
+
+        // 1. Always-loaded (resident) skills — loaded at conversation start
+        for (String skillName : skillsLoader.getAlwaysSkills()) {
+            String content = skillsLoader.loadSkill(skillName);
+            if (content != null && !content.isBlank()) {
+                skills.put(skillName, content);
+            }
+        }
+
+        // 2. User-loaded skills — loaded via skill tool or /prefix during conversation
+        if (commandManager != null) {
+            for (String skillName : commandManager.getUserLoadedSkills()) {
+                // Skip if already added from always skills
+                if (skills.containsKey(skillName)) continue;
+                String content = skillsLoader.loadSkill(skillName);
+                if (content != null && !content.isBlank()) {
+                    skills.put(skillName, content);
+                }
+            }
+        }
+
+        return skills;
+    }
+
+    /**
+     * Get currently running background tasks.
+     */
+    private Map<String, ?> getRunningTasks(String sessionKey) {
+        // Return task state from the TaskFramework if available
+        return Map.of();
+    }
+
+    /**
+     * Track file reads for post-compact file restoration.
+     * Called after each successful ReadFileTool execution.
+     *
+     * @param tc Tool call request
+     * @param result Tool execution result
+     */
+    private void trackFileReadIfNeeded(ToolCallRequest tc, String result) {
+        if (!"Read".equals(tc.getName()) || result == null) return;
+        // Only track successful reads (not errors or file-not-found)
+        if (result.startsWith("Error:")) return;
+
+        Map<String, Object> args = tc.getArguments();
+        if (args == null) return;
+
+        String filePath = args.get("file_path") instanceof String fp ? fp : null;
+        if (filePath == null) filePath = args.get("path") instanceof String p ? p : null;
+        if (filePath == null) return;
+
+        try {
+            Path resolvedPath = workspace.resolve(filePath).normalize();
+            readFileState.track(resolvedPath.toString());
+        } catch (Exception e) {
+            // Ignore tracking failures
+        }
+    }
 
     /**
      * 如果工具结果过大，持久化到磁盘并返回预览。
@@ -2096,5 +2804,308 @@ public class AgentLoop {
      */
     public AppState getAppState() {
         return appState;
+    }
+
+    /**
+     * 加载指定 session 的 todos 到 AppState
+     * 对应 Open-ClaudeCode: extractTodosFromTranscript() - 从持久化文件恢复 todos
+     *
+     * @param sessionsDir sessions 根目录 (workspace/sessions)
+     * @param sessionId session ID
+     */
+    public void loadTodosForSession(java.nio.file.Path sessionsDir, String sessionId) {
+        if (sessionsDir == null || sessionId == null || sessionId.isEmpty()) {
+            log.debug("Cannot load todos: sessionsDir or sessionId is null or empty");
+            return;
+        }
+        agent.tool.task.TodoWriteTool.loadTodosIntoAppState(sessionsDir, sessionId, appState.setter());
+    }
+
+    /**
+     * 从已恢复的 Session 消息中还原 Plan Mode 状态。
+     *
+     * 对齐 Open-ClaudeCode: copyPlanForResume() + getSlugFromLog()
+     * - 扫描消息中是否有 EnterPlanMode 的 tool_result
+     * - 从 tool_result content 中提取 wordSlug（格式：Plan file: /path/plans/{slug}.md）
+     * - 检查 plan 文件是否还存在
+     * - 存在则调用 PlanModeState.restorePlanMode() 恢复内存状态
+     */
+    private void restorePlanModeFromSession(String sessionKey, java.nio.file.Path sessionsDir, String sessionId) {
+        try {
+            java.nio.file.Path sessionPath = sessionsDir.resolve(sessionId + ".jsonl");
+            if (!Files.exists(sessionPath)) return;
+
+            // 读取 session JSONL，扫描消息
+            java.util.List<String> lines = Files.readAllLines(sessionPath);
+            String enterPlanResult = null;
+
+            for (String line : lines) {
+                if (line.isBlank()) continue;
+                try {
+                    @SuppressWarnings("unchecked")
+                    java.util.Map<String, Object> obj = GsonFactory.getGson().fromJson(line, java.util.Map.class);
+                    if (obj == null) continue;
+
+                    // 跳过 metadata 行
+                    if ("metadata".equals(obj.get("_type"))) continue;
+
+                    // 查找 role=tool + name=EnterPlanMode 的消息
+                    String role = obj.get("role") instanceof String ? (String) obj.get("role") : null;
+                    String name = obj.get("name") instanceof String ? (String) obj.get("name") : null;
+                    if ("tool".equals(role) && "EnterPlanMode".equals(name)) {
+                        Object content = obj.get("content");
+                        if (content instanceof String) {
+                            enterPlanResult = (String) content;
+                        }
+                        // 继续扫描，取最后一个 EnterPlanMode tool result（覆盖可能的重试）
+                    }
+
+                    // 检查是否已经 ExitPlanMode（说明 plan mode 已结束）
+                    if ("tool".equals(role) && "ExitPlanMode".equals(name)) {
+                        // 有 ExitPlanMode 调用，说明已经退出了 plan mode
+                        // 只有当 ExitPlanMode 返回错误时才继续查找
+                        Object content = obj.get("content");
+                        if (content instanceof String && !((String) content).startsWith("{\"error\"")) {
+                            enterPlanResult = null; // 成功退出，清除标记
+                        }
+                    }
+                } catch (Exception ignored) {
+                    // 跳过无法解析的行
+                }
+            }
+
+            if (enterPlanResult == null || enterPlanResult.startsWith("{\"error\"")) {
+                return; // 未在 plan mode 中
+            }
+
+            // 从 tool_result content 提取 wordSlug
+            // 格式: "...Plan file: /path/plans/{slug}.md..."
+            String wordSlug = extractWordSlugFromMessage(enterPlanResult);
+            if (wordSlug == null) return;
+
+            // 检查 plan 文件是否存在
+            if (!PlanFileManager.hasPlanBySlug(wordSlug)) {
+                // 对齐 Open-ClaudeCode: 从 session 消息中恢复 plan 内容
+                String recovered = recoverPlanContentFromMessages(lines, wordSlug);
+                if (recovered != null) {
+                    PlanFileManager.writePlanBySlug(wordSlug, recovered);
+                    log.info("Recovered plan content from session messages: slug={}", wordSlug);
+                } else {
+                    log.warn("Plan file not found for slug={} and unable to recover from messages, skipping plan mode restore", wordSlug);
+                    return;
+                }
+            }
+
+            // 恢复 plan mode 状态
+            agent.tool.plan.PlanModeState.restorePlanMode(sessionKey, wordSlug);
+            log.info("Restored plan mode on resume: sessionKey={}, wordSlug={}", sessionKey, wordSlug);
+        } catch (Exception e) {
+            log.warn("Failed to restore plan mode on resume: {}", e.toString());
+        }
+    }
+
+    /**
+     * 从 session 消息中恢复 plan 内容（当 plan 文件丢失时）。
+     *
+     * 对齐 Open-ClaudeCode: src/utils/plans.ts → recoverPlanFromMessages()
+     *
+     * 按优先级（从后往前扫描，取最近一次出现）：
+     * 1. ExitPlanMode tool_use 的 input.plan 字段
+     * 2. user 消息的 planContent 字段
+     * 3. attachment 消息的 plan_file_reference 类型
+     */
+    private String recoverPlanContentFromMessages(java.util.List<String> lines, String wordSlug) {
+        for (int i = lines.size() - 1; i >= 0; i--) {
+            String line = lines.get(i);
+            if (line.isBlank()) continue;
+            try {
+                @SuppressWarnings("unchecked")
+                java.util.Map<String, Object> obj = GsonFactory.getGson().fromJson(line, java.util.Map.class);
+                if (obj == null) continue;
+                if ("metadata".equals(obj.get("_type"))) continue;
+
+                String role = obj.get("role") instanceof String ? (String) obj.get("role") : null;
+
+                // 1) Assistant 消息：检查 tool_calls 中的 ExitPlanMode tool_use input.plan
+                if ("assistant".equals(role)) {
+                    Object toolCalls = obj.get("tool_calls");
+                    if (toolCalls instanceof java.util.List<?> list) {
+                        for (Object tc : list) {
+                            if (tc instanceof java.util.Map<?, ?> tcMap) {
+                                Object fn = tcMap.get("function");
+                                if (fn instanceof java.util.Map<?, ?> fnMap) {
+                                    String name = fnMap.get("name") instanceof String ? (String) fnMap.get("name") : null;
+                                    if ("ExitPlanMode".equals(name)) {
+                                        Object args = fnMap.get("arguments");
+                                        // arguments 可能是 JSON 字符串或 Map
+                                        if (args instanceof String argsStr && !argsStr.isBlank()) {
+                                            try {
+                                                java.util.Map<?, ?> argsMap = GsonFactory.getGson().fromJson(argsStr, java.util.Map.class);
+                                                Object plan = argsMap.get("plan");
+                                                if (plan instanceof String planStr && !planStr.isBlank()) {
+                                                    return planStr;
+                                                }
+                                            } catch (Exception ignored) {}
+                                        } else if (args instanceof java.util.Map<?, ?> argsMap) {
+                                            Object plan = argsMap.get("plan");
+                                            if (plan instanceof String planStr && !planStr.isBlank()) {
+                                                return planStr;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 2) User 消息：planContent 字段
+                if ("user".equals(role)) {
+                    Object planContent = obj.get("planContent");
+                    if (planContent instanceof String pc && !pc.isBlank()) {
+                        return pc;
+                    }
+                }
+
+                // 3) Attachment 消息：plan_file_reference
+                String type = obj.get("type") instanceof String ? (String) obj.get("type") : null;
+                if ("attachment".equals(type)) {
+                    Object attachment = obj.get("attachment");
+                    if (attachment instanceof java.util.Map<?, ?> attMap) {
+                        String attType = attMap.get("type") instanceof String ? (String) attMap.get("type") : null;
+                        if ("plan_file_reference".equals(attType)) {
+                            Object plan = attMap.get("planContent");
+                            if (plan instanceof String planStr && !planStr.isBlank()) {
+                                return planStr;
+                            }
+                        }
+                    }
+                }
+            } catch (Exception ignored) {
+                // 跳过无法解析的行
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 公开方法：在 Agent 启动时确保 plan mode 状态已从 session 恢复。
+     * 供 GUI 和 CLI 在初始化时调用，确保 tool 过滤在首条消息处理前生效。
+     */
+    public void ensurePlanModeState(String sessionKey, Session session) {
+        lazyRestorePlanMode(sessionKey, session);
+    }
+
+    /**
+     * 惰性恢复 plan mode 状态（每次请求时检查，仅首次执行）。
+     * 解决进程重启后 PlanModeState 为空但 session 消息中仍处于 plan mode 的问题。
+     *
+     * 对齐 Open-ClaudeCode: lazy restoration via copyPlanForResume on first request
+     */
+    private void lazyRestorePlanMode(String sessionKey, Session session) {
+        if (sessionKey == null || session == null) return;
+        // 已有缓存，说明已经恢复过
+        if (agent.tool.plan.PlanModeState.getWordSlug(sessionKey) != null) return;
+
+        java.nio.file.Path sessionsDir = workspace.resolve("sessions");
+        String sessionId = session.getSessionId();
+        if (sessionId == null || sessionId.isEmpty()) return;
+
+        restorePlanModeFromSession(sessionKey, sessionsDir, sessionId);
+    }
+
+    /**
+     * 从 EnterPlanMode tool_result 内容中提取 wordSlug。
+     * tool_result 格式: "...Plan file: /Users/.../plans/calm-brewing-tiger.md..."
+     */
+    private String extractWordSlugFromMessage(String content) {
+        if (content == null) return null;
+        // 匹配 "Plan file: /path/plans/{slug}.md"
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("plans/([\\w-]+)\\.md").matcher(content);
+        if (m.find()) {
+            return m.group(1);
+        }
+        return null;
+    }
+
+    // ==================== PostSamplingHook Integration ====================
+
+    /**
+     * PostSamplingHook: 在每次 LLM 响应后触发
+     *
+     * 对齐 Open-ClaudeCode: PostSamplingHooks 在每次 assistant 消息后执行
+     * 用于 Session Memory 自动提取等功能
+     *
+     * @param sessionId 会话 ID
+     * @param messages 当前消息列表
+     * @param hasToolCallsInLastTurn 最后一次 Assistant 消息是否有工具调用
+     * @param systemPrompt 系统提示词
+     */
+    private void runPostSamplingHooks(
+            String sessionId,
+            List<Map<String, Object>> messages,
+            boolean hasToolCallsInLastTurn,
+            String systemPrompt) {
+
+        if (sessionMemoryService == null || !sessionMemoryService.isEnabled()) {
+            return;
+        }
+
+        // 估算当前 token 数
+        int currentTokenCount = estimateTokenCount(messages);
+
+        // 检查是否满足提取条件
+        if (sessionMemoryService.shouldExtract(currentTokenCount, hasToolCallsInLastTurn)) {
+            log.info("PostSamplingHook triggered: sessionId={}, tokenCount={}", sessionId, currentTokenCount);
+
+            // 异步触发提取，不阻塞主对话
+            CompletableFuture.runAsync(() -> {
+                try {
+                    // 等待之前的提取完成
+                    SessionMemoryUtils.waitForExtraction();
+
+                    // 触发提取
+                    sessionMemoryService.extract(sessionId, messages, systemPrompt);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    log.debug("PostSamplingHook interrupted while waiting for extraction");
+                }
+            });
+        }
+    }
+
+    /**
+     * 估算消息列表的 token 数
+     */
+    private int estimateTokenCount(List<Map<String, Object>> messages) {
+        if (messages == null) return 0;
+
+        int total = 0;
+        for (Map<String, Object> msg : messages) {
+            Object content = msg.get("content");
+            if (content instanceof String s) {
+                total += (s.length() / 4) + 1;
+            }
+        }
+        return total;
+    }
+
+    /**
+     * 检查最后一次 Assistant 消息是否有工具调用
+     */
+    private boolean hasToolCallsInLastAssistantMessage(List<Map<String, Object>> messages) {
+        if (messages == null || messages.isEmpty()) {
+            return false;
+        }
+        // 从后往前找最后一个 assistant 消息
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            Map<String, Object> msg = messages.get(i);
+            if (!"assistant".equals(msg.get("role"))) {
+                continue;
+            }
+            Object toolCalls = msg.get("tool_calls");
+            return toolCalls instanceof List<?> list && !list.isEmpty();
+        }
+        return false;
     }
 }

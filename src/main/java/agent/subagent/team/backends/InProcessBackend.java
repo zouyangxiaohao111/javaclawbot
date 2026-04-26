@@ -2,9 +2,12 @@ package agent.subagent.team.backends;
 
 import agent.subagent.team.TeamCoordinator;
 import agent.subagent.team.TeammateInfo;
+import agent.subagent.team.messaging.TeammateMailbox;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
@@ -44,12 +47,27 @@ public class InProcessBackend implements Backend {
     }
 
     @Override
-    public String createPane(String name, String color) {
+    public String displayName() {
+        return "in-process";
+    }
+
+    @Override
+    public boolean supportsHideShow() {
+        return false;  // In-process 不支持隐藏/显示
+    }
+
+    @Override
+    public boolean isRunningInside() {
+        return true;  // 始终在进程内运行
+    }
+
+    @Override
+    public CreatePaneResult createPane(String name, String color) {
         String paneId = UUID.randomUUID().toString();
         InProcessTeammate teammate = new InProcessTeammate(paneId, name, color);
         teammates.put(paneId, teammate);
         log.info("Created InProcessTeammate: paneId={}, name={}", paneId, name);
-        return paneId;
+        return CreatePaneResult.first(paneId);
     }
 
     @Override
@@ -89,6 +107,42 @@ public class InProcessBackend implements Backend {
             return teammate.pollOutput();
         }
         return "";
+    }
+
+    @Override
+    public void setPaneBorderColor(String paneId, String color) {
+        // In-process 不支持设置边框颜色
+        log.debug("setPaneBorderColor: no-op for in-process backend");
+    }
+
+    @Override
+    public void setPaneTitle(String paneId, String name, String color) {
+        // In-process 不支持设置标题
+        log.debug("setPaneTitle: no-op for in-process backend");
+    }
+
+    @Override
+    public void enablePaneBorderStatus() {
+        // In-process 不支持
+        log.debug("enablePaneBorderStatus: no-op for in-process backend");
+    }
+
+    @Override
+    public void rebalancePanes(boolean hasLeader) {
+        // In-process 不支持
+        log.debug("rebalancePanes: no-op for in-process backend");
+    }
+
+    @Override
+    public boolean hidePane(String paneId) {
+        log.debug("hidePane: no-op for in-process backend");
+        return false;
+    }
+
+    @Override
+    public boolean showPane(String paneId, String targetWindowOrPane) {
+        log.debug("showPane: no-op for in-process backend");
+        return false;
     }
 
     /**
@@ -157,6 +211,7 @@ public class InProcessBackend implements Backend {
         private volatile String status = "running";
         private volatile boolean isIdle = true;
         private volatile boolean shutdownRequested = false;
+        private agent.tool.ToolUseContext toolUseContext;
 
         public TeammateContext(String agentId, String agentName, String teamName,
                                String color, boolean planModeRequired,
@@ -186,6 +241,8 @@ public class InProcessBackend implements Backend {
         public void setIdle(boolean idle) { this.isIdle = idle; }
         public boolean isShutdownRequested() { return shutdownRequested; }
         public void setShutdownRequested(boolean shutdownRequested) { this.shutdownRequested = shutdownRequested; }
+        public agent.tool.ToolUseContext getToolUseContext() { return toolUseContext; }
+        public void setToolUseContext(agent.tool.ToolUseContext toolUseContext) { this.toolUseContext = toolUseContext; }
     }
 
     /**
@@ -319,11 +376,12 @@ public class InProcessBackend implements Backend {
             }
 
             try {
-                // 使用上下文执行命令
+                // 使用上下文执行命令 - 对应 Open-ClaudeCode: runWithTeammateContext()
                 InProcessBackend.runWithContext(context, () -> {
-                    // TODO: 执行 runAgent 并收集输出
-                    // 这里暂时返回占位消息
-                    outputQueue.offer("Executing: " + command);
+                    // 执行 runAgent 并收集输出
+                    // 对应 Open-ClaudeCode: inProcessRunner.ts 中的 runInProcessTeammate
+                    String result = executeRunAgent(command);
+                    outputQueue.offer(result);
                     return null;
                 });
             } catch (Exception e) {
@@ -332,6 +390,41 @@ public class InProcessBackend implements Backend {
             }
 
             status = "idle";
+        }
+
+        /**
+         * 执行 runAgent 并收集输出
+         * 对应 Open-ClaudeCode: inProcessRunner.ts - runInProcessTeammate()
+         */
+        private String executeRunAgent(String command) {
+            try {
+                // 使用 RunAgent.runGeneralPurpose 执行
+                // 对应 Open-ClaudeCode: inProcessRunner.ts 中的 runAgent 调用
+                // 从 TeammateContext 获取 ToolUseContext
+                agent.tool.ToolUseContext toolUseContext = context.getToolUseContext();
+                String result = agent.subagent.execution.RunAgent.runGeneralPurpose(command, false, toolUseContext);
+                return result != null ? result : "";
+            } catch (Exception e) {
+                log.error("Error executing runAgent", e);
+                return "Error executing runAgent: " + e.getMessage();
+            }
+        }
+
+        /**
+         * 构建系统提示
+         * 对应 Open-ClaudeCode: inProcessRunner.ts 中的系统提示构建
+         */
+        private String buildSystemPrompt() {
+            // 获取默认系统提示
+            String defaultPrompt = agent.subagent.builtin.general.GeneralPurposeAgent.getSystemPrompt();
+
+            // 添加队友系统提示附加内容
+            String teammateAddendum = "\n\n# Teammate Instructions\n" +
+                "You are running as a teammate in a multi-agent team. " +
+                "You should collaborate with other teammates and follow the team lead's instructions. " +
+                "Use the available tools to complete your assigned task.";
+
+            return defaultPrompt + teammateAddendum;
         }
 
         public void stop() {
@@ -365,8 +458,225 @@ public class InProcessBackend implements Backend {
         return teamName != null && !teamName.isEmpty() ? name + "@" + teamName : name;
     }
 
+    /**
+     * 获取 Session ID
+     * 对应 Open-ClaudeCode: 从 AppState 或 ToolUseContext 获取 sessionId
+     */
     private String getSessionId() {
-        // TODO: 从 AppState 获取 sessionId
+        // 从 ToolUseContext 获取 sessionId
+        TeammateContext ctx = getContext();
+        if (ctx != null && ctx.getToolUseContext() != null) {
+            String sessionId = ctx.getToolUseContext().getSessionId();
+            if (sessionId != null) {
+                return sessionId;
+            }
+        }
+        // 回退到生成随机 sessionId
         return "session-" + UUID.randomUUID().toString().substring(0, 8);
+    }
+
+    // =====================
+    // Mailbox Polling and Task Coordination
+    // =====================
+
+    /**
+     * 轮询新消息
+     * 对应 Open-ClaudeCode: readMailbox()
+     *
+     * @param teammateName teammate 名称
+     * @param teamName 团队名称
+     * @return 新消息列表
+     */
+    public List<TeammateMailbox.MailboxMessage> pollNewMessages(String teammateName, String teamName) {
+        TeammateMailbox mailbox = getMailbox();
+        if (mailbox == null) {
+            return Collections.emptyList();
+        }
+        return mailbox.pollNewMessages(teammateName, teamName);
+    }
+
+    /**
+     * 等待下一条消息或关闭请求
+     * 对应 Open-ClaudeCode: inProcessRunner.ts - waitForNextPromptOrShutdown()
+     *
+     * 轮询 teammate 的信箱，等待：
+     * - 新的 prompt 消息
+     * - 关闭请求
+     * - 中止信号
+     *
+     * @param identity TeammateContext
+     * @param abortController 中止控制器
+     * @param taskId 任务 ID
+     * @param pollIntervalMs 轮询间隔（毫秒）
+     * @return WaitResult 包含消息类型和内容
+     */
+    public WaitResult waitForNextPromptOrShutdown(
+            TeammateContext identity,
+            AbortController abortController,
+            String taskId,
+            long pollIntervalMs
+    ) {
+        TeammateMailbox mailbox = getMailbox();
+        if (mailbox == null) {
+            log.warn("Mailbox not available for waitForNextPromptOrShutdown");
+            return WaitResult.aborted();
+        }
+
+        int pollCount = 0;
+        while (!abortController.isAborted()) {
+            // 等待间隔（首次立即检查）
+            if (pollCount > 0) {
+                try {
+                    Thread.sleep(pollIntervalMs);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return WaitResult.aborted();
+                }
+            }
+            pollCount++;
+
+            // 检查中止信号
+            if (abortController.isAborted()) {
+                log.debug("{} aborted while waiting", identity.getAgentName());
+                return WaitResult.aborted();
+            }
+
+            // 读取所有消息
+            List<TeammateMailbox.MailboxMessage> messages = mailbox.readAll(
+                    identity.getAgentName(),
+                    identity.getTeamName()
+            );
+
+            // 优先检查关闭请求
+            for (int i = 0; i < messages.size(); i++) {
+                TeammateMailbox.MailboxMessage msg = messages.get(i);
+                TeammateMailbox.ShutdownRequestInfo shutdown = mailbox.isShutdownRequest(msg.getText());
+                if (shutdown != null) {
+                    log.info("{} received shutdown request from {}", identity.getAgentName(), shutdown.from);
+                    return WaitResult.shutdownRequest(shutdown.from, shutdown.reason, msg.getText());
+                }
+            }
+
+            // 查找下一条未读消息
+            for (TeammateMailbox.MailboxMessage msg : messages) {
+                // 检查是否是来自团队领导的普通消息
+                if ("team-lead".equals(msg.getFrom()) || "user".equals(msg.getFrom())) {
+                    log.debug("{} received message from {}", identity.getAgentName(), msg.getFrom());
+                    return WaitResult.newMessage(msg.getText(), msg.getFrom(), msg.getColor(), msg.getSummary());
+                }
+            }
+        }
+
+        log.debug("{} exiting poll loop (aborted, polls={})", identity.getAgentName(), pollCount);
+        return WaitResult.aborted();
+    }
+
+    /**
+     * 发送空闲通知给团队领导
+     * 对应 Open-ClaudeCode: inProcessRunner.ts - sendIdleNotification()
+     *
+     * @param agentName 代理名称
+     * @param agentColor 代理颜色
+     * @param teamName 团队名称
+     * @param idleReason 空闲原因 (available, interrupted, failed)
+     * @param summary 摘要
+     */
+    public void sendIdleNotification(
+            String agentName,
+            String agentColor,
+            String teamName,
+            String idleReason,
+            String summary
+    ) {
+        TeammateMailbox mailbox = getMailbox();
+        if (mailbox == null) {
+            log.warn("Mailbox not available for sendIdleNotification");
+            return;
+        }
+
+        TeammateMailbox.MailboxMessage notification = TeammateMailbox.createIdleNotification(
+                agentName, idleReason, summary, null, null, null
+        );
+
+        // 发送给团队领导（TEAM_LEAD_NAME）
+        mailbox.write("team-lead", notification, teamName);
+        log.debug("Sent idle notification from {} to team-lead", agentName);
+    }
+
+    /**
+     * 获取信箱实例
+     */
+    private TeammateMailbox getMailbox() {
+        // 尝试从上下文获取
+        TeammateContext ctx = getContext();
+        if (ctx != null && ctx.getToolUseContext() != null) {
+            // 从 ToolUseContext 获取 mailbox（如果可用）
+            // 注意：这需要 ToolUseContext 提供获取 mailbox 的方法
+        }
+        // 回退到使用团队协调器的 mailbox
+        return teamMailbox;
+    }
+
+    /** 团队信箱（由 TeamCoordinator 设置） */
+    private TeammateMailbox teamMailbox;
+
+    /**
+     * 设置团队信箱
+     */
+    public void setTeamMailbox(TeammateMailbox mailbox) {
+        this.teamMailbox = mailbox;
+    }
+
+    /**
+     * 等待结果
+     */
+    public static class WaitResult {
+        public enum Type {
+            NEW_MESSAGE,
+            SHUTDOWN_REQUEST,
+            ABORTED
+        }
+
+        private final Type type;
+        private final String message;
+        private final String from;
+        private final String color;
+        private final String summary;
+        private final String originalMessage;
+        private final String reason;
+
+        private WaitResult(Type type, String message, String from, String color, String summary, String originalMessage, String reason) {
+            this.type = type;
+            this.message = message;
+            this.from = from;
+            this.color = color;
+            this.summary = summary;
+            this.originalMessage = originalMessage;
+            this.reason = reason;
+        }
+
+        public static WaitResult newMessage(String message, String from, String color, String summary) {
+            return new WaitResult(Type.NEW_MESSAGE, message, from, color, summary, null, null);
+        }
+
+        public static WaitResult shutdownRequest(String from, String reason, String originalMessage) {
+            return new WaitResult(Type.SHUTDOWN_REQUEST, null, from, null, null, originalMessage, reason);
+        }
+
+        public static WaitResult aborted() {
+            return new WaitResult(Type.ABORTED, null, null, null, null, null, null);
+        }
+
+        public Type getType() { return type; }
+        public String getMessage() { return message; }
+        public String getFrom() { return from; }
+        public String getColor() { return color; }
+        public String getSummary() { return summary; }
+        public String getOriginalMessage() { return originalMessage; }
+        public String getReason() { return reason; }
+
+        public boolean isAborted() { return type == Type.ABORTED; }
+        public boolean isShutdownRequest() { return type == Type.SHUTDOWN_REQUEST; }
+        public boolean isNewMessage() { return type == Type.NEW_MESSAGE; }
     }
 }

@@ -27,6 +27,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
+import java.util.HashSet;
 import java.util.concurrent.*;
 import java.util.stream.Collectors;
 
@@ -42,6 +44,9 @@ import java.util.stream.Collectors;
  */
 @Slf4j
 public class McpManager {
+
+    /** 全局单例引用 */
+    private static volatile McpManager instance;
 
     private Map<String, MCPServerConfig> mcpServers;
     private final Executor executor;
@@ -83,6 +88,20 @@ public class McpManager {
             t.setDaemon(true);
             return t;
         });
+    }
+
+    /**
+     * 设置全局单例
+     */
+    public static void setInstance(McpManager manager) {
+        instance = manager;
+    }
+
+    /**
+     * 获取全局单例
+     */
+    public static McpManager getInstance() {
+        return instance;
     }
 
     private static String safeErrorMessage(Throwable e) {
@@ -362,7 +381,18 @@ public class McpManager {
         return connected;
     }
 
-
+    /**
+     * 获取 MCP 工具列表（用于子代理共享）
+     * 对应 Open-ClaudeCode: toolUseContext.options.mcpClients
+     *
+     * @return 所有已注册的 MCP 工具列表
+     */
+    public List<Tool> getTools() {
+        return new ArrayList<>(mcpTools.toolNames()).stream()
+                .map(mcpTools::get)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toList());
+    }
 
     /**
      * 检查单个服务器是否已连接
@@ -372,10 +402,43 @@ public class McpManager {
     }
 
     /**
+     * 获取 MCP 服务器配置（按名称查找）
+     *
+     * 先检查内存缓存，再尝试从配置文件加载
+     *
+     * @param serverName 服务器名称
+     * @return 服务器配置，如果不存在返回 null
+     */
+    public MCPServerConfig getConfigByName(String serverName) {
+        // 先检查内存缓存
+        MCPServerConfig cfg = mcpServers.get(serverName);
+        if (cfg != null) {
+            return cfg;
+        }
+
+        // 尝试从配置文件重新加载
+        try {
+            Config config = ConfigIO.loadConfig(ConfigIO.getConfigPath(workspace));
+            if (config != null && config.getTools() != null
+                && config.getTools().getMcpServers() != null) {
+                cfg = config.getTools().getMcpServers().get(serverName);
+                // 更新本地缓存
+                if (cfg != null) {
+                    mcpServers = config.getTools().getMcpServers();
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Failed to load MCP config for server '{}': {}", serverName, e.getMessage());
+        }
+
+        return cfg;
+    }
+
+    /**
      * 获取所有已连接的服务器名称
      */
-    public java.util.Set<String> getConnectedServerNames() {
-        return new java.util.HashSet<>(handles.keySet());
+    public Set<String> getConnectedServerNames() {
+        return new HashSet<>(handles.keySet());
     }
 
     /**
@@ -502,6 +565,72 @@ public class McpManager {
         }
 
         handles.put(serverName, new ServerHandle(serverName, client, registered, copyCfg(cfg)));
+    }
+
+    /**
+     * 连接到动态服务器（内联配置）
+     *
+     * 用于子代理自己定义的 MCP 服务器，不注册到全局 handles
+     * 而是返回给调用者自己管理生命周期
+     *
+     * 对应 Open-ClaudeCode: connectToServer(name, config) - 动态 scope
+     *
+     * @param serverName 服务器名称
+     * @param config 服务器配置
+     * @return 动态服务器连接结果，包含客户端和工具
+     */
+    public DynamicMcpConnection connectDynamicServer(String serverName, MCPServerConfig config) {
+        log.info("[MCP] Creating dynamic MCP connection for server: {}", serverName);
+
+        try {
+            McpAsyncClient client = createClient(config);
+
+            client.initialize().block(Duration.ofSeconds(20));
+            McpSchema.ListToolsResult toolsResult = client.listTools().block(Duration.ofSeconds(20));
+
+            List<Tool> registered = buildWrappedTools(serverName, client, config, toolsResult);
+
+            log.info("[MCP] Dynamic server '{}' connected with {} tools", serverName, registered.size());
+
+            return new DynamicMcpConnection(serverName, client, registered, config);
+        } catch (Exception e) {
+            log.error("[MCP] Failed to connect dynamic server '{}': {}", serverName, e.getMessage(), e);
+            throw new RuntimeException("Failed to connect dynamic MCP server: " + serverName, e);
+        }
+    }
+
+    /**
+     * 动态 MCP 连接结果
+     */
+    public static class DynamicMcpConnection {
+        private final String serverName;
+        private final McpAsyncClient client;
+        private final List<Tool> tools;
+        private final MCPServerConfig config;
+
+        public DynamicMcpConnection(String serverName, McpAsyncClient client, List<Tool> tools, MCPServerConfig config) {
+            this.serverName = serverName;
+            this.client = client;
+            this.tools = tools;
+            this.config = config;
+        }
+
+        public String getServerName() { return serverName; }
+        public McpAsyncClient getClient() { return client; }
+        public List<Tool> getTools() { return tools; }
+        public MCPServerConfig getConfig() { return config; }
+
+        /**
+         * 关闭连接
+         */
+        public void close() {
+            try {
+                client.closeGracefully().subscribe();
+                log.debug("[MCP] Dynamic server '{}' closed", serverName);
+            } catch (Exception e) {
+                log.warn("[MCP] Error closing dynamic server '{}': {}", serverName, e.getMessage());
+            }
+        }
     }
 
     /**

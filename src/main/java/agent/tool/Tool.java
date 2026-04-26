@@ -37,6 +37,10 @@ public abstract class Tool {
      * Execute the tool with given parameters.
      * Return a string result of the tool execution.
      */
+    public CompletionStage<String> execute(Map<String, Object> args, ToolUseContext parentUseContext) {
+        return execute(args);
+    }
+
     public abstract CompletionStage<String> execute(Map<String, Object> args);
 
     /**

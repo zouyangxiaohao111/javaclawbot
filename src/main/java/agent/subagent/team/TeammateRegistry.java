@@ -27,11 +27,11 @@ public class TeammateRegistry {
      * @param info teammate 信息
      */
     public void register(TeammateInfo info) {
-        if (info == null || info.getId() == null) {
-            throw new IllegalArgumentException("TeammateInfo and id cannot be null");
+        if (info == null || info.getTeammateId() == null) {
+            throw new IllegalArgumentException("TeammateInfo and teammateId cannot be null");
         }
-        teammates.put(info.getId(), info);
-        log.debug("Registered teammate: id={}, name={}", info.getId(), info.getName());
+        teammates.put(info.getTeammateId(), info);
+        log.debug("Registered teammate: id={}, name={}", info.getTeammateId(), info.getName());
     }
 
     /**
