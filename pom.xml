@@ -170,6 +170,13 @@
             <version>${playwright.version}</version>
         </dependency>-->
 
+        <!-- Markdown 渲染：Flexmark + JavaFX WebView -->
+        <dependency>
+            <groupId>io.github.raghul-tech</groupId>
+            <artifactId>javafx-markdown-preview-all</artifactId>
+            <version>1.0.3</version>
+        </dependency>
+
         <!-- MCP：Model Context Protocol SDK -->
         <dependency>
             <groupId>io.modelcontextprotocol.sdk</groupId>
