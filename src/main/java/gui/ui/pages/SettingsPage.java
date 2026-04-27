@@ -303,6 +303,11 @@ public class SettingsPage extends VBox {
         settingsContainer.getChildren().add(createGatewaySection());
         settingsContainer.getChildren().add(createSeparator());
         settingsContainer.getChildren().add(buildChannelsSection());
+
+        // refresh 重建了所有内容，若暗色主题已激活需重新转换内联样式
+        if (darkTheme) {
+            applyThemeToNode(this, true);
+        }
     }
 
     /** ComboBox 条目类型：模型名 或 提供商分隔标题 */
