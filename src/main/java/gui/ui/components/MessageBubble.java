@@ -36,12 +36,12 @@ public class MessageBubble extends HBox {
             avatar.setStyle("-fx-background-color: rgba(0, 0, 0, 0.05); -fx-background-radius: 999px; -fx-pref-width: 32px; -fx-pref-height: 32px; -fx-alignment: center;");
             avatar.setMinSize(32, 32);
 
-            Label bubble = new Label(content);
-            bubble.getStyleClass().add("assistant-bubble");
-            bubble.setWrapText(true);
-            bubble.setMaxWidth(MAX_WIDTH);
+            // 使用 MarkdownRenderer 渲染助手消息
+            javafx.scene.layout.VBox mdContent = MarkdownRenderer.render(content);
+            mdContent.getStyleClass().add("assistant-bubble");
+            mdContent.setMaxWidth(MAX_WIDTH);
 
-            getChildren().addAll(avatar, bubble);
+            getChildren().addAll(avatar, mdContent);
         }
     }
 }
