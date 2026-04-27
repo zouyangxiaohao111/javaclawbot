@@ -160,6 +160,8 @@ public class ModelsPage extends VBox {
             for (int i = 0; i < ALL_PROVIDERS.length; i++) {
                 if (ALL_PROVIDERS[i].equals(providerName)) { providerCombo.getSelectionModel().select(i); break; }
             }
+        } else {
+            providerCombo.getSelectionModel().select(0);
         }
 
         ProviderConfig initPc = provCfg.getByName(currentProvider[0]);
@@ -224,19 +226,20 @@ public class ModelsPage extends VBox {
 
         btnRow.getChildren().addAll(cancelBtn, saveBtn);
 
+        // 模型列表区域 (可滚动)
+        ScrollPane modelScrollPane = new ScrollPane(modelsBox);
+        modelScrollPane.setStyle("-fx-background-color: transparent; -fx-border-color: transparent;");
+        modelScrollPane.setFitToWidth(true);
+        modelScrollPane.setPrefViewportHeight(200);
+        modelScrollPane.setMaxHeight(350);
+
         root.getChildren().addAll(title, providerTitle, providerCombo,
             newLabel("API Key"), apiKeyField,
             newLabel("API Base URL (可选)"), baseField,
-            saveBtn, new javafx.scene.control.Separator(),
-            newLabel("模型列表"), modelsBox, btnRow);
+            new javafx.scene.control.Separator(),
+            newLabel("模型列表"), modelScrollPane, btnRow);
 
-        ScrollPane sp = new ScrollPane(root);
-        sp.setStyle("-fx-background-color: transparent; -fx-border-color: transparent;");
-        sp.setFitToWidth(true);
-        sp.setPrefViewportHeight(600);
-        sp.setMaxHeight(700);
-
-        Scene scene = new Scene(sp);
+        Scene scene = new Scene(root);
         scene.setFill(javafx.scene.paint.Color.TRANSPARENT);
         dialog.setScene(scene);
         dialog.sizeToScene();

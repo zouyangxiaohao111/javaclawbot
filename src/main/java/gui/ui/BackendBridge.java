@@ -15,9 +15,11 @@ import javafx.application.Platform;
 import providers.CustomProvider;
 import providers.LLMProvider;
 import providers.ProviderRegistry;
+import providers.cli.ProjectRegistry;
 import session.Session;
 import session.SessionManager;
 import skills.SkillsLoader;
+import utils.Helpers;
 
 import java.nio.file.Path;
 import java.util.List;
@@ -57,6 +59,7 @@ public class BackendBridge {
     private AgentLoop agentLoop;
     private CronService cron;
     private SkillsLoader skillsLoader;
+    private ProjectRegistry projectRegistry;
 
     // ── Bus 模式 ──
     private final AtomicBoolean busLoopRunning = new AtomicBoolean(false);
@@ -100,10 +103,23 @@ public class BackendBridge {
         Path cronStorePath = ConfigIO.getDataDir().resolve("cron").resolve("jobs.json");
         this.cron = new CronService(cronStorePath, null);
 
-        // 5) MessageBus
+        // 5) ProjectRegistry（按 session 隔离，存储在 ~/.javaclawbot/projects/{sessionKey}/）
+        Path projectStorePath = Helpers.getDataPath()
+                .resolve("projects")
+                .resolve(sessionKey.replace(":", "_"))
+                .resolve("projects.json");
+        this.projectRegistry = new ProjectRegistry(projectStorePath);
+        this.projectRegistry.load();
+        // 自动绑定当前工作目录为主项目
+        String cwd = System.getProperty("user.dir");
+        if (cwd != null && !cwd.isBlank() && projectRegistry.getMainProject() == null) {
+            projectRegistry.bind("main", cwd, true);
+        }
+
+        // 6) MessageBus
         this.bus = new MessageBus();
 
-        // 6) AgentLoop
+        // 7) AgentLoop
         this.agentLoop = new AgentLoop(
                 this.bus,
                 this.provider,
@@ -120,16 +136,17 @@ public class BackendBridge {
                 this.sessionManager,
                 this.config.getTools().getMcpServers(),
                 this.config.getChannels(),
-                rt.getRuntimeSettings()
+                rt.getRuntimeSettings(),
+                this.projectRegistry
         );
 
-        // 7) SkillsLoader
+        // 8) SkillsLoader
         this.skillsLoader = new SkillsLoader(this.config.getWorkspacePath());
 
-        // 8) 启动 bus 交互模式
+        // 9) 启动 bus 交互模式
         startBusInteractiveMode();
 
-        // 9) 恢复 plan mode 状态
+        // 10) 恢复 plan mode 状态
         try {
             Session session = sessionManager.getOrCreate(sessionKey);
             agentLoop.ensurePlanModeState(sessionKey, session);
@@ -381,6 +398,25 @@ public class BackendBridge {
 
     public SkillsLoader getSkillsLoader() {
         return skillsLoader;
+    }
+
+    public ProjectRegistry getProjectRegistry() {
+        return projectRegistry;
+    }
+
+    /**
+     * 返回当前绑定的项目目录（用于 @file 提示），
+     * 优先主项目路径 → 其次工作区。
+     */
+    public Path getProjectDir() {
+        if (projectRegistry != null) {
+            String mainPath = projectRegistry.getMainProjectPath();
+            if (mainPath != null && !mainPath.isBlank()) {
+                Path p = Path.of(mainPath);
+                if (java.nio.file.Files.exists(p)) return p;
+            }
+        }
+        return config != null ? config.getWorkspacePath() : Path.of(System.getProperty("user.dir"));
     }
 
     public String getSessionKey() {

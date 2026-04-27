@@ -66,16 +66,24 @@ public class ContextBuilder {
      * @param warnHandler     警告处理器（可为 null）
      */
     public ContextBuilder(Path workspace, BootstrapConfig bootstrapConfig, java.util.function.Consumer<String> warnHandler) {
+        this(workspace, bootstrapConfig, warnHandler, null);
+    }
+
+    /** 带外部 ProjectRegistry 的构造器（GUI 使用，按 session 隔离项目绑定） */
+    public ContextBuilder(Path workspace, BootstrapConfig bootstrapConfig, java.util.function.Consumer<String> warnHandler, ProjectRegistry projectRegistry) {
         this.workspace = Objects.requireNonNull(workspace, "workspace");
         this.memory = new MemoryStore(workspace);
         this.skills = new SkillsLoader(workspace);
         this.bootstrapConfig = bootstrapConfig != null ? bootstrapConfig : new BootstrapConfig();
         this.commandQueueManager = new CommandQueueManager(this.skills);
-        // 使用 ProjectRegistry 管理项目（与 CLI Agent 共享 cli-projects.json）
-        this.projectRegistry = new ProjectRegistry(workspace.resolve("cli-projects.json"));
-        this.projectRegistry.load();
+        if (projectRegistry != null) {
+            this.projectRegistry = projectRegistry;
+        } else {
+            this.projectRegistry = new ProjectRegistry(workspace.resolve("cli-projects.json"));
+            this.projectRegistry.load();
+        }
 
-        this.bootstrapLoader = new BootstrapLoader(workspace, this.bootstrapConfig, warnHandler, projectRegistry);
+        this.bootstrapLoader = new BootstrapLoader(workspace, this.bootstrapConfig, warnHandler, this.projectRegistry);
     }
 
 

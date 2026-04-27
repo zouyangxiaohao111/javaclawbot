@@ -45,7 +45,7 @@ public class MainStage {
     }
 
     private void configureStage() {
-        stage.initStyle(StageStyle.TRANSPARENT);
+        stage.initStyle(StageStyle.UNDECORATED);
         stage.setWidth(DEFAULT_WIDTH);
         stage.setHeight(DEFAULT_HEIGHT);
         stage.setMinWidth(MIN_WIDTH);
@@ -214,9 +214,10 @@ public class MainStage {
                         );
                     });
 
-                    // Set workspace for @file completion
+                    // Set workspace and project dir for @file completion
                     chatPage.getChatInput().setWorkspacePath(
                         backendBridge.getConfig().getWorkspacePath());
+                    chatPage.getChatInput().setProjectPath(backendBridge.getProjectDir());
 
                     // Initial status
                     chatPage.setStatusText("\u25CF 模型就绪 \u00B7 "

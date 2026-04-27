@@ -65,11 +65,20 @@ public class CliAgentCommandHandler {
     }
 
     public CliAgentCommandHandler(Path workspacePath) {
+        this(workspacePath, null);
+    }
+
+    /** 带外部 ProjectRegistry 的构造器（GUI 使用，按 session 隔离项目绑定） */
+    public CliAgentCommandHandler(Path workspacePath, ProjectRegistry projectRegistry) {
         this.workspacePath = workspacePath;
 
-        Path registryPath = workspacePath.resolve("cli-projects.json");
-        this.projectRegistry = new ProjectRegistry(registryPath);
-        this.projectRegistry.load();
+        if (projectRegistry != null) {
+            this.projectRegistry = projectRegistry;
+        } else {
+            Path registryPath = workspacePath.resolve("cli-projects.json");
+            this.projectRegistry = new ProjectRegistry(registryPath);
+            this.projectRegistry.load();
+        }
 
         this.outputHandler = new CliAgentOutputHandler();
         PermissionEngine permissionEngine = PermissionEngine.createDefault();
@@ -85,7 +94,7 @@ public class CliAgentCommandHandler {
 
         // 传入 sessionManager 给 agentPool
         this.agentPool = new CliAgentPool(
-                projectRegistry,
+                this.projectRegistry,
                 permissionEngine,
                 outputHandler,
                 sessionManager

@@ -299,11 +299,13 @@ public class SettingsPage extends VBox {
         descLabel.setStyle("-fx-font-size: 13px; -fx-text-fill: rgba(0, 0, 0, 0.5);");
         infoBox.getChildren().addAll(titleLabel, descLabel);
 
+        // 保留完整列表供搜索
+        java.util.List<ModelItem> allItems = new java.util.ArrayList<>(items);
+
         ComboBox<ModelItem> modelCombo = new ComboBox<>();
         modelCombo.getItems().addAll(items);
-        // 选中第一个（当前模型）
         if (!items.isEmpty()) modelCombo.setValue(items.get(0));
-        modelCombo.setEditable(false);
+        modelCombo.setEditable(true);
         modelCombo.setStyle("-fx-background-color: rgba(0, 0, 0, 0.03); -fx-background-radius: 12px;"
             + " -fx-border-color: transparent; -fx-font-size: 13px;");
         modelCombo.setPrefHeight(40);
@@ -335,9 +337,86 @@ public class SettingsPage extends VBox {
             }
         });
 
+        // ---- 搜索过滤：使用独立 Popup，不修改 ComboBox items 避免 IndexOutOfBounds ----
+        javafx.stage.Popup searchPopup = new javafx.stage.Popup();
+        searchPopup.setAutoHide(true);
+        VBox searchList = new VBox(2);
+        searchList.setStyle("-fx-background-color: rgba(255,255,255,0.97); -fx-background-radius: 10px;"
+            + " -fx-border-color: rgba(0,0,0,0.08); -fx-border-radius: 10px; -fx-border-width: 1px;");
+        searchList.setPadding(new Insets(4));
+        searchPopup.getContent().add(searchList);
+
+        modelCombo.getEditor().textProperty().addListener((obs, old, text) -> {
+            searchPopup.hide();
+            if (text == null || text.isBlank()) return;
+            String lower = text.toLowerCase().trim();
+            if (lower.isEmpty()) return;
+
+            // Filter models
+            java.util.List<ModelItem> filtered = new java.util.ArrayList<>();
+            for (ModelItem mi : allItems) {
+                if (mi.isHeader()) {
+                    filtered.add(mi);
+                } else if (mi.modelName != null && mi.modelName.toLowerCase().contains(lower)) {
+                    filtered.add(mi);
+                }
+            }
+            // Clean orphan headers
+            java.util.List<ModelItem> clean = new java.util.ArrayList<>();
+            for (int i = 0; i < filtered.size(); i++) {
+                ModelItem mi = filtered.get(i);
+                if (mi.isHeader()) {
+                    if (i + 1 < filtered.size() && !filtered.get(i + 1).isHeader()) {
+                        clean.add(mi);
+                    }
+                } else {
+                    clean.add(mi);
+                }
+            }
+            if (clean.isEmpty()) return;
+
+            // Hide native dropdown so it doesn't overlap the search popup
+            modelCombo.hide();
+
+            // Build popup rows
+            searchList.getChildren().clear();
+            for (ModelItem mi : clean) {
+                javafx.scene.control.Label row = new javafx.scene.control.Label(mi.text);
+                row.setPadding(new Insets(4, 10, 4, 10));
+                row.setPrefHeight(24);
+                if (mi.isHeader()) {
+                    row.setStyle("-fx-text-fill: rgba(0,0,0,0.4); -fx-font-weight: 700;"
+                        + " -fx-font-size: 11px; -fx-font-family: sans-serif;");
+                    row.setDisable(true);
+                } else {
+                    row.setStyle("-fx-font-family: monospace; -fx-font-size: 13px;"
+                        + " -fx-cursor: hand;");
+                    row.setOnMouseClicked(ev -> {
+                        searchPopup.hide();
+                        modelCombo.setValue(mi);
+                        modelCombo.getEditor().setText(mi.modelName);
+                    });
+                }
+                searchList.getChildren().add(row);
+            }
+            // Show popup below ComboBox
+            if (!searchList.getChildren().isEmpty()) {
+                var bounds = modelCombo.localToScreen(modelCombo.getBoundsInLocal());
+                searchPopup.show(modelCombo.getScene().getWindow(),
+                    bounds.getMinX(), bounds.getMaxY() + 2);
+            }
+        });
+
+        // Hide search popup when ComboBox dropdown is opened (user clicked arrow)
+        modelCombo.setOnShowing(e -> searchPopup.hide());
+
         modelCombo.setOnAction(e -> {
-            ModelItem selected = modelCombo.getValue();
-            if (selected == null || selected.isHeader() || selected.modelName.equals(currentModel)) return;
+            // editable ComboBox getValue() may return String when user types
+            Object value = modelCombo.getValue();
+            if (!(value instanceof ModelItem)) return;
+            ModelItem selected = (ModelItem) value;
+            if (selected.isHeader()) return;
+            if (selected.modelName.equals(currentModel)) return;
             String pn = selected.providerName;
             // 同时更新 model 和 provider
             cfg.getAgents().getDefaults().setModel(selected.modelName);

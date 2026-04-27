@@ -110,7 +110,7 @@ public class AgentLoop {
     /**
      * 是否启用思考模式（保留推理内容）
      */
-    private final ContextBuilder context;
+    private ContextBuilder context;
     private final SessionManager sessions;
     /**
      * 任务系统状态（Phase 4 集成）
@@ -159,7 +159,8 @@ public class AgentLoop {
     /**
      * CLI Agent 命令处理器
      */
-    private final CliAgentCommandHandler cliAgentHandler;
+    private CliAgentCommandHandler cliAgentHandler;
+    private providers.cli.ProjectRegistry projectRegistry;
 
     // 跟踪已记录的 CLI session ID，避免重复添加 reference marker
     private final Set<String> recordedCliSessions = ConcurrentHashMap.newKeySet();
@@ -371,6 +372,57 @@ public class AgentLoop {
         // 设置任务开始回调，清除停止标记，确保队列任务不受之前 /stop 命令影响
         this.queue.setOnTaskStart(sessionKey -> clearStopRequested(sessionKey));
         this.cronToolFacade = (cronService != null) ? new CronTool(cronService) : null;
+        this.projectRegistry = null;
+    }
+
+    /** 带 ProjectRegistry 的构造器（GUI 使用，按 session 隔离项目绑定） */
+    public AgentLoop(
+            MessageBus bus,
+            LLMProvider provider,
+            java.nio.file.Path workspace,
+            String model,
+            Integer maxIterations,
+            Double temperature,
+            Integer maxTokens,
+            Integer contextWindow,
+            Integer memoryWindow,
+            String reasoningEffort,
+            CronService cronService,
+            boolean restrictToWorkspace,
+            SessionManager sessionManager,
+            Map<String, MCPServerConfig> mcpServers,
+            ChannelsConfig channelsConfig,
+            AgentRuntimeSettings runtimeSettings,
+            providers.cli.ProjectRegistry projectRegistry
+    ) {
+        this(bus, provider, workspace, model, maxIterations, temperature, maxTokens,
+            contextWindow, memoryWindow, reasoningEffort, cronService, restrictToWorkspace,
+            sessionManager, mcpServers, channelsConfig, runtimeSettings);
+        this.projectRegistry = projectRegistry;
+        // 使用外部 ProjectRegistry 替代默认的
+        if (projectRegistry != null) {
+            this.context = new ContextBuilder(workspace,
+                currentConfig().getAgents().getDefaults().getBootstrapConfig(),
+                null,
+                projectRegistry);
+            this.cliAgentHandler = new CliAgentCommandHandler(workspace, projectRegistry);
+            this.cliAgentHandler.setSendToChannelWithMeta((message, sessionKey, metadata) -> {
+                if (sessionKey == null || sessionKey.isBlank()) {
+                    if (metadata != null && metadata.containsKey("cli_session_id")) {
+                        sessionKey = "cli:direct";
+                    } else {
+                        log.debug("CLI Agent output without sessionKey, skipping: {}", message);
+                        return;
+                    }
+                }
+                String[] parts = sessionKey.split(":", 2);
+                String channel = parts[0];
+                String chatId = parts.length > 1 ? parts[1] : "";
+                bus.publishOutbound(new bus.OutboundMessage(
+                    channel, chatId, message, List.of(),
+                    metadata != null ? new java.util.HashMap<>(metadata) : Map.of()));
+            });
+        }
     }
 
     private AgentRuntimeSettings.Snapshot runtimeSnapshot() {

@@ -38,6 +38,7 @@ public class CompletionPopup {
     private int selectedIndex = -1;
 
     private Path workspacePath;
+    private Path projectPath;
 
     public record CompletionItem(String text, String description, CompletionKind kind) {}
     public enum CompletionKind { COMMAND, FILE, DIR }
@@ -91,8 +92,17 @@ public class CompletionPopup {
         this.workspacePath = workspacePath;
     }
 
+    public void setProjectPath(Path projectPath) {
+        this.projectPath = projectPath;
+    }
+
     public boolean isShowing() {
         return popup.isShowing();
+    }
+
+    /** 返回当前用于文件解析的基础路径 */
+    public Path getBasePath() {
+        return (projectPath != null && Files.exists(projectPath)) ? projectPath : workspacePath;
     }
 
     private void handleKeyPress(javafx.scene.input.KeyEvent e) {
@@ -140,7 +150,9 @@ public class CompletionPopup {
     }
 
     private void filterFiles(String partial) {
-        if (workspacePath == null || !Files.exists(workspacePath)) { hide(); return; }
+        // Prefer project directory over workspace (e.g. @file completion in bound project)
+        Path basePath = (projectPath != null && Files.exists(projectPath)) ? projectPath : workspacePath;
+        if (basePath == null || !Files.exists(basePath)) { hide(); return; }
 
         filtered.clear();
         String lower = partial.toLowerCase();
@@ -153,14 +165,14 @@ public class CompletionPopup {
         if (lastSlash >= 0) {
             String dirPart = partial.substring(0, lastSlash);
             nameFilter = partial.substring(lastSlash + 1).toLowerCase();
-            Path resolved = workspacePath.resolve(dirPart);
+            Path resolved = basePath.resolve(dirPart);
             if (Files.isDirectory(resolved)) {
                 searchDir = resolved;
             } else {
                 hide(); return;
             }
         } else {
-            searchDir = workspacePath;
+            searchDir = basePath;
             nameFilter = lower;
         }
 
@@ -180,7 +192,7 @@ public class CompletionPopup {
         for (Path p : children) {
             String name = p.getFileName().toString();
             boolean isDir = Files.isDirectory(p);
-            String relPath = workspacePath.relativize(p).toString();
+            String relPath = basePath.relativize(p).toString();
             filtered.add(new CompletionItem(
                 name + (isDir ? "/" : ""),
                 relPath,
@@ -265,24 +277,25 @@ public class CompletionPopup {
     }
 
     private void completeItem(CompletionItem item) {
-        String prefix;
         String text = inputArea.getText();
         if (item.kind() == CompletionKind.COMMAND) {
             // Replace the partial command prefix
-            prefix = text.substring(0, text.lastIndexOf('/'));
+            String prefix = text.substring(0, text.lastIndexOf('/'));
             inputArea.setText(prefix + item.text() + " ");
             inputArea.positionCaret(inputArea.getText().length());
         } else {
-            // Replace from @... to file name
+            // Replace from @... to the relative path (for unambiguous resolution at send time)
             int atIdx = text.lastIndexOf('@');
             if (atIdx >= 0) {
-                prefix = text.substring(0, atIdx + 1);
+                String prefix = text.substring(0, atIdx + 1);
                 String afterAt = text.substring(atIdx + 1);
                 int lastSlash = afterAt.lastIndexOf('/');
                 if (lastSlash >= 0) {
                     prefix = text.substring(0, atIdx + 1 + lastSlash + 1);
                 }
-                inputArea.setText(prefix + item.text());
+                // 使用相对路径保证文件引用唯一可解析
+                String completionText = item.description() != null ? item.description() : item.text();
+                inputArea.setText(prefix + completionText);
                 inputArea.positionCaret(inputArea.getText().length());
             }
         }

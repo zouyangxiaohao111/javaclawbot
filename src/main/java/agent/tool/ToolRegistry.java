@@ -118,7 +118,13 @@ public class ToolRegistry {
         }
 
         // 对齐 Python：params 必须是 dict；这里允许 null 并转为空 map
-        Map<String, Object> safeParams = (params == null) ? new LinkedHashMap<>() : params;
+        // 做一次防御性拷贝，避免不可变 Map（如 Map.of()）或第三方 Map 实现引发并发/兼容问题
+        Map<String, Object> safeParams;
+        if (params == null) {
+            safeParams = new LinkedHashMap<>();
+        } else {
+            safeParams = new LinkedHashMap<>(params);
+        }
 
         log.info("执行工具: {}, 参数: {}", name, safeParams);
 

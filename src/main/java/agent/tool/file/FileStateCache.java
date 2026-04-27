@@ -87,7 +87,7 @@ public class FileStateCache {
     }
 
     /** Record that a file was read with its content and metadata */
-    public void markRead(Path path, String content, long mtimeMs, long sizeBytes) {
+    public synchronized void markRead(Path path, String content, long mtimeMs, long sizeBytes) {
         Path key = normalize(path);
         FileState state = new FileState(content, mtimeMs, sizeBytes);
         FileState existing = cache.get(key);
@@ -101,7 +101,7 @@ public class FileStateCache {
     }
 
     /** Record with full state including offset/limit/partial view */
-    public void markRead(Path path, String content, long mtimeMs, long sizeBytes,
+    public synchronized void markRead(Path path, String content, long mtimeMs, long sizeBytes,
                          Integer offset, Integer limit, boolean isPartialView) {
         Path key = normalize(path);
         FileState state = new FileState(content, System.currentTimeMillis(), mtimeMs, sizeBytes,
@@ -117,17 +117,17 @@ public class FileStateCache {
     }
 
     /** Check if a file has been read via the Read tool */
-    public boolean hasRead(Path path) {
+    public synchronized boolean hasRead(Path path) {
         return cache.containsKey(normalize(path));
     }
 
     /** Get cached state, or null if not read */
-    public FileState getState(Path path) {
+    public synchronized FileState getState(Path path) {
         return cache.get(normalize(path));
     }
 
     /** Check if file is unchanged since last read (for file_unchanged dedup) */
-    public boolean isUnchanged(Path path) {
+    public synchronized boolean isUnchanged(Path path) {
         FileState state = cache.get(normalize(path));
         if (state == null) return false;
         try {
@@ -139,7 +139,7 @@ public class FileStateCache {
     }
 
     /** Remove entry (typically after a write) */
-    public void invalidate(Path path) {
+    public synchronized void invalidate(Path path) {
         Path key = normalize(path);
         FileState existing = cache.remove(key);
         if (existing != null) {
@@ -148,24 +148,24 @@ public class FileStateCache {
     }
 
     /** Clear all entries */
-    public void clear() {
+    public synchronized void clear() {
         cache.clear();
         currentSizeBytes = 0;
     }
 
     /** Number of cached entries */
-    public int size() {
+    public synchronized int size() {
         return cache.size();
     }
 
     /** Current cache size in bytes */
-    public long calculatedSize() {
+    public synchronized long calculatedSize() {
         return currentSizeBytes;
     }
 
     /** All cached paths */
-    public Set<Path> keys() {
-        return Collections.unmodifiableSet(cache.keySet());
+    public synchronized Set<Path> keys() {
+        return Collections.unmodifiableSet(new LinkedHashSet<>(cache.keySet()));
     }
 
     /**

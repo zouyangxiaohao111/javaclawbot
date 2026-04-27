@@ -98,7 +98,8 @@ public class ChatInput extends VBox {
         // 发送按钮事件
         sendButton.setOnAction(e -> sendMessage());
         inputArea.setOnKeyPressed(e -> {
-            if (completionPopup.isShowing()) return;
+            // 若事件已被 popup 消费（如 ENTER 选中文件），则不处理
+            if (e.isConsumed() || completionPopup.isShowing()) return;
             if (e.getCode() == javafx.scene.input.KeyCode.ENTER) {
                 if (e.isShiftDown()) {
                     inputArea.insertText(inputArea.getCaretPosition(), "\n");
@@ -113,11 +114,75 @@ public class ChatInput extends VBox {
     private void sendMessage() {
         String text = inputArea.getText().trim();
         if (!text.isEmpty() || !attachedImages.isEmpty()) {
+            String resolvedText = resolveFileMentions(text);
             for (Consumer<String> listener : sendListeners) {
-                listener.accept(text);
+                listener.accept(resolvedText);
             }
             inputArea.clear();
             clearImages();
+        }
+    }
+
+    /**
+     * 将消息中的 @文件名 引用解析为完整的文件路径上下文。
+     * 例如 "@License 解释一下" -> "用户提供文件：/path/to/License\n解释一下"
+     */
+    private String resolveFileMentions(String text) {
+        StringBuilder result = new StringBuilder();
+        StringBuilder remaining = new StringBuilder(text);
+        java.util.Set<String> resolvedPaths = new java.util.LinkedHashSet<>();
+
+        // 在 workspace/project 目录中查找 @ 引用的文件
+        java.nio.file.Path base = completionPopup.getBasePath();
+        if (base == null) return text;
+
+        // 查找所有 @word 格式的引用
+        java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("@(\\S+)").matcher(text);
+        while (matcher.find()) {
+            String ref = matcher.group(1);
+            // 去除末尾标点符号
+            ref = ref.replaceAll("[.,;:!?)]+$", "");
+            if (ref.isEmpty()) continue;
+
+            // 尝试在 base 目录下查找匹配的文件
+            java.nio.file.Path resolved = resolveFileName(base, ref);
+            if (resolved != null) {
+                resolvedPaths.add(resolved.toString());
+            }
+        }
+
+        // 构建最终消息：文件路径 + 原始消息（去除 @引用）
+        if (!resolvedPaths.isEmpty()) {
+            for (String path : resolvedPaths) {
+                result.append("用户提供文件：").append(path).append("\n");
+            }
+            result.append("\n");
+        }
+        result.append(text);
+        return result.toString();
+    }
+
+    /**
+     * 在 base 目录下查找匹配 name 的文件（支持部分名称匹配）
+     */
+    private java.nio.file.Path resolveFileName(java.nio.file.Path base, String name) {
+        // 先尝试直接路径解析
+        java.nio.file.Path direct = base.resolve(name);
+        if (java.nio.file.Files.exists(direct)) return direct.toAbsolutePath().normalize();
+
+        // 在 base 下搜索匹配的文件名（限制深度避免性能问题）
+        try {
+            try (var stream = java.nio.file.Files.list(base)) {
+                return stream
+                    .filter(p -> {
+                        String fn = p.getFileName().toString();
+                        return fn.equalsIgnoreCase(name) || fn.toLowerCase().startsWith(name.toLowerCase());
+                    })
+                    .findFirst()
+                    .orElse(null);
+            }
+        } catch (Exception ignored) {
+            return null;
         }
     }
 
@@ -181,5 +246,9 @@ public class ChatInput extends VBox {
 
     public void setWorkspacePath(java.nio.file.Path path) {
         completionPopup.setWorkspacePath(path);
+    }
+
+    public void setProjectPath(java.nio.file.Path path) {
+        completionPopup.setProjectPath(path);
     }
 }
