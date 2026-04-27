@@ -21,8 +21,11 @@ public class ChatInput extends VBox {
     private final Label statusBar;
     private final CompletionPopup completionPopup;
     private final List<Consumer<String>> sendListeners = new ArrayList<>();
-    private final List<java.nio.file.Path> attachedImages = new ArrayList<>();
+    // 附件：图片路径（放入 media）、其他文件路径（拼入消息文本）
+    private final List<java.nio.file.Path> imagePaths = new ArrayList<>();
+    private final List<java.nio.file.Path> otherFilePaths = new ArrayList<>();
     private final HBox imagePreviewRow;
+    private final HBox fileTagRow;
 
     public ChatInput() {
         setSpacing(0);
@@ -58,9 +61,33 @@ public class ChatInput extends VBox {
         imagePreviewRow.setVisible(false);
         imagePreviewRow.setManaged(false);
 
+        // 文件标签行（非图片文件）
+        fileTagRow = new HBox(6);
+        fileTagRow.setPadding(new Insets(0, 0, 0, 0));
+        fileTagRow.setVisible(false);
+        fileTagRow.setManaged(false);
+
         Button attachBtn = new Button("\uD83D\uDCCE");
-        attachBtn.setStyle("-fx-background-color: transparent; -fx-pref-width: 32px; -fx-pref-height: 32px; -fx-background-radius: 8px;");
-        attachBtn.setOnAction(e -> selectImages());
+        attachBtn.setStyle("-fx-background-color: rgba(0, 0, 0, 0.08); -fx-pref-width: 40px; -fx-pref-height: 40px;"
+            + " -fx-background-radius: 10px; -fx-font-size: 18px; -fx-cursor: hand;"
+            + " -fx-text-fill: rgba(0, 0, 0, 0.4);");
+        attachBtn.setOnMouseEntered(e ->
+            attachBtn.setStyle("-fx-background-color: rgba(0, 0, 0, 0.15); -fx-pref-width: 40px; -fx-pref-height: 40px;"
+                + " -fx-background-radius: 10px; -fx-font-size: 18px; -fx-cursor: hand;"
+                + " -fx-text-fill: rgba(0, 0, 0, 0.7);"));
+        attachBtn.setOnMouseExited(e ->
+            attachBtn.setStyle("-fx-background-color: rgba(0, 0, 0, 0.08); -fx-pref-width: 40px; -fx-pref-height: 40px;"
+                + " -fx-background-radius: 10px; -fx-font-size: 18px; -fx-cursor: hand;"
+                + " -fx-text-fill: rgba(0, 0, 0, 0.4);"));
+        attachBtn.setOnMousePressed(e ->
+            attachBtn.setStyle("-fx-background-color: rgba(0, 0, 0, 0.22); -fx-pref-width: 40px; -fx-pref-height: 40px;"
+                + " -fx-background-radius: 10px; -fx-font-size: 18px; -fx-cursor: hand;"
+                + " -fx-text-fill: rgba(0, 0, 0, 0.8);"));
+        attachBtn.setOnMouseReleased(e ->
+            attachBtn.setStyle("-fx-background-color: rgba(0, 0, 0, 0.15); -fx-pref-width: 40px; -fx-pref-height: 40px;"
+                + " -fx-background-radius: 10px; -fx-font-size: 18px; -fx-cursor: hand;"
+                + " -fx-text-fill: rgba(0, 0, 0, 0.7);"));
+        attachBtn.setOnAction(e -> selectFiles());
 
         Button mentionBtn = new Button("@");
         mentionBtn.setStyle("-fx-background-color: transparent; -fx-pref-width: 32px; -fx-pref-height: 32px; -fx-background-radius: 8px;");
@@ -95,7 +122,7 @@ public class ChatInput extends VBox {
 
         buttonRow.getChildren().addAll(attachBtn, mentionBtn, spacer, sendButton);
 
-        inputCard.getChildren().addAll(grabber, inputArea, imagePreviewRow, buttonRow);
+        inputCard.getChildren().addAll(grabber, inputArea, imagePreviewRow, fileTagRow, buttonRow);
 
         // 间距：保持状态栏到卡片和到底部距离一致（各 8px）
         Region gap = new Region();
@@ -129,13 +156,25 @@ public class ChatInput extends VBox {
 
     private void sendMessage() {
         String text = inputArea.getText().trim();
-        if (!text.isEmpty() || !attachedImages.isEmpty()) {
+        if (!text.isEmpty() || !imagePaths.isEmpty() || !otherFilePaths.isEmpty()) {
+            // 非图片文件：在消息开头拼接路径
+            if (!otherFilePaths.isEmpty()) {
+                StringBuilder sb = new StringBuilder();
+                sb.append("用户指定文件：");
+                for (int i = 0; i < otherFilePaths.size(); i++) {
+                    if (i > 0) sb.append(", ");
+                    sb.append(otherFilePaths.get(i).toString());
+                }
+                sb.append("\n\n");
+                sb.append(text);
+                text = sb.toString();
+            }
             String resolvedText = resolveFileMentions(text);
             for (Consumer<String> listener : sendListeners) {
                 listener.accept(resolvedText);
             }
             inputArea.clear();
-            clearImages();
+            clearFiles();
         }
     }
 
@@ -202,47 +241,125 @@ public class ChatInput extends VBox {
         }
     }
 
-    private void selectImages() {
+    private void selectFiles() {
         javafx.stage.FileChooser chooser = new javafx.stage.FileChooser();
-        chooser.setTitle("选择图片");
+        chooser.setTitle("选择文件");
         chooser.getExtensionFilters().add(
-            new javafx.stage.FileChooser.ExtensionFilter("图片文件", "*.png", "*.jpg", "*.jpeg", "*.gif", "*.webp", "*.bmp"));
+            new javafx.stage.FileChooser.ExtensionFilter("所有支持的文件",
+                "*.png", "*.jpg", "*.jpeg", "*.gif", "*.webp", "*.bmp",
+                "*.mp4", "*.avi", "*.mov", "*.mkv", "*.webm",
+                "*.txt", "*.md", "*.json", "*.xml", "*.csv",
+                "*.pdf", "*.doc", "*.docx", "*.ppt", "*.pptx", "*.xls", "*.xlsx",
+                "*.zip", "*.tar", "*.gz", "*.jar",
+                "*.java", "*.py", "*.js", "*.ts", "*.go", "*.rs",
+                "*.c", "*.cpp", "*.h", "*.html", "*.css", "*.sql",
+                "*.yaml", "*.yml", "*.toml", "*.ini", "*.cfg",
+                "*.*"));
         java.util.List<java.io.File> files = chooser.showOpenMultipleDialog(getScene().getWindow());
         if (files != null) {
             for (java.io.File f : files) {
-                attachedImages.add(f.toPath());
-                addImagePreview(f.toPath());
+                handleFile(f.toPath());
             }
         }
     }
 
+    private void handleFile(java.nio.file.Path path) {
+        String name = path.getFileName().toString().toLowerCase();
+        // 图片：预览 + 加入 media 列表
+        if (name.endsWith(".png") || name.endsWith(".jpg") || name.endsWith(".jpeg")
+                || name.endsWith(".gif") || name.endsWith(".webp") || name.endsWith(".bmp")) {
+            imagePaths.add(path);
+            addImagePreview(path);
+            return;
+        }
+        // 视频：暂不支持
+        if (name.endsWith(".mp4") || name.endsWith(".avi") || name.endsWith(".mov")
+                || name.endsWith(".mkv") || name.endsWith(".webm")) {
+            Label toast = new Label("\u26A0 视频暂不支持");
+            toast.setStyle("-fx-background-color: rgba(255, 0, 0, 0.08); -fx-text-fill: #dc2626;"
+                + " -fx-background-radius: 8px; -fx-padding: 6px 12px; -fx-font-size: 12px;");
+            fileTagRow.getChildren().add(toast);
+            fileTagRow.setVisible(true);
+            fileTagRow.setManaged(true);
+            // 2秒后自动消失
+            javafx.animation.PauseTransition pt = new javafx.animation.PauseTransition(
+                javafx.util.Duration.seconds(2));
+            pt.setOnFinished(ev -> {
+                fileTagRow.getChildren().remove(toast);
+                if (fileTagRow.getChildren().isEmpty()) {
+                    fileTagRow.setVisible(false);
+                    fileTagRow.setManaged(false);
+                }
+            });
+            pt.play();
+            return;
+        }
+        // 其他文件：记录路径，显示标签
+        otherFilePaths.add(path);
+        addFileTag(path);
+    }
+
     private void addImagePreview(java.nio.file.Path path) {
-        Label preview = new Label("\uD83D\uDDBC " + path.getFileName().toString());
-        preview.setStyle("-fx-background-color: rgba(0,0,0,0.05); -fx-background-radius: 8px; "
-            + "-fx-padding: 4px 8px; -fx-font-size: 12px;");
-        preview.setOnMouseClicked(e -> {
-            attachedImages.remove(path);
-            imagePreviewRow.getChildren().remove(preview);
-            if (attachedImages.isEmpty()) {
+        // 显示图片缩略图
+        javafx.scene.image.Image img = new javafx.scene.image.Image(
+            path.toUri().toString(), 80, 60, true, true);
+        javafx.scene.image.ImageView imgView = new javafx.scene.image.ImageView(img);
+        imgView.setFitWidth(80);
+        imgView.setFitHeight(60);
+        imgView.setPreserveRatio(true);
+        imgView.setStyle("-fx-background-radius: 6px; -fx-cursor: hand;");
+
+        javafx.scene.layout.StackPane container = new javafx.scene.layout.StackPane(imgView);
+        container.setStyle("-fx-background-radius: 6px;"
+            + " -fx-border-color: rgba(0,0,0,0.1); -fx-border-radius: 6px; -fx-border-width: 1px;");
+
+        // 点击删除
+        container.setOnMouseClicked(e -> {
+            imagePaths.remove(path);
+            imagePreviewRow.getChildren().remove(container);
+            if (imagePaths.isEmpty()) {
                 imagePreviewRow.setVisible(false);
                 imagePreviewRow.setManaged(false);
             }
         });
-        imagePreviewRow.getChildren().add(preview);
+
+        imagePreviewRow.getChildren().add(container);
         imagePreviewRow.setVisible(true);
         imagePreviewRow.setManaged(true);
     }
 
-    private void clearImages() {
-        attachedImages.clear();
+    private void addFileTag(java.nio.file.Path path) {
+        Label tag = new Label("\uD83D\uDCC4 " + path.getFileName().toString());
+        tag.setStyle("-fx-background-color: rgba(0,0,0,0.05); -fx-background-radius: 8px;"
+            + " -fx-padding: 4px 8px; -fx-font-size: 12px; -fx-cursor: hand;");
+        tag.setOnMouseClicked(e -> {
+            otherFilePaths.remove(path);
+            fileTagRow.getChildren().remove(tag);
+            if (fileTagRow.getChildren().isEmpty()) {
+                fileTagRow.setVisible(false);
+                fileTagRow.setManaged(false);
+            }
+        });
+        fileTagRow.getChildren().add(tag);
+        fileTagRow.setVisible(true);
+        fileTagRow.setManaged(true);
+    }
+
+    private void clearFiles() {
+        imagePaths.clear();
+        otherFilePaths.clear();
         imagePreviewRow.getChildren().clear();
         imagePreviewRow.setVisible(false);
         imagePreviewRow.setManaged(false);
+        fileTagRow.getChildren().clear();
+        fileTagRow.setVisible(false);
+        fileTagRow.setManaged(false);
     }
 
+    /** 获取图片路径列表（用于 media 字段） */
     public java.util.List<String> getAttachedImages() {
         java.util.List<String> paths = new ArrayList<>();
-        for (java.nio.file.Path p : attachedImages) {
+        for (java.nio.file.Path p : imagePaths) {
             paths.add(p.toString());
         }
         return paths;

@@ -232,15 +232,14 @@ public class MainStage {
                     chatPage.getChatInput().addSendListener(text -> {
                         if (backendBridge.isWaitingForResponse()) return;
                         java.util.List<String> images = chatPage.getChatInput().getAttachedImages();
-                        String displayText = text;
-                        if (!images.isEmpty()) {
-                            StringBuilder sb = new StringBuilder(text);
-                            for (String img : images) {
-                                sb.append("\n[image: ").append(img).append("]");
-                                displayText = displayText + " \uD83D\uDDBC";
+                        // 收集图片路径用于聊天区预览展示
+                        java.util.List<java.nio.file.Path> imagePaths = new java.util.ArrayList<>();
+                        if (images != null) {
+                            for (String p : images) {
+                                imagePaths.add(java.nio.file.Path.of(p));
                             }
                         }
-                        chatPage.addUserMessage(displayText.isEmpty() ? "\uD83D\uDDBC 图片" : displayText);
+                        chatPage.addUserMessage(text, imagePaths);
                         chatPage.setStatusText("\u25CF 思考中...");
                         backendBridge.sendMessage(
                             text,

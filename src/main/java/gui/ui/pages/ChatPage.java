@@ -142,7 +142,34 @@ public class ChatPage extends VBox {
     }
 
     public void addUserMessage(String content) {
+        addUserMessage(content, java.util.List.of());
+    }
+
+    /** 用户消息 + 图片预览 */
+    public void addUserMessage(String content, java.util.List<java.nio.file.Path> imagePaths) {
         clearWelcomeIfNeeded();
+
+        // 图片预览
+        if (imagePaths != null && !imagePaths.isEmpty()) {
+            javafx.scene.layout.HBox imgRow = new javafx.scene.layout.HBox(8);
+            imgRow.setPadding(new javafx.geometry.Insets(0, 0, 8, 0));
+            imgRow.setAlignment(javafx.geometry.Pos.CENTER_RIGHT);
+            for (java.nio.file.Path p : imagePaths) {
+                javafx.scene.image.Image img = new javafx.scene.image.Image(
+                    p.toUri().toString(), 200, 150, true, true);
+                javafx.scene.image.ImageView iv = new javafx.scene.image.ImageView(img);
+                iv.setFitWidth(200);
+                iv.setFitHeight(150);
+                iv.setPreserveRatio(true);
+                iv.setStyle("-fx-background-radius: 10px;"
+                    + " -fx-border-color: rgba(0,0,0,0.08); -fx-border-radius: 10px;"
+                    + " -fx-border-width: 1px;");
+                javafx.scene.layout.StackPane sp = new javafx.scene.layout.StackPane(iv);
+                sp.setStyle("-fx-background-radius: 10px;");
+                imgRow.getChildren().add(sp);
+            }
+            messageContainer.getChildren().add(imgRow);
+        }
 
         MessageBubble bubble = new MessageBubble(MessageBubble.Role.USER, content);
         messageContainer.getChildren().add(bubble);
