@@ -46,10 +46,6 @@ public class SettingsPage extends VBox {
         settingsContainer = new VBox(32);
         settingsContainer.setMaxWidth(800);
 
-        // 外观设置
-        settingsContainer.getChildren().add(createAppearanceSection());
-        settingsContainer.getChildren().add(createSeparator());
-
         // 模型设置
         settingsContainer.getChildren().add(createModelSection());
         settingsContainer.getChildren().add(createSeparator());
@@ -66,101 +62,6 @@ public class SettingsPage extends VBox {
         scrollPane.setContent(content);
         getChildren().add(scrollPane);
         VBox.setVgrow(scrollPane, Priority.ALWAYS);
-    }
-
-    private volatile boolean darkTheme = false;
-
-    private VBox createAppearanceSection() {
-        VBox section = new VBox(16);
-
-        Label sectionTitle = new Label("外观");
-        sectionTitle.getStyleClass().add("section-title");
-
-        HBox themeBox = new HBox(12);
-        Button lightBtn = new Button("\u2600\uFE0F 亮色");
-        lightBtn.getStyleClass().addAll("pill-button");
-        lightBtn.setPrefHeight(40);
-
-        Button darkBtn = new Button("\uD83C\uDF19 暗色");
-        darkBtn.getStyleClass().addAll("pill-button");
-        darkBtn.setPrefHeight(40);
-
-        // 按当前主题状态设置初始选中
-        if (darkTheme) {
-            darkBtn.getStyleClass().add("selected");
-        } else {
-            lightBtn.getStyleClass().add("selected");
-        }
-
-        // 主题切换
-        String darkCss = getClass().getResource("/gui/ui/styles/dark.css").toExternalForm();
-        String lightBg = "#f1ede1";
-        String darkBg = "#1b1b1c";
-
-        lightBtn.setOnAction(e -> {
-            darkTheme = false;
-            lightBtn.getStyleClass().add("selected");
-            darkBtn.getStyleClass().remove("selected");
-            getScene().getStylesheets().remove(darkCss);
-            applyPageBackgrounds(lightBg);
-        });
-        darkBtn.setOnAction(e -> {
-            darkTheme = true;
-            darkBtn.getStyleClass().add("selected");
-            lightBtn.getStyleClass().remove("selected");
-            if (!getScene().getStylesheets().contains(darkCss)) {
-                getScene().getStylesheets().add(darkCss);
-            }
-            applyPageBackgrounds(darkBg);
-        });
-
-        themeBox.getChildren().addAll(lightBtn, darkBtn);
-
-        section.getChildren().addAll(sectionTitle, themeBox);
-        return section;
-    }
-
-    /**
-     * 递归遍历整个场景图，将所有内联样式中的亮色主题颜色转换为暗色主题颜色（或反向）。
-     * 这样可以覆盖所有嵌套组件（ChatInput 卡片、设置行、通道行等），
-     * 而不仅仅是顶层页面容器。
-     */
-    private void applyPageBackgrounds(String bgColor) {
-        javafx.scene.Scene scene = getScene();
-        if (scene == null) return;
-        javafx.scene.Node root = scene.getRoot();
-        if (root == null) return;
-        applyThemeToNode(root, darkTheme);
-    }
-
-    private void applyThemeToNode(javafx.scene.Node node, boolean dark) {
-        String style = node.getStyle();
-        if (style != null && !style.isEmpty()) {
-            if (dark) {
-                // Light → Dark: 页面背景色
-                style = style.replace("#f1ede1", "#1b1b1c");
-                // Light → Dark: 卡片白色背景 → 暗色卡片
-                style = style.replace("-fx-background-color: white;", "-fx-background-color: #232324;");
-                // Light → Dark: rgba(0,0,0,X) → rgba(255,255,255,X) (背景/边框/阴影等)
-                style = style.replaceAll("rgba\\(0,\\s*0,\\s*0,", "rgba(255, 255, 255,");
-                // Sidebar 特殊背景色
-                style = style.replace("rgba(234, 232, 225, 0.6)", "rgba(30, 30, 30, 0.6)");
-            } else {
-                // Dark → Light
-                style = style.replace("#1b1b1c", "#f1ede1");
-                style = style.replace("-fx-background-color: #232324;", "-fx-background-color: white;");
-                style = style.replaceAll("rgba\\(255,\\s*255,\\s*255,", "rgba(0, 0, 0,");
-                style = style.replace("rgba(30, 30, 30, 0.6)", "rgba(234, 232, 225, 0.6)");
-            }
-            node.setStyle(style);
-        }
-
-        // 递归处理子节点
-        if (node instanceof javafx.scene.Parent parent) {
-            for (javafx.scene.Node child : parent.getChildrenUnmodifiable()) {
-                applyThemeToNode(child, dark);
-            }
-        }
     }
 
     private VBox createModelSection() {
@@ -296,18 +197,11 @@ public class SettingsPage extends VBox {
     private void refresh() {
         if (backendBridge == null) return;
         settingsContainer.getChildren().clear();
-        settingsContainer.getChildren().add(createAppearanceSection());
-        settingsContainer.getChildren().add(createSeparator());
         settingsContainer.getChildren().add(buildModelSection());
         settingsContainer.getChildren().add(createSeparator());
         settingsContainer.getChildren().add(createGatewaySection());
         settingsContainer.getChildren().add(createSeparator());
         settingsContainer.getChildren().add(buildChannelsSection());
-
-        // refresh 重建了所有内容，若暗色主题已激活需重新转换内联样式
-        if (darkTheme) {
-            applyThemeToNode(this, true);
-        }
     }
 
     /** ComboBox 条目类型：模型名 或 提供商分隔标题 */
