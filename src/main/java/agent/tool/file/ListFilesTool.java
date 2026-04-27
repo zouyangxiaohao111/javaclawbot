@@ -10,6 +10,7 @@ import java.util.*;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.function.Supplier;
 import java.util.stream.Stream;
 
 import static agent.tool.file.FileSystemTools.asString;
@@ -31,12 +32,12 @@ import static agent.tool.file.FileSystemTools.schemaPathOnly;
 public final class ListFilesTool extends Tool {
     private final Path workspace;
     private final Path allowedDir;
-    private final ProjectRegistry projectRegistry;
+    private final Supplier<ProjectRegistry> projectRegistrySupplier;
 
-    public ListFilesTool(Path workspace, Path allowedDir, ProjectRegistry projectRegistry) {
+    public ListFilesTool(Path workspace, Path allowedDir, Supplier<ProjectRegistry> projectRegistrySupplier) {
         this.workspace = workspace;
         this.allowedDir = allowedDir;
-        this.projectRegistry = projectRegistry;
+        this.projectRegistrySupplier = projectRegistrySupplier;
     }
 
     public ListFilesTool(Path workspace, Path allowedDir) {
@@ -70,8 +71,9 @@ public final class ListFilesTool extends Tool {
                 dirPath = PathUtil.resolvePath(path, workspace, allowedDir);
             } else {
                 // 默认路径逻辑：优先使用主项目路径
-                if (projectRegistry != null) {
-                    String mainProjectPath = projectRegistry.getMainProjectPath();
+                if (projectRegistrySupplier != null) {
+                    ProjectRegistry registry = projectRegistrySupplier.get();
+                    String mainProjectPath = registry.getMainProjectPath();
                     if (StrUtil.isNotBlank(mainProjectPath)) {
                         dirPath = Paths.get(mainProjectPath);
                     } else {

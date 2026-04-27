@@ -178,9 +178,10 @@
     -fx-padding: 4 0 4 0;
 }
 
-/* 滚动条 */
+/* 滚动条 — 默认 16px，悬停时颜色加深 */
 .scroll-bar:vertical {
-    -fx-pref-width: 8px;
+    -fx-pref-width: 16px;
+    -fx-padding: 0 2px;
 }
 
 .scroll-bar:vertical .track {
@@ -188,10 +189,10 @@
 }
 
 .scroll-bar:vertical .thumb {
-    -fx-background-color: #e5e7eb;
-    -fx-background-radius: 8px;
+    -fx-background-color: rgba(0, 0, 0, 0.1);
+    -fx-background-radius: 10px;
 }
 
 .scroll-bar:vertical .thumb:hover {
-    -fx-background-color: rgba(0, 0, 0, 0.3);
+    -fx-background-color: rgba(0, 0, 0, 0.25);
 }

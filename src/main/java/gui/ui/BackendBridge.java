@@ -103,18 +103,12 @@ public class BackendBridge {
         Path cronStorePath = ConfigIO.getDataDir().resolve("cron").resolve("jobs.json");
         this.cron = new CronService(cronStorePath, null);
 
-        // 5) ProjectRegistry（按 session 隔离，存储在 ~/.javaclawbot/projects/{sessionKey}/）
-        Path projectStorePath = Helpers.getDataPath()
-                .resolve("projects")
-                .resolve(sessionKey.replace(":", "_"))
-                .resolve("projects.json");
-        this.projectRegistry = new ProjectRegistry(projectStorePath);
-        this.projectRegistry.load();
-        // 自动绑定当前工作目录为主项目
-        String cwd = System.getProperty("user.dir");
-        if (cwd != null && !cwd.isBlank() && projectRegistry.getMainProject() == null) {
-            projectRegistry.bind("main", cwd, true);
+        // 5) ProjectRegistry（按 sessionId 隔离，避免上一轮绑定的项目遗留到本轮）
+        String sessionId = getCurrentSession() != null ? getCurrentSession().getSessionId() : null;
+        if (sessionId == null) {
+            sessionId = Session.generateSessionId();
         }
+        this.projectRegistry = createProjectRegistry(sessionId);
 
         // 6) MessageBus
         this.bus = new MessageBus();
@@ -271,9 +265,9 @@ public class BackendBridge {
             }
         }, executor);
 
-        // 标题生成计数
+        // 标题生成计数：对话2轮后触发后台任务总结title
         userMessageCount++;
-        if (userMessageCount >= 3 && titleGenerationPending.compareAndSet(false, true)) {
+        if (userMessageCount >= 2 && titleGenerationPending.compareAndSet(false, true)) {
             triggerTitleGeneration();
         }
     }
@@ -313,6 +307,16 @@ public class BackendBridge {
         if (sessionManager == null || bus == null) return null;
         userMessageCount = 0;
         titleGenerationPending.set(false);
+
+        Session newSession = sessionManager.createNew(sessionKey);
+
+        // 为新会话创建独立的 ProjectRegistry，避免上一轮绑定遗留
+        ProjectRegistry newRegistry = createProjectRegistry(newSession.getSessionId());
+        this.projectRegistry = newRegistry;
+        if (agentLoop != null) {
+            agentLoop.updateProjectRegistry(newRegistry);
+        }
+
         // 发送 /clear 命令，让 AgentLoop 同时重置 session 和内部状态
         CompletableFuture.runAsync(() -> {
             try {
@@ -322,7 +326,7 @@ public class BackendBridge {
             } catch (Exception ignored) {
             }
         }, executor);
-        return sessionManager.createNew(sessionKey);
+        return newSession;
     }
 
     /**
@@ -372,6 +376,25 @@ public class BackendBridge {
     public void resetTitleCounter() {
         userMessageCount = 0;
         titleGenerationPending.set(false);
+    }
+
+    /**
+     * 热刷新 LLMProvider 和模型配置（模型/API Key 变更时调用）
+     */
+    public void refreshProvider() {
+        String defaultModel = this.config.getAgents().getDefaults().getModel();
+        LLMProvider newProvider = makeProvider(this.config);
+        this.provider = newProvider;
+        if (this.agentLoop != null) {
+            this.agentLoop.updateProvider(newProvider);
+            this.agentLoop.updateModelConfig(
+                defaultModel,
+                this.config.obtainMaxTokens(defaultModel),
+                this.config.obtainContextWindow(defaultModel),
+                this.config.obtainTemperature(defaultModel),
+                this.config.getAgents().getDefaults().getReasoningEffort()
+            );
+        }
     }
 
     // ── Getters ──
@@ -449,6 +472,24 @@ public class BackendBridge {
     }
 
     // ── Private helpers ──
+
+    /**
+     * 创建按 sessionId 隔离的 ProjectRegistry
+     */
+    private ProjectRegistry createProjectRegistry(String sessionId) {
+        Path projectStorePath = Helpers.getDataPath()
+                .resolve("projects")
+                .resolve(sessionId)
+                .resolve("projects.json");
+        ProjectRegistry registry = new ProjectRegistry(projectStorePath);
+        registry.load();
+        // 自动绑定当前工作目录为主项目
+        String cwd = System.getProperty("user.dir");
+        if (cwd != null && !cwd.isBlank() && registry.getMainProject() == null) {
+            registry.bind("main", cwd, true);
+        }
+        return registry;
+    }
 
     private static LLMProvider makeProvider(Config config) {
         String model = config.getAgents().getDefaults().getModel();

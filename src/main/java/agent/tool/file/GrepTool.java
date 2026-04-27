@@ -16,6 +16,7 @@ import java.nio.file.attribute.FileTime;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 /**
@@ -56,12 +57,12 @@ public final class GrepTool extends Tool {
 
     private final Path workspace;
     private final Path allowedDir;
-    private final ProjectRegistry projectRegistry;
+    private final Supplier<ProjectRegistry> projectRegistrySupplier;
 
-    public GrepTool(Path workspace, Path allowedDir, ProjectRegistry projectRegistry) {
+    public GrepTool(Path workspace, Path allowedDir, Supplier<ProjectRegistry> projectRegistrySupplier) {
         this.workspace = workspace;
         this.allowedDir = allowedDir;
-        this.projectRegistry = projectRegistry;
+        this.projectRegistrySupplier = projectRegistrySupplier;
     }
 
     // ---------- Line 169: userFacingName → "Search" ----------
@@ -218,7 +219,8 @@ public final class GrepTool extends Tool {
                 absolutePath = Paths.get(path);
             } else {
                 // 先从主项目中配置
-                String mainProjectPath = projectRegistry.getMainProjectPath();
+                ProjectRegistry registry = projectRegistrySupplier.get();
+                String mainProjectPath = registry.getMainProjectPath();
                 if (StrUtil.isBlank(mainProjectPath)) {
                     absolutePath = workspace;
                 }else {

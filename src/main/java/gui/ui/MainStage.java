@@ -156,6 +156,8 @@ public class MainStage {
         else if (page instanceof SettingsPage p) {
             p.setBackendBridge(backendBridge);
             p.setOnModelChanged(model -> {
+                // 热刷新 provider 和 AgentLoop，使模型变更即时生效
+                backendBridge.refreshProvider();
                 chatPage.setStatusText("\u25CF 模型就绪 \u00B7 " + model);
             });
         }

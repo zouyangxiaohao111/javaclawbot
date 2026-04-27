@@ -3,6 +3,7 @@ package gui.ui.pages;
 import gui.ui.components.ChatInput;
 import gui.ui.components.MessageBubble;
 import gui.ui.components.ToolCallCard;
+import javafx.application.Platform;
 import javafx.geometry.Insets;
 import javafx.geometry.Orientation;
 import javafx.geometry.Pos;
@@ -11,6 +12,7 @@ import javafx.scene.control.ScrollPane;
 import javafx.scene.control.SplitPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
+import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 
 public class ChatPage extends VBox {
@@ -19,6 +21,10 @@ public class ChatPage extends VBox {
     private final ScrollPane scrollPane;
     private final ChatInput chatInput;
     private final SplitPane splitPane;
+    private final StackPane scrollStack;
+    private final Label scrollToBottomBtn;
+
+    private boolean autoScroll = true;
 
     public ChatPage() {
         setSpacing(0);
@@ -33,6 +39,29 @@ public class ChatPage extends VBox {
         scrollPane.setStyle("-fx-background-color: transparent; -fx-border-color: transparent;");
         scrollPane.setFitToWidth(true);
 
+        // 悬浮滚动到底部按钮（必须在 vvalue 监听器之前创建）
+        scrollToBottomBtn = createScrollToBottomButton();
+
+        // 跟踪滚动位置，判断是否在底部
+        scrollPane.vvalueProperty().addListener((obs, old, val) -> {
+            double scrollBottom = val.doubleValue();
+            // vvalue 1.0 = 滚动到底部; 容差 0.05
+            boolean atBottom = scrollBottom >= 0.95;
+            if (atBottom) {
+                autoScroll = true;
+                scrollToBottomBtn.setVisible(false);
+            } else {
+                autoScroll = false;
+                scrollToBottomBtn.setVisible(true);
+            }
+        });
+
+        // StackPane 层叠消息区域和悬浮按钮
+        scrollStack = new StackPane();
+        scrollStack.getChildren().addAll(scrollPane, scrollToBottomBtn);
+        StackPane.setAlignment(scrollToBottomBtn, Pos.BOTTOM_RIGHT);
+        StackPane.setMargin(scrollToBottomBtn, new Insets(0, 24, 12, 0));
+
         // 输入区域
         chatInput = new ChatInput();
 
@@ -40,7 +69,7 @@ public class ChatPage extends VBox {
         splitPane = new SplitPane();
         splitPane.setOrientation(Orientation.VERTICAL);
         splitPane.setStyle("-fx-background-color: transparent; -fx-border-color: transparent;");
-        splitPane.getItems().addAll(scrollPane, chatInput);
+        splitPane.getItems().addAll(scrollStack, chatInput);
         splitPane.setDividerPosition(0, 0.75);
         VBox.setVgrow(splitPane, Priority.ALWAYS);
 
@@ -48,6 +77,37 @@ public class ChatPage extends VBox {
 
         // 添加欢迎消息
         addWelcomeMessage();
+    }
+
+    private Label createScrollToBottomButton() {
+        Label btn = new Label("\u2B07");
+        btn.setStyle("-fx-background-color: rgba(0, 0, 0, 0.08);"
+            + " -fx-background-radius: 999px;"
+            + " -fx-pref-width: 40px; -fx-pref-height: 40px;"
+            + " -fx-alignment: center;"
+            + " -fx-font-size: 18px;"
+            + " -fx-cursor: hand;"
+            + " -fx-text-fill: rgba(0, 0, 0, 0.5);");
+        btn.setVisible(false);
+        btn.setManaged(false);
+        btn.setOnMouseClicked(e -> scrollToBottom());
+        btn.setOnMouseEntered(e ->
+            btn.setStyle("-fx-background-color: rgba(0, 0, 0, 0.15);"
+                + " -fx-background-radius: 999px;"
+                + " -fx-pref-width: 40px; -fx-pref-height: 40px;"
+                + " -fx-alignment: center;"
+                + " -fx-font-size: 18px;"
+                + " -fx-cursor: hand;"
+                + " -fx-text-fill: rgba(0, 0, 0, 0.7);"));
+        btn.setOnMouseExited(e ->
+            btn.setStyle("-fx-background-color: rgba(0, 0, 0, 0.08);"
+                + " -fx-background-radius: 999px;"
+                + " -fx-pref-width: 40px; -fx-pref-height: 40px;"
+                + " -fx-alignment: center;"
+                + " -fx-font-size: 18px;"
+                + " -fx-cursor: hand;"
+                + " -fx-text-fill: rgba(0, 0, 0, 0.5);"));
+        return btn;
     }
 
     private void addWelcomeMessage() {
@@ -80,13 +140,13 @@ public class ChatPage extends VBox {
 
         MessageBubble bubble = new MessageBubble(MessageBubble.Role.USER, content);
         messageContainer.getChildren().add(bubble);
-        scrollToBottom();
+        smartScrollToBottom();
     }
 
     public void addAssistantMessage(String content) {
         MessageBubble bubble = new MessageBubble(MessageBubble.Role.ASSISTANT, content);
         messageContainer.getChildren().add(bubble);
-        scrollToBottom();
+        smartScrollToBottom();
     }
 
     public ToolCallCard addToolCallCard(String toolName, String status, String params) {
@@ -105,7 +165,7 @@ public class ChatPage extends VBox {
         avatar.setMinSize(32, 32);
         wrapper.getChildren().addAll(avatar, card);
         messageContainer.getChildren().add(wrapper);
-        scrollToBottom();
+        smartScrollToBottom();
         return card;
     }
 
@@ -116,8 +176,22 @@ public class ChatPage extends VBox {
         }
     }
 
+    /**
+     * 智能滚动：仅在用户处于底部附近时自动滚动到最新消息
+     */
+    private void smartScrollToBottom() {
+        if (autoScroll) {
+            Platform.runLater(() -> scrollPane.setVvalue(1.0));
+        }
+    }
+
+    /**
+     * 强制滚动到底部（悬浮按钮点击时）
+     */
     private void scrollToBottom() {
-        scrollPane.setVvalue(1.0);
+        autoScroll = true;
+        scrollToBottomBtn.setVisible(false);
+        Platform.runLater(() -> scrollPane.setVvalue(1.0));
     }
 
     public ChatInput getChatInput() {
@@ -139,6 +213,8 @@ public class ChatPage extends VBox {
         } else {
             messageContainer.getChildren().clear();
         }
+        autoScroll = true;
+        scrollToBottomBtn.setVisible(false);
     }
 
     public void loadMessages(java.util.List<java.util.Map<String, Object>> history) {
@@ -155,5 +231,7 @@ public class ChatPage extends VBox {
                 addAssistantMessage(content);
             }
         }
+        // 历史加载后滚动到底部
+        Platform.runLater(() -> scrollPane.setVvalue(1.0));
     }
 }

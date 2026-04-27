@@ -263,8 +263,11 @@ public class SettingsPage extends VBox {
         config.provider.ProvidersConfig provCfg = cfg.getProviders();
         java.util.List<ModelItem> items = new java.util.ArrayList<>();
 
-        // 当前模型排最前（即使属于某个 provider）
-        items.add(new ModelItem("  " + currentModel + "  (当前)", currentModel, currentProvider != null ? currentProvider : ""));
+        // 当前模型排最前，带提供商前缀
+        String currentLabel = (currentProvider != null && !currentProvider.isBlank())
+            ? "  " + currentProvider + "/" + currentModel + "  (当前)"
+            : "  " + currentModel + "  (当前)";
+        items.add(new ModelItem(currentLabel, currentModel, currentProvider != null ? currentProvider : ""));
 
         for (int i = 0; i < providerOrder.length; i++) {
             String pn = providerOrder[i];
@@ -283,7 +286,7 @@ public class SettingsPage extends VBox {
             for (config.provider.model.ModelConfig mc : pc.getModelConfigs()) {
                 if (mc.getModel() != null && !mc.getModel().isBlank()
                     && !mc.getModel().equals(currentModel)) {
-                    items.add(new ModelItem("     " + mc.getModel(), mc.getModel(), pn));
+                    items.add(new ModelItem("     " + pn + "/" + mc.getModel(), mc.getModel(), pn));
                 }
             }
         }

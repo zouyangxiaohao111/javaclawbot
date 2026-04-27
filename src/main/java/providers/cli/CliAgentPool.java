@@ -11,6 +11,7 @@ import session.CliAgentSessionManager;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 /**
  * CLI Agent 实例池 - 管理所有运行中的 Agent 实例
@@ -26,7 +27,7 @@ import java.util.function.Consumer;
 public class CliAgentPool {
 
     private final Map<String, CliAgentSession> sessions = new ConcurrentHashMap<>();
-    private final ProjectRegistry projectRegistry;
+    private final Supplier<ProjectRegistry> projectRegistrySupplier;
     private final PermissionEngine permissionEngine;
     private final CliAgentOutputHandler outputHandler;
     private final CliAgentSessionManager sessionManager;
@@ -62,11 +63,11 @@ public class CliAgentPool {
             String errorMessage
     ) {}
 
-    public CliAgentPool(ProjectRegistry projectRegistry,
+    public CliAgentPool(Supplier<ProjectRegistry> projectRegistrySupplier,
                         PermissionEngine permissionEngine,
                         CliAgentOutputHandler outputHandler,
                         CliAgentSessionManager sessionManager) {
-        this.projectRegistry = projectRegistry;
+        this.projectRegistrySupplier = projectRegistrySupplier;
         this.permissionEngine = permissionEngine;
         this.outputHandler = outputHandler;
         this.sessionManager = sessionManager;
@@ -171,7 +172,7 @@ public class CliAgentPool {
      * 创建新会话
      */
     private CompletableFuture<CliAgentSession> createSession(String project, String agentType) {
-        String workDir = projectRegistry.getPath(project);
+        String workDir = projectRegistrySupplier.get().getPath(project);
         if (workDir == null) {
             return CompletableFuture.failedFuture(
                     new IllegalArgumentException("项目 '" + project + "' 未绑定。使用 /bind " + project + "=<路径> 绑定"));

@@ -13,6 +13,7 @@ import memory.MemoryStore;
 import providers.cli.ProjectRegistry;
 import skills.SkillsLoader;
 import utils.GsonFactory;
+import utils.Helpers;
 
 import java.io.IOException;
 import java.net.URLConnection;
@@ -24,6 +25,7 @@ import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.function.Supplier;
 
 /**
  * 上下文构建器：负责组装系统提示词与消息列表，用于调用大模型。
@@ -47,7 +49,7 @@ public class ContextBuilder {
     private final SkillsLoader skills;
     private final BootstrapLoader bootstrapLoader;
     private final CommandQueueManager commandQueueManager;
-    private final ProjectRegistry projectRegistry;
+    private final Supplier<ProjectRegistry> projectRegistrySupplier;
     @Getter
     private final BootstrapConfig bootstrapConfig;
 
@@ -69,21 +71,28 @@ public class ContextBuilder {
         this(workspace, bootstrapConfig, warnHandler, null);
     }
 
-    /** 带外部 ProjectRegistry 的构造器（GUI 使用，按 session 隔离项目绑定） */
-    public ContextBuilder(Path workspace, BootstrapConfig bootstrapConfig, java.util.function.Consumer<String> warnHandler, ProjectRegistry projectRegistry) {
+    /** 带外部 ProjectRegistry supplier 的构造器（支持 per-session 动态解析） */
+    public ContextBuilder(Path workspace, BootstrapConfig bootstrapConfig, java.util.function.Consumer<String> warnHandler, Supplier<ProjectRegistry> projectRegistrySupplier) {
         this.workspace = Objects.requireNonNull(workspace, "workspace");
         this.memory = new MemoryStore(workspace);
         this.skills = new SkillsLoader(workspace);
         this.bootstrapConfig = bootstrapConfig != null ? bootstrapConfig : new BootstrapConfig();
         this.commandQueueManager = new CommandQueueManager(this.skills);
-        if (projectRegistry != null) {
-            this.projectRegistry = projectRegistry;
+        if (projectRegistrySupplier != null) {
+            this.projectRegistrySupplier = projectRegistrySupplier;
         } else {
-            this.projectRegistry = new ProjectRegistry(workspace.resolve("cli-projects.json"));
-            this.projectRegistry.load();
+            ProjectRegistry defaultPr = new ProjectRegistry(Helpers.getDataPath()
+                    .resolve("projects")
+                    .resolve("projects.json"));
+            defaultPr.load();
+            String cwd = System.getProperty("user.dir");
+            if (cwd != null && !cwd.isBlank() && defaultPr.getMainProject() == null) {
+                defaultPr.bind("main", cwd, true);
+            }
+            this.projectRegistrySupplier = () -> defaultPr;
         }
 
-        this.bootstrapLoader = new BootstrapLoader(workspace, this.bootstrapConfig, warnHandler, this.projectRegistry);
+        this.bootstrapLoader = new BootstrapLoader(workspace, this.bootstrapConfig, warnHandler, this.projectRegistrySupplier);
     }
 
 
@@ -192,7 +201,7 @@ public class ContextBuilder {
         }
 
         // 从 ProjectRegistry 获取主代理项目
-        ProjectRegistry.ProjectInfo mainProject = projectRegistry.getMainProject();
+        ProjectRegistry.ProjectInfo mainProject = projectRegistrySupplier.get().getMainProject();
         if (mainProject == null) {
             return "";
         }

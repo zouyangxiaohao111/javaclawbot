@@ -13,7 +13,7 @@ import java.util.logging.Logger;
 /**
  * 异步会话标题生成器。
  *
- * 当会话中用户消息数 >= 3 时触发，使用 LLM 生成 10 字以内的中文标题，
+ * 当会话中用户消息数 >= 2 时触发，使用 LLM 生成 10 字以内的中文标题，
  * 存入 session.metadata["title"]。
  */
 public final class TitleGenerator {

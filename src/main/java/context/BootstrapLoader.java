@@ -16,6 +16,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.util.*;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
 
@@ -51,14 +52,14 @@ public class BootstrapLoader {
     private final Path workspace;
     private final BootstrapConfig bootstrapConfig;
     private final Consumer<String> warnHandler;
-    private final ProjectRegistry projectRegistry;
+    private final Supplier<ProjectRegistry> projectRegistrySupplier;
 
 
-    public BootstrapLoader(Path workspace, BootstrapConfig bootstrapConfig, Consumer<String> warnHandler, ProjectRegistry projectRegistry) {
+    public BootstrapLoader(Path workspace, BootstrapConfig bootstrapConfig, Consumer<String> warnHandler, Supplier<ProjectRegistry> projectRegistrySupplier) {
         this.workspace = workspace;
         this.bootstrapConfig = bootstrapConfig != null ? bootstrapConfig : new BootstrapConfig();
         this.warnHandler = warnHandler;
-        this.projectRegistry = projectRegistry;
+        this.projectRegistrySupplier = projectRegistrySupplier;
     }
 
     /**
@@ -322,8 +323,9 @@ public class BootstrapLoader {
                 .replace("{is_git}", String.valueOf(isGitRepo))
                 .replace("{is_svn}", String.valueOf(isSvnRepo))
                 .replace("{model}", modelName);
-        if (isDevMode() && StrUtil.isNotBlank(projectRegistry.getMainProjectPath())){
-            content = content.replace("{project_dir}", projectRegistry.getMainProjectPath());
+        if (isDevMode() && projectRegistrySupplier != null
+                && StrUtil.isNotBlank(projectRegistrySupplier.get().getMainProjectPath())){
+            content = content.replace("{project_dir}", projectRegistrySupplier.get().getMainProjectPath());
         }else {
             content = content.replace("{project_dir}", "");
         }

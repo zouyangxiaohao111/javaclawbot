@@ -15,6 +15,7 @@ import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.function.Supplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -43,12 +44,12 @@ public final class GlobTool extends Tool {
 
     private final Path workspace;
     private final Path allowedDir;
-    private final ProjectRegistry projectRegistry;
+    private final Supplier<ProjectRegistry> projectRegistrySupplier;
 
-    public GlobTool(Path workspace, Path allowedDir, ProjectRegistry projectRegistry) {
+    public GlobTool(Path workspace, Path allowedDir, Supplier<ProjectRegistry> projectRegistrySupplier) {
         this.workspace = workspace;
         this.allowedDir = allowedDir;
-        this.projectRegistry = projectRegistry;
+        this.projectRegistrySupplier = projectRegistrySupplier;
     }
 
     // ---------- Line 57-58: name = 'Glob' ----------
@@ -110,7 +111,8 @@ public final class GlobTool extends Tool {
                 searchDir = Paths.get(path);
             } else {
                 // 先从主项目中配置
-                String mainProjectPath = projectRegistry.getMainProjectPath();
+                ProjectRegistry registry = projectRegistrySupplier.get();
+                String mainProjectPath = registry.getMainProjectPath();
                 if (StrUtil.isBlank(mainProjectPath)) {
                     searchDir = workspace;
                 }else {

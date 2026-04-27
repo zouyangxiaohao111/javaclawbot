@@ -96,15 +96,15 @@ public class AgentLoop {
 
     private final MessageBus bus;
     private final ChannelsConfig channelsConfig;
-    private final LLMProvider provider;
+    private volatile LLMProvider provider;
     private final java.nio.file.Path workspace;
-    private final String model;
+    private volatile String model;
     private final int maxIterations;
-    private final double temperature;
-    private final int maxTokens;
-    private final int contextWindow;
+    private volatile double temperature;
+    private volatile int maxTokens;
+    private volatile int contextWindow;
     private final int memoryWindow;
-    private final String reasoningEffort;
+    private volatile String reasoningEffort;
     private final CronService cronService;
     private final boolean restrictToWorkspace;
     /**
@@ -160,7 +160,6 @@ public class AgentLoop {
      * CLI Agent 命令处理器
      */
     private CliAgentCommandHandler cliAgentHandler;
-    private providers.cli.ProjectRegistry projectRegistry;
 
     // 跟踪已记录的 CLI session ID，避免重复添加 reference marker
     private final Set<String> recordedCliSessions = ConcurrentHashMap.newKeySet();
@@ -259,7 +258,7 @@ public class AgentLoop {
         this.mcpServers = (mcpServers != null) ? mcpServers : Map.of();
         this.mcpManager = new McpManager(workspace, mcpServers, executor);
 
-        // 初始化 CLI Agent 命令处理器
+        // 初始化 CLI Agent 命令处理器（内部管理 defaultRegistry + per-session 注册表）
         this.cliAgentHandler = new CliAgentCommandHandler(workspace);
         this.cliAgentHandler.setSendToChannelWithMeta((message, sessionKey, metadata) -> {
             // sessionKey 可能为 null（如 projectSessionKeys 没有映射时）
@@ -365,14 +364,13 @@ public class AgentLoop {
             var cfg = runtimeSettings.getCurrentConfig();
             maxConcurrent = cfg.getAgents().getDefaults().getMaxConcurrent();
         }
-        this.context = new ContextBuilder(workspace, currentConfig().getAgents().getDefaults().getBootstrapConfig());
+        this.context = new ContextBuilder(workspace, currentConfig().getAgents().getDefaults().getBootstrapConfig(), null, cliAgentHandler::getProjectRegistry);
         this.memoryStore = new MemoryStore(workspace);
         // AgentLoopQueue 使用独立线程池，避免 executeImmediately 中的 join() 阻塞共享线程池导致死锁
         this.queue = new AgentLoopQueue(maxConcurrent);
         // 设置任务开始回调，清除停止标记，确保队列任务不受之前 /stop 命令影响
         this.queue.setOnTaskStart(sessionKey -> clearStopRequested(sessionKey));
         this.cronToolFacade = (cronService != null) ? new CronTool(cronService) : null;
-        this.projectRegistry = null;
     }
 
     /** 带 ProjectRegistry 的构造器（GUI 使用，按 session 隔离项目绑定） */
@@ -398,31 +396,39 @@ public class AgentLoop {
         this(bus, provider, workspace, model, maxIterations, temperature, maxTokens,
             contextWindow, memoryWindow, reasoningEffort, cronService, restrictToWorkspace,
             sessionManager, mcpServers, channelsConfig, runtimeSettings);
-        this.projectRegistry = projectRegistry;
-        // 使用外部 ProjectRegistry 替代默认的
+        // 将外部 registry 注册为 "cli:direct" session 的 ProjectRegistry
         if (projectRegistry != null) {
-            this.context = new ContextBuilder(workspace,
-                currentConfig().getAgents().getDefaults().getBootstrapConfig(),
-                null,
-                projectRegistry);
-            this.cliAgentHandler = new CliAgentCommandHandler(workspace, projectRegistry);
-            this.cliAgentHandler.setSendToChannelWithMeta((message, sessionKey, metadata) -> {
-                if (sessionKey == null || sessionKey.isBlank()) {
-                    if (metadata != null && metadata.containsKey("cli_session_id")) {
-                        sessionKey = "cli:direct";
-                    } else {
-                        log.debug("CLI Agent output without sessionKey, skipping: {}", message);
-                        return;
-                    }
-                }
-                String[] parts = sessionKey.split(":", 2);
-                String channel = parts[0];
-                String chatId = parts.length > 1 ? parts[1] : "";
-                bus.publishOutbound(new bus.OutboundMessage(
-                    channel, chatId, message, List.of(),
-                    metadata != null ? new java.util.HashMap<>(metadata) : Map.of()));
-            });
+            this.cliAgentHandler.registerSessionRegistry("cli:direct", projectRegistry);
         }
+    }
+
+    /**
+     * 更新当前会话的 ProjectRegistry（新建会话时调用）
+     */
+    public void updateProjectRegistry(providers.cli.ProjectRegistry registry) {
+        if (registry != null) {
+            this.cliAgentHandler.registerSessionRegistry("cli:direct", registry);
+        }
+    }
+
+    /**
+     * 热更新 LLMProvider（模型/API Key 变更时调用）
+     */
+    public void updateProvider(LLMProvider newProvider) {
+        if (newProvider != null) {
+            this.provider = newProvider;
+        }
+    }
+
+    /**
+     * 热更新模型配置（模型切换时同步更新 context window 等参数）
+     */
+    public void updateModelConfig(String newModel, int newMaxTokens, int newContextWindow, double newTemperature, String newReasoningEffort) {
+        this.model = newModel;
+        this.maxTokens = newMaxTokens;
+        this.contextWindow = newContextWindow;
+        this.temperature = newTemperature;
+        this.reasoningEffort = newReasoningEffort;
     }
 
     private AgentRuntimeSettings.Snapshot runtimeSnapshot() {
@@ -609,7 +615,7 @@ public class AgentLoop {
         sharedTools.register(new FileSystemTools.ReadWordTool(workspace, allowedDir));
         sharedTools.register(new FileSystemTools.ReadWordStructuredTool(workspace, allowedDir));
 
-        sharedTools.register(new ListFilesTool(workspace, allowedDir, cliAgentHandler.getProjectRegistry()));
+        sharedTools.register(new ListFilesTool(workspace, allowedDir, cliAgentHandler::getProjectRegistry));
         // 校验git环境
         if (Shell.isWindows()) {
             Shell.setWindowsBashPath(runtimeSnapshot().windowsBashPath());
@@ -638,8 +644,8 @@ public class AgentLoop {
         sharedTools.register(new MemorySearchTool(workspace));
 
         // 搜索工具（对齐 Claude Code 的 Grep/Glob 工具）
-        sharedTools.register(new GrepTool(workspace, allowedDir, cliAgentHandler.getProjectRegistry()));
-        sharedTools.register(new GlobTool(workspace, allowedDir, cliAgentHandler.getProjectRegistry()));
+        sharedTools.register(new GrepTool(workspace, allowedDir, cliAgentHandler::getProjectRegistry));
+        sharedTools.register(new GlobTool(workspace, allowedDir, cliAgentHandler::getProjectRegistry));
 
         // CLI Agent 工具（开发者模式下可用）
         if (currentConfig().getAgents().getDefaults().isDevelopment()) {
@@ -791,8 +797,8 @@ public class AgentLoop {
         // 每次请求独立创建 MessageTool，避免串会话
         localTools.register(new MessageTool(bus::publishOutbound, channel, chatId, messageId));
         localTools.register(new ReadFileTool(workspace, null, sharedFileCache));
-        localTools.register(new GlobTool(workspace, null, cliAgentHandler.getProjectRegistry()));
-        localTools.register(new GrepTool(workspace, null, cliAgentHandler.getProjectRegistry()));
+        localTools.register(new GlobTool(workspace, null, cliAgentHandler::getProjectRegistry));
+        localTools.register(new GrepTool(workspace, null, cliAgentHandler::getProjectRegistry));
         localTools.register(new EditTool(workspace, null, sharedFileCache));
         localTools.register(new WriteTool(workspace, null, sharedFileCache));
         localTools.register(new SkillTool(commandManager, skillsLoader));
@@ -817,8 +823,8 @@ public class AgentLoop {
         localTools.register(new ReadFileTool(workspace, null, sharedFileCache));
         localTools.register(new EditTool(workspace, null, sharedFileCache));
         localTools.register(new WriteTool(workspace, null, sharedFileCache));
-        localTools.register(new GlobTool(workspace, null, cliAgentHandler.getProjectRegistry()));
-        localTools.register(new GrepTool(workspace, null, cliAgentHandler.getProjectRegistry()));
+        localTools.register(new GlobTool(workspace, null, cliAgentHandler::getProjectRegistry));
+        localTools.register(new GrepTool(workspace, null, cliAgentHandler::getProjectRegistry));
 
         // 添加记忆压缩工具
         localTools.register(new PruneMessagesTool(sessions, sessionKey));

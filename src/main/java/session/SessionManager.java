@@ -273,6 +273,11 @@ public final class SessionManager {
                     item.put("created_at", data.get("created_at"));
                     item.put("updated_at", data.get("updated_at"));
                     item.put("path", path.toString());
+                    // 包含 metadata（title 等字段），供 GUI 历史列表显示
+                    Object md = data.get("metadata");
+                    if (md instanceof Map) {
+                        item.put("metadata", md);
+                    }
                     sessions.add(item);
 
                 } catch (Exception ignore) {

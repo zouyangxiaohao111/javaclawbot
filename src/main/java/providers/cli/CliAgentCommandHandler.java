@@ -7,6 +7,7 @@ import providers.cli.model.FileAttachment;
 import providers.cli.model.ImageAttachment;
 import providers.cli.permission.PermissionEngine;
 import session.CliAgentSessionManager;
+import utils.Helpers;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -37,7 +38,10 @@ import java.util.function.BiConsumer;
 @Slf4j
 public class CliAgentCommandHandler {
 
-    private final ProjectRegistry projectRegistry;
+    /** 默认 registry（fallback，无 session 上下文时使用） */
+    private final ProjectRegistry defaultRegistry;
+    /** per-session registries: sessionKey → ProjectRegistry */
+    private final Map<String, ProjectRegistry> sessionRegistries = new java.util.concurrent.ConcurrentHashMap<>();
     private final CliAgentPool agentPool;
     private final CliAgentOutputHandler outputHandler;
     private final CliAgentSessionManager sessionManager;
@@ -73,11 +77,11 @@ public class CliAgentCommandHandler {
         this.workspacePath = workspacePath;
 
         if (projectRegistry != null) {
-            this.projectRegistry = projectRegistry;
+            this.defaultRegistry = projectRegistry;
         } else {
-            Path registryPath = workspacePath.resolve("cli-projects.json");
-            this.projectRegistry = new ProjectRegistry(registryPath);
-            this.projectRegistry.load();
+            this.defaultRegistry = createRegistry(Helpers.getDataPath()
+                    .resolve("projects")
+                    .resolve("projects.json"));
         }
 
         this.outputHandler = new CliAgentOutputHandler();
@@ -92,9 +96,9 @@ public class CliAgentCommandHandler {
             return t;
         });
 
-        // 传入 sessionManager 给 agentPool
+        // 传入 Supplier 给 agentPool，支持 per-session 解析
         this.agentPool = new CliAgentPool(
-                this.projectRegistry,
+                this::getProjectRegistry,
                 permissionEngine,
                 outputHandler,
                 sessionManager
@@ -332,7 +336,7 @@ public class CliAgentCommandHandler {
         }
 
         // 执行绑定
-        if (projectRegistry.bind(name, path, isMain)) {
+        if (getProjectRegistry().bind(name, path, isMain)) {
             String mainHint = isMain ? " ⭐ [主代理]" : "";
             reply(msg, "✅ 项目已绑定" + mainHint + ": " + name + " → " + path);
         } else {
@@ -350,7 +354,7 @@ public class CliAgentCommandHandler {
         }
 
         String name = parts[1];
-        if (projectRegistry.unbind(name)) {
+        if (getProjectRegistry().unbind(name)) {
             // 停止相关的 Agent
             agentPool.stopAllForProject(name);
             reply(msg, "✅ 项目已解绑: " + name);
@@ -363,7 +367,7 @@ public class CliAgentCommandHandler {
      * 处理 /projects 命令
      */
     private void handleProjects(InboundMessage msg) {
-        reply(msg, projectRegistry.formatList());
+        reply(msg, getProjectRegistry().formatList());
     }
 
     /**
@@ -380,7 +384,7 @@ public class CliAgentCommandHandler {
         String prompt = parts[2];
 
         // 检查项目是否存在
-        String workDir = projectRegistry.getPath(project);
+        String workDir = getProjectRegistry().getPath(project);
         if (workDir == null) {
             reply(msg, "❌ 项目 '" + project + "' 未绑定。\n" +
                     "使用 /bind " + project + "=<路径> 绑定项目");
@@ -429,7 +433,7 @@ public class CliAgentCommandHandler {
     private void handleStatus(InboundMessage msg, String[] parts) {
         if (parts.length >= 2) {
             String project = parts[1];
-            String workDir = projectRegistry.getPath(project);
+            String workDir = getProjectRegistry().getPath(project);
             if (workDir == null) {
                 reply(msg, "❌ 项目不存在: " + project);
                 return;
@@ -533,7 +537,7 @@ public class CliAgentCommandHandler {
         }
 
         String project = parts[1];
-        String workDir = projectRegistry.getPath(project);
+        String workDir = getProjectRegistry().getPath(project);
         if (workDir == null) {
             reply(msg, "❌ 项目不存在: " + project);
             return;
@@ -560,7 +564,7 @@ public class CliAgentCommandHandler {
         // 检查冲突
         int i = 1;
         String original = name;
-        while (projectRegistry.exists(name)) {
+        while (getProjectRegistry().exists(name)) {
             name = original + i++;
         }
         return name;
@@ -602,7 +606,42 @@ public class CliAgentCommandHandler {
     }
 
     public ProjectRegistry getProjectRegistry() {
-        return projectRegistry;
+        String sessionKey = currentSessionKey.get();
+        if (sessionKey != null && !sessionKey.isBlank()) {
+            return sessionRegistries.computeIfAbsent(sessionKey, this::createSessionRegistry);
+        }
+        return defaultRegistry;
+    }
+
+    /**
+     * 预注册一个 session 的 ProjectRegistry（GUI 用，避免重复创建）
+     */
+    public void registerSessionRegistry(String sessionKey, ProjectRegistry registry) {
+        sessionRegistries.put(sessionKey, registry);
+    }
+
+    /**
+     * 为指定 sessionKey 创建 ProjectRegistry
+     */
+    private ProjectRegistry createSessionRegistry(String sessionKey) {
+        Path storePath = Helpers.getDataPath()
+                .resolve("projects")
+                .resolve(sessionKey.replace(":", "_"))
+                .resolve("projects.json");
+        return createRegistry(storePath);
+    }
+
+    /**
+     * 创建并初始化 ProjectRegistry（load + auto-bind user.dir）
+     */
+    private static ProjectRegistry createRegistry(Path storePath) {
+        ProjectRegistry registry = new ProjectRegistry(storePath);
+        registry.load();
+        String cwd = System.getProperty("user.dir");
+        if (cwd != null && !cwd.isBlank() && registry.getMainProject() == null) {
+            registry.bind("main", cwd, true);
+        }
+        return registry;
     }
 
     public CliAgentPool getAgentPool() {
