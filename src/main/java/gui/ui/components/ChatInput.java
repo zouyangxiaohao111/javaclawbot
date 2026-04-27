@@ -74,11 +74,11 @@ public class ChatInput extends VBox {
             + " -fx-fill: transparent; -fx-stroke-line-cap: round; -fx-stroke-line-join: round;");
 
         javafx.scene.layout.StackPane attachBtn = new javafx.scene.layout.StackPane(attachIcon);
-        attachBtn.setPrefSize(40, 40);
-        attachBtn.setMaxSize(40, 40);
-        String attachDefault = "-fx-background-color: rgba(0,0,0,0.08); -fx-background-radius: 10px; -fx-cursor: hand;";
-        String attachHover  = "-fx-background-color: rgba(0,0,0,0.15); -fx-background-radius: 10px; -fx-cursor: hand;";
-        String attachPress  = "-fx-background-color: rgba(0,0,0,0.22); -fx-background-radius: 10px; -fx-cursor: hand;";
+        attachBtn.setPrefSize(28, 28);
+        attachBtn.setMaxSize(28, 28);
+        String attachDefault = "-fx-background-color: rgba(0,0,0,0.08); -fx-background-radius: 8px; -fx-cursor: hand;";
+        String attachHover  = "-fx-background-color: rgba(0,0,0,0.15); -fx-background-radius: 8px; -fx-cursor: hand;";
+        String attachPress  = "-fx-background-color: rgba(0,0,0,0.22); -fx-background-radius: 8px; -fx-cursor: hand;";
         attachBtn.setStyle(attachDefault);
         attachBtn.setOnMouseEntered(e -> {
             attachBtn.setStyle(attachHover);
