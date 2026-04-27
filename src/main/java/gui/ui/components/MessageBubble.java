@@ -84,7 +84,7 @@ public class MessageBubble extends HBox {
 
             // Flexmark: markdown → HTML
             String htmlBody = RENDERER.render(PARSER.parse(content));
-            String html = String.format(HTML_TEMPLATE, htmlBody);
+            String html = HTML_TEMPLATE.replace("%s", htmlBody);
 
             WebView webView = new WebView();
             webView.setStyle("-fx-background-color: transparent;");
