@@ -3,6 +3,7 @@ package gui.ui.pages;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.control.Button;
+import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.layout.HBox;
@@ -10,10 +11,17 @@ import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 import javafx.scene.shape.Line;
 
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.function.Consumer;
+
 public class SettingsPage extends VBox {
 
     private VBox settingsContainer;
     private gui.ui.BackendBridge backendBridge;
+    private Consumer<String> onModelChanged;
 
     public SettingsPage() {
         setSpacing(0);
@@ -230,8 +238,64 @@ public class SettingsPage extends VBox {
     private VBox buildModelSection() {
         config.Config cfg = backendBridge.getConfig();
         String model = cfg.getAgents().getDefaults().getModel();
-        String apiKey = "";
         String providerName = cfg.getProviderName(model);
+
+        VBox section = new VBox(16);
+        Label sectionTitle = new Label("模型");
+        sectionTitle.getStyleClass().add("section-title");
+
+        // 收集所有已配置 provider 的模型列表
+        Set<String> modelNames = new LinkedHashSet<>();
+        modelNames.add(model); // 当前模型排最前
+        config.provider.ProvidersConfig provCfg = cfg.getProviders();
+        for (String pn : new String[]{"anthropic","openai","deepseek","openrouter","groq",
+            "zhipu","dashscope","gemini","moonshot","minimax","aihubmix",
+            "siliconflow","volcengine","vllm","githubCopilot","custom"}) {
+            config.provider.ProviderConfig pc = provCfg.getByName(pn);
+            if (pc == null || pc.getModelConfigs() == null) continue;
+            for (config.provider.model.ModelConfig mc : pc.getModelConfigs()) {
+                if (mc.getModel() != null && !mc.getModel().isBlank()) {
+                    modelNames.add(mc.getModel());
+                }
+            }
+        }
+
+        // 模型选择行（使用 ComboBox）
+        HBox modelRow = new HBox(16);
+        modelRow.setAlignment(Pos.CENTER_LEFT);
+
+        VBox infoBox = new VBox(4);
+        Label titleLabel = new Label("默认模型");
+        titleLabel.setStyle("-fx-font-size: 15px; -fx-font-weight: 500;");
+        Label descLabel = new Label("选择用于对话的 AI 模型");
+        descLabel.setStyle("-fx-font-size: 13px; -fx-text-fill: rgba(0, 0, 0, 0.5);");
+        infoBox.getChildren().addAll(titleLabel, descLabel);
+
+        ComboBox<String> modelCombo = new ComboBox<>();
+        modelCombo.getItems().addAll(new ArrayList<>(modelNames));
+        modelCombo.setValue(model);
+        modelCombo.setEditable(true);
+        modelCombo.setStyle("-fx-background-color: rgba(0, 0, 0, 0.03); -fx-background-radius: 12px;"
+            + " -fx-border-color: transparent; -fx-font-family: monospace; -fx-font-size: 13px;");
+        modelCombo.setPrefHeight(40);
+        modelCombo.setOnAction(e -> {
+            String selected = modelCombo.getValue();
+            if (selected != null && !selected.isBlank() && !selected.equals(model)) {
+                cfg.getAgents().getDefaults().setModel(selected);
+                try {
+                    config.ConfigIO.saveConfig(cfg, null);
+                } catch (Exception ignored) {}
+                if (onModelChanged != null) onModelChanged.accept(selected);
+                // 刷新当前 section 显示
+                refresh();
+            }
+        });
+
+        modelRow.getChildren().addAll(infoBox, modelCombo);
+        HBox.setHgrow(infoBox, Priority.ALWAYS);
+
+        // API Key 显示
+        String apiKey = "";
         if (providerName != null) {
             config.provider.ProviderConfig pc = cfg.getProviders().getByName(providerName);
             if (pc != null && pc.getApiKey() != null && !pc.getApiKey().isBlank()) {
@@ -241,14 +305,14 @@ public class SettingsPage extends VBox {
         String maskedKey = apiKey.length() > 4
             ? apiKey.substring(0, 4) + "\u2022\u2022\u2022\u2022" + apiKey.substring(apiKey.length() - 4)
             : (apiKey.isBlank() ? "未配置" : "\u2022\u2022\u2022");
-
-        VBox section = new VBox(16);
-        Label sectionTitle = new Label("模型");
-        sectionTitle.getStyleClass().add("section-title");
-        HBox modelRow = createSettingRow("默认模型", "选择用于对话的 AI 模型", model + " \u25BE");
         HBox apiKeyRow = createSettingRow("API 密钥", "用于认证模型服务", maskedKey);
+
         section.getChildren().addAll(sectionTitle, modelRow, apiKeyRow);
         return section;
+    }
+
+    public void setOnModelChanged(Consumer<String> callback) {
+        this.onModelChanged = callback;
     }
 
     private VBox buildChannelsSection() {

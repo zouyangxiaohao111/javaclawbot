@@ -9,6 +9,15 @@ import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
+import javafx.stage.FileChooser;
+
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.nio.file.Path;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 
 public class SkillsPage extends VBox {
 
@@ -64,6 +73,7 @@ public class SkillsPage extends VBox {
         Button addBtn = new Button("+ 安装新技能");
         addBtn.getStyleClass().add("pill-button");
         addBtn.setPrefHeight(40);
+        addBtn.setOnAction(e -> installSkillZip());
 
         content.getChildren().addAll(titleBox, skillGrid, addBtn);
         VBox.setMargin(addBtn, new Insets(24, 0, 0, 0));
@@ -123,6 +133,51 @@ public class SkillsPage extends VBox {
                 source != null ? source : "", status), col, row);
             col++;
             if (col >= 2) { col = 0; row++; }
+        }
+    }
+
+    private void installSkillZip() {
+        FileChooser chooser = new FileChooser();
+        chooser.setTitle("选择技能压缩包");
+        chooser.getExtensionFilters().add(
+            new FileChooser.ExtensionFilter("ZIP 压缩包", "*.zip"));
+        File file = chooser.showOpenDialog(getScene().getWindow());
+        if (file == null) return;
+
+        Path skillsDir = backendBridge.getConfig().getWorkspacePath().resolve("skills");
+        try {
+            extractZip(file, skillsDir.toFile());
+            refresh();
+        } catch (IOException ex) {
+            System.err.println("安装技能失败: " + ex.getMessage());
+        }
+    }
+
+    private void extractZip(File zipFile, File destDir) throws IOException {
+        destDir.mkdirs();
+        try (ZipInputStream zis = new ZipInputStream(new FileInputStream(zipFile))) {
+            ZipEntry entry;
+            byte[] buf = new byte[4096];
+            while ((entry = zis.getNextEntry()) != null) {
+                File outFile = new File(destDir, entry.getName());
+                // 防止 Zip Slip 攻击
+                if (!outFile.getCanonicalPath().startsWith(destDir.getCanonicalPath() + File.separator)
+                    && !outFile.getCanonicalPath().equals(destDir.getCanonicalPath())) {
+                    continue;
+                }
+                if (entry.isDirectory()) {
+                    outFile.mkdirs();
+                } else {
+                    outFile.getParentFile().mkdirs();
+                    try (FileOutputStream fos = new FileOutputStream(outFile)) {
+                        int len;
+                        while ((len = zis.read(buf)) > 0) {
+                            fos.write(buf, 0, len);
+                        }
+                    }
+                }
+                zis.closeEntry();
+            }
         }
     }
 }

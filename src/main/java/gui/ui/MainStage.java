@@ -153,7 +153,12 @@ public class MainStage {
         else if (page instanceof SkillsPage p) p.setBackendBridge(backendBridge);
         else if (page instanceof McpPage p) p.setBackendBridge(backendBridge);
         else if (page instanceof CronPage p) p.setBackendBridge(backendBridge);
-        else if (page instanceof SettingsPage p) p.setBackendBridge(backendBridge);
+        else if (page instanceof SettingsPage p) {
+            p.setBackendBridge(backendBridge);
+            p.setOnModelChanged(model -> {
+                chatPage.setStatusText("\u25CF 模型就绪 \u00B7 " + model);
+            });
+        }
     }
 
     private void initializeBackend() {
