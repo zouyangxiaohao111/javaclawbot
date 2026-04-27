@@ -95,7 +95,16 @@ public class ChatPage extends VBox {
 
     public ToolCallCard addToolCallCard(String toolName, String status, String params, boolean startExpanded) {
         ToolCallCard card = new ToolCallCard(toolName, status, params, startExpanded);
-        messageContainer.getChildren().add(card);
+        card.setMaxWidth(700);
+        // Wrap in HBox like assistant bubble (avatar + card)
+        HBox wrapper = new HBox(12);
+        wrapper.setAlignment(javafx.geometry.Pos.CENTER_LEFT);
+        wrapper.setPadding(new Insets(8, 0, 8, 0));
+        Label avatar = new Label("\u2728");
+        avatar.setStyle("-fx-background-color: rgba(0, 0, 0, 0.05); -fx-background-radius: 999px; -fx-pref-width: 32px; -fx-pref-height: 32px; -fx-alignment: center;");
+        avatar.setMinSize(32, 32);
+        wrapper.getChildren().addAll(avatar, card);
+        messageContainer.getChildren().add(wrapper);
         scrollToBottom();
         return card;
     }

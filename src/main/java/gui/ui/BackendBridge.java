@@ -290,12 +290,21 @@ public class BackendBridge {
     }
 
     /**
-     * 创建新会话
+     * 创建新会话：发送 /clear 命令让 AgentLoop 重置上下文
      */
     public Session newSession() {
-        if (sessionManager == null) return null;
+        if (sessionManager == null || bus == null) return null;
         userMessageCount = 0;
         titleGenerationPending.set(false);
+        // 发送 /clear 命令，让 AgentLoop 同时重置 session 和内部状态
+        CompletableFuture.runAsync(() -> {
+            try {
+                InboundMessage clearMsg = new InboundMessage(
+                        CLI_CHANNEL, "user", CLI_CHAT_ID, "/clear", null, null);
+                bus.publishInbound(clearMsg).toCompletableFuture().join();
+            } catch (Exception ignored) {
+            }
+        }, executor);
         return sessionManager.createNew(sessionKey);
     }
 
@@ -307,14 +316,17 @@ public class BackendBridge {
         userMessageCount = 0;
         titleGenerationPending.set(false);
         sessionManager.resumeSession(sessionKey, sessionId);
+        // 清除缓存，强制下次 getOrCreate 从磁盘加载
+        sessionManager.evictFromCache(sessionKey);
     }
 
     /**
-     * 获取会话历史消息
+     * 获取会话历史消息（直接从磁盘加载，不经缓存）
      */
     public List<Map<String, Object>> getSessionHistory(String sessionId) {
         if (sessionManager == null) return List.of();
         sessionManager.resumeSession(sessionKey, sessionId);
+        sessionManager.evictFromCache(sessionKey);
         Session session = sessionManager.getOrCreate(sessionKey);
         return session.getHistory();
     }

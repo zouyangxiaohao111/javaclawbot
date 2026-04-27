@@ -145,6 +145,13 @@ public final class SessionManager {
     }
 
     /**
+     * 从缓存中移除指定 key 的会话，强制下次 getOrCreate 从磁盘加载。
+     */
+    public void evictFromCache(String sessionKey) {
+        cache.remove(sessionKey);
+    }
+
+    /**
      * 保存会话（原子写入 + 清洗非法字符 + 同 key 加锁）
      */
     public void save(Session session) {
