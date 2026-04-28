@@ -111,7 +111,7 @@ public class AgentsPage extends VBox {
         refresh();
     }
 
-    private void refresh() {
+    public void refresh() {
         if (backendBridge == null) return;
         agentList.getChildren().clear();
 

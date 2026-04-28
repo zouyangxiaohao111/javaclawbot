@@ -483,7 +483,7 @@ public class ExecTool extends Tool {
         for (String pattern : denyPatterns) {
             if (pattern == null || pattern.isBlank()) continue;
             if (Pattern.compile(pattern).matcher(lower).find()) {
-                return "Error: Command blocked by safety guard (dangerous pattern detected)";
+                return "此命令包含危险操作，已被拦截。如需执行，请让用户自行在终端中手动操作。";
             }
         }
 
@@ -587,9 +587,17 @@ public class ExecTool extends Tool {
 
     private static List<String> defaultDenyPatterns() {
         List<String> list = new ArrayList<>();
-        list.add("\\brm\\s+-[rf]{1,2}\\b");
-        list.add("\\bdel\\s+/[fq]\\b");
-        list.add("\\brmdir\\s+/s\\b");
+        // Block rm with recursive flag (-r/-R), allow single file rm (-f alone is OK)
+        list.add("\\brm\\s+-(?:[^-\\s]*[rR]|[rR][^-\\s]*)");
+        // Block rm --recursive (long form)
+        list.add("\\brm\\s+--recursive");
+        // Block rmdir/rd /s (recursive) on Windows
+        list.add("\\b(?:rmdir|rd)\\s+/[sS]");
+        // Block del /s (recursive delete) on Windows
+        list.add("\\bdel\\s+/[sS]");
+        // Block PowerShell Remove-Item -Recurse
+        list.add("\\bRemove-Item\\s+.*-Recurse");
+        // Block format/mkfs/diskpart (disk destructive)
         list.add("(?:^|[;&|]\\s*)format\\b");
         list.add("\\b(mkfs|diskpart)\\b");
         list.add("\\bdd\\s+if=");

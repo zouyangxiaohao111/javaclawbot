@@ -2,6 +2,7 @@ package gui.ui;
 
 import providers.LLMProvider;
 import session.Session;
+import utils.Helpers;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -132,6 +133,7 @@ public final class TitleGenerator {
             if (response == null) {
                 LOG.warning("标题生成: LLM 响应为 null");
             }
+            title = Helpers.stripThink(title);
             if (title != null) {
                 title = title.trim()
                         .replaceAll("^[\"'\u201C\u201D\u2018\u2019\u300C\u300D]+", "")

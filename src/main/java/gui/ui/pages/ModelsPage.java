@@ -76,7 +76,7 @@ public class ModelsPage extends VBox {
         refresh();
     }
 
-    private void refresh() {
+    public void refresh() {
         if (backendBridge == null) return;
         modelList.getChildren().clear();
 

@@ -150,7 +150,7 @@ public class AgentLoop {
      * 共享 FileStateCache：Read 读入缓存 → Edit/Write 校验通过
      */
     private final FileStateCache sharedFileCache;
-    private volatile boolean running = false;
+    private volatile AtomicBoolean running = new AtomicBoolean(false);
     private final Map<String, MCPServerConfig> mcpServers;
     /**
      * MCP 动态工具管理器
@@ -852,11 +852,11 @@ public class AgentLoop {
     }
 
     public CompletableFuture<Void> run() {
-        running = true;
+        running.compareAndSet(false, true);
         connectMcp().toCompletableFuture().join();
         log.info("Agent 循环已启动");
 
-        while (running) {
+        while (running.get()) {
             InboundMessage msg = null;
             try {
                 msg = bus.consumeInbound(1, TimeUnit.SECONDS);
@@ -895,7 +895,7 @@ public class AgentLoop {
     }
 
     public void stop() {
-        running = false;
+        running.compareAndSet(true, false);
         if (queue != null) {
             queue.shutdown();
         }
@@ -1573,12 +1573,30 @@ public class AgentLoop {
                 return null;
             }
 
+            // 提取推理内容
+            String reasoningContent = null;
+            for (int i = rr.messages.size() - 1; i >= 0; i--) {
+                Map<String, Object> am = rr.messages.get(i);
+                if ("assistant".equals(am.get("role")) && am.containsKey("reasoning_content")) {
+                    Object rc = am.get("reasoning_content");
+                    if (rc instanceof String s && !s.isBlank()) {
+                        reasoningContent = s;
+                    }
+                    break;
+                }
+            }
+            Map<String, Object> meta = msg.getMetadata() != null
+                ? new LinkedHashMap<>(msg.getMetadata()) : new LinkedHashMap<>();
+            if (reasoningContent != null) {
+                meta.put("_reasoning_content", reasoningContent);
+            }
+
             return new OutboundMessage(
                     msg.getChannel(),
                     msg.getChatId(),
                     finalContent,
                     List.of(),
-                    msg.getMetadata() != null ? msg.getMetadata() : Map.of()
+                    meta
             );
         });
     }

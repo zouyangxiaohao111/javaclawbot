@@ -5,6 +5,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.Map;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
@@ -104,7 +105,7 @@ public class AgentLoopQueue {
      */
     private final ExecutorService queueExecutor;
 
-    private volatile boolean running = true;
+    private volatile AtomicBoolean running = new AtomicBoolean(true);
 
     /**
      * 完整构造函数
@@ -217,7 +218,7 @@ public class AgentLoopQueue {
             Supplier<CompletableFuture<T>> task,
             String description
     ) {
-        if (!running) {
+        if (!running.get()) {
             CompletableFuture<T> failed = new CompletableFuture<>();
             failed.completeExceptionally(new RejectedExecutionException("Queue is shutting down"));
             return failed;
@@ -395,7 +396,7 @@ public class AgentLoopQueue {
      * 处理队列中的下一个任务
      */
     private void processNextInQueue(SessionLane lane, String sessionKey) {
-        if (!running) return;
+        if (!running.get()) return;
         
         // 检查是否有正在运行的任务
         if (lane.currentRun != null && !lane.currentRun.isDone()) {
@@ -482,7 +483,7 @@ public class AgentLoopQueue {
      * 停止队列
      */
     public void shutdown() {
-        running = false;
+        running.compareAndSet(true, false);
         scheduler.shutdownNow();
         queueExecutor.shutdownNow();  // 关闭独立线程池
 

@@ -1,5 +1,7 @@
 package agent.subagent.task.todo;
 
+import com.fasterxml.jackson.annotation.JsonValue;
+
 /**
  * Todo item status enum.
  * 对应 Open-ClaudeCode: src/utils/todo/types.ts - TodoStatusSchema
@@ -17,6 +19,7 @@ public enum TodoStatus {
         this.value = value;
     }
 
+    @JsonValue
     public String getValue() {
         return value;
     }

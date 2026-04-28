@@ -55,6 +55,7 @@ public class TodoItem {
         this.activeForm = activeForm;
     }
 
+    @JsonIgnore
     public Instant getUpdatedAt() {
         return updatedAt;
     }

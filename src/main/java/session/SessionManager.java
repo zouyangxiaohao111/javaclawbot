@@ -179,6 +179,11 @@ public final class SessionManager {
      * 保存会话（原子写入 + 清洗非法字符 + 同 key 加锁）
      */
     public void save(Session session) {
+        // 空会话（0条消息）不保存，避免每次点击"新对话"产生无用文件
+        if (session.getMessages().isEmpty()) {
+            return;
+        }
+
         String key = session.getKey();
         String sessionId = session.getSessionId();
         

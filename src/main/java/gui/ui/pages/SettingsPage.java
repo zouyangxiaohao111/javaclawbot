@@ -194,7 +194,7 @@ public class SettingsPage extends VBox {
         refresh();
     }
 
-    private void refresh() {
+    public void refresh() {
         if (backendBridge == null) return;
         settingsContainer.getChildren().clear();
         settingsContainer.getChildren().add(buildModelSection());
