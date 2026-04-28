@@ -32,6 +32,7 @@ public class MessageBubble extends HBox {
         RENDERER = HtmlRenderer.builder(options).build();
 
         HTML_TEMPLATE = "<!DOCTYPE html><html><head><meta charset='UTF-8'><style>"
+            + "html,body{overflow:hidden;}"
             + "body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;"
             + "font-size:14px;line-height:1.6;color:#1c1c1e;background:transparent;margin:0;padding:12px 16px;}"
             + "pre{background:rgba(0,0,0,0.04);border:1px solid rgba(0,0,0,0.08);border-radius:8px;"
@@ -183,7 +184,7 @@ public class MessageBubble extends HBox {
                 "Math.max(document.body.scrollHeight, "
                 + "document.documentElement.scrollHeight)");
             if (h instanceof Number) {
-                wv.setPrefHeight(((Number) h).doubleValue() + 16);
+                wv.setPrefHeight(((Number) h).doubleValue());
             }
         } catch (Exception ignored) {}
     }
