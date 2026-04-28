@@ -25,6 +25,7 @@ public class ChatPage extends VBox {
     private final Label scrollToBottomBtn;
 
     private boolean autoScroll = true;
+    private boolean programmaticScroll = false;
     private double lastVvalue = 1.0;
     private double lastContentHeight = 0;
 
@@ -50,6 +51,14 @@ public class ChatPage extends VBox {
             double viewHeight = scrollPane.getViewportBounds().getHeight();
             double contentHeight = messageContainer.getHeight();
             boolean canScroll = contentHeight > viewHeight + 1;
+
+            // 程序化滚动期间不干预，由 scrollToBottom/smartScrollToBottom 控制
+            if (programmaticScroll) {
+                lastVvalue = v;
+                lastContentHeight = contentHeight;
+                return;
+            }
+
             boolean atBottom = v >= 0.95;
             if (!canScroll || atBottom) {
                 autoScroll = true;
@@ -223,17 +232,25 @@ public class ChatPage extends VBox {
      */
     private void smartScrollToBottom() {
         if (autoScroll) {
-            Platform.runLater(() -> scrollPane.setVvalue(1.0));
+            programmaticScroll = true;
+            Platform.runLater(() -> {
+                scrollPane.setVvalue(1.0);
+                programmaticScroll = false;
+            });
         }
     }
 
     /**
-     * 强制滚动到底部（悬浮按钮点击时）
+     * 强制滚动到底部（悬浮按钮点击 / WebView 高度自适应回调时）
      */
     private void scrollToBottom() {
         autoScroll = true;
         scrollToBottomBtn.setVisible(false);
-        Platform.runLater(() -> scrollPane.setVvalue(1.0));
+        programmaticScroll = true;
+        Platform.runLater(() -> {
+            scrollPane.setVvalue(1.0);
+            programmaticScroll = false;
+        });
     }
 
     public ChatInput getChatInput() {
