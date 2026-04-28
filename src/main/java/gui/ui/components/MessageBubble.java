@@ -83,6 +83,47 @@ public class MessageBubble extends HBox {
 
     public enum Role { USER, ASSISTANT }
 
+    /** 创建消息 WebView 气泡（不含 avatar/HBox 包装，供组合使用） */
+    public static StackPane createBubbleWebView(String content) {
+        String htmlBody = RENDERER.render(PARSER.parse(content));
+        String html = HTML_TEMPLATE.replace("%s", htmlBody);
+
+        WebView webView = new WebView();
+        webView.setContextMenuEnabled(false);
+        double initW = estimateContentWidth(content);
+        webView.setPrefWidth(initW);
+        webView.setMaxWidth(initW);
+        int lineCount = (int) content.lines().count();
+        webView.setPrefHeight(Math.max(40, lineCount * 22 + 24));
+        webView.getEngine().loadContent(html);
+
+        webView.getEngine().documentProperty().addListener((obs, old, doc) -> {
+            if (doc != null) {
+                javafx.application.Platform.runLater(() -> adjustWebViewHeight(webView));
+            }
+        });
+
+        StackPane bubble = new StackPane(webView);
+        bubble.setStyle("-fx-background-color: rgba(0,0,0,0.05);"
+            + " -fx-background-radius: 16px;"
+            + " -fx-padding: 0;");
+
+        Rectangle clip = new Rectangle();
+        clip.widthProperty().bind(bubble.widthProperty());
+        clip.heightProperty().bind(bubble.heightProperty());
+        clip.setArcWidth(32);
+        clip.setArcHeight(32);
+        bubble.setClip(clip);
+
+        // 滚轮转发
+        webView.addEventFilter(ScrollEvent.SCROLL, e -> {
+            e.consume();
+            javafx.event.Event.fireEvent(bubble, e.copyFor(bubble, bubble));
+        });
+
+        return bubble;
+    }
+
     public MessageBubble(Role role, String content) {
         setSpacing(12);
         setPadding(new Insets(8, 0, 8, 0));
@@ -201,10 +242,13 @@ public class MessageBubble extends HBox {
     private static void adjustWebViewHeight(WebView wv) {
         try {
             Object h = wv.getEngine().executeScript(
-                "Math.max(document.body.scrollHeight, "
-                + "document.documentElement.scrollHeight)");
+                "(function(){return Math.max(document.body.scrollHeight,"
+                + "document.documentElement.scrollHeight);})()");
             if (h instanceof Number) {
-                wv.setPrefHeight(((Number) h).doubleValue());
+                double height = ((Number) h).doubleValue();
+                if (height > 0) {
+                    wv.setPrefHeight(height);
+                }
             }
         } catch (Exception ignored) {}
     }

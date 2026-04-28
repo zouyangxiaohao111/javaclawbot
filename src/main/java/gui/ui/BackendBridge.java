@@ -43,6 +43,8 @@ import java.util.function.Consumer;
  */
 public class BackendBridge {
 
+    private static final java.util.logging.Logger log = java.util.logging.Logger.getLogger(BackendBridge.class.getName());
+
     /** 进度事件：区分思考内容、工具调用、工具结果 */
     public record ProgressEvent(String content, boolean isToolHint,
                                 boolean isToolResult, String toolName, String toolCallId) {
@@ -80,6 +82,8 @@ public class BackendBridge {
     private final AtomicReference<Consumer<ProgressEvent>> currentProgressCallback = new AtomicReference<>();
     private final AtomicReference<Consumer<String>> currentResponseCallback = new AtomicReference<>();
     private volatile boolean waitingForResponse = false;
+    /** 最近一次回复的推理内容 */
+    private volatile String lastReasoningContent;
 
     // ── 标题生成计数器 ──
     private final AtomicBoolean titleGenerationPending = new AtomicBoolean(false);
@@ -192,8 +196,24 @@ public class BackendBridge {
                     } else {
                         // 最终回复
                         String content = out.getContent() != null ? out.getContent() : "";
+                        // 提取推理内容
+                        Object rcObj = meta.get("_reasoning_content");
+                        if (rcObj instanceof String s && !s.isBlank()) {
+                            lastReasoningContent = s;
+                        } else {
+                            lastReasoningContent = null;
+                        }
                         Consumer<String> cb = currentResponseCallback.getAndSet(null);
                         waitingForResponse = false;
+
+                        // 标题生成：回复完成后触发，确保 session 已包含本轮完整对话
+                        if (userMessageCount >= 1 && titleGenerationPending.compareAndSet(false, true)) {
+                            triggerTitleGeneration(false);
+                        }
+                        if (userMessageCount >= 3 && titleRegenerationPending.compareAndSet(false, true)) {
+                            triggerTitleGeneration(true);
+                        }
+
                         Platform.runLater(() -> {
                             if (cb != null) {
                                 cb.accept(content);
@@ -266,14 +286,8 @@ public class BackendBridge {
             }
         }, executor);
 
-        // 标题生成：2轮后首次生成，6轮后更新总结使标题更精确
+        // 标题生成计数器（实际触发在收到回复后，确保 session 已包含本轮对话）
         userMessageCount++;
-        if (userMessageCount >= 2 && titleGenerationPending.compareAndSet(false, true)) {
-            triggerTitleGeneration(false);
-        }
-        if (userMessageCount >= 6 && titleRegenerationPending.compareAndSet(false, true)) {
-            triggerTitleGeneration(true);
-        }
     }
 
     /**
@@ -302,6 +316,23 @@ public class BackendBridge {
     public Session getCurrentSession() {
         if (sessionManager == null) return null;
         return sessionManager.getOrCreate(sessionKey);
+    }
+
+    /**
+     * 确保当前为全新会话（用于欢迎页启动），不通过 bus 发送 /clear，直接操作 SessionManager。
+     */
+    public void ensureFreshSession() {
+        if (sessionManager == null) return;
+        userMessageCount = 0;
+        titleGenerationPending.set(false);
+        titleRegenerationPending.set(false);
+
+        Session newSession = sessionManager.createNew(sessionKey);
+        ProjectRegistry newRegistry = createProjectRegistry(newSession.getSessionId());
+        this.projectRegistry = newRegistry;
+        if (agentLoop != null) {
+            agentLoop.updateProjectRegistry(newRegistry);
+        }
     }
 
     /**
@@ -368,13 +399,38 @@ public class BackendBridge {
             try {
                 Session session = getCurrentSession();
                 if (session == null) return;
+                String sessionId = session.getSessionId();
+                log.info("开始生成标题: sessionId=" + sessionId + ", force=" + force);
                 String title = TitleGenerator.generateTitle(provider, session, force);
                 if (title != null && !title.isBlank()) {
                     sessionManager.save(session);
+                    log.info("标题生成成功: sessionId=" + sessionId + ", title=" + title);
+                } else if (!force) {
+                    // 首次生成失败，使用默认标题
+                    String defaultTitle = "新对话-" + java.time.LocalDate.now()
+                        .format(java.time.format.DateTimeFormatter.ofPattern("yy-MM-dd"));
+                    session.getMetadata().put("title", defaultTitle);
+                    sessionManager.save(session);
+                    log.info("标题生成失败，使用默认标题: sessionId=" + sessionId + ", title=" + defaultTitle);
+                } else {
+                    log.info("标题更新跳过（已有标题或生成失败）: sessionId=" + sessionId);
                 }
-            } catch (Exception ignored) {
+            } catch (Exception e) {
+                log.warning("标题生成异常: " + e.getMessage());
             }
         }, executor);
+    }
+
+    /**
+     * 从磁盘重新加载配置（解决 GUI 页面缓存问题）
+     */
+    public void reloadConfigFromDisk() {
+        try {
+            this.config = ConfigIO.loadConfig(null);
+            log.fine("配置已从磁盘重新加载");
+        } catch (Exception e) {
+            log.warning("重新加载配置失败: " + e.getMessage());
+        }
     }
 
     /**
@@ -466,7 +522,26 @@ public class BackendBridge {
         return waitingForResponse;
     }
 
+    /** 获取最近一次回复的推理内容（可能为 null） */
+    public String getLastReasoningContent() {
+        return lastReasoningContent;
+    }
+
     // ── 资源清理 ──
+
+    /** 非阻塞停止所有循环（供窗口关闭调用，设置标志后由 System.exit 兜底） */
+    public void stopAllLoops() {
+        busLoopRunning.set(false);
+        if (agentLoop != null) {
+            try {
+                agentLoop.stop();
+            } catch (Exception ignored) {}
+        }
+        if (cron != null) {
+            try { cron.stop(); } catch (Exception ignored) {}
+        }
+        executor.shutdown();
+    }
 
     public void shutdown() {
         busLoopRunning.set(false);

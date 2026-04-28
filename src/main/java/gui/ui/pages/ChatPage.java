@@ -1,8 +1,15 @@
 package gui.ui.pages;
 
+import com.vladsch.flexmark.ext.tables.TablesExtension;
+import com.vladsch.flexmark.html.HtmlRenderer;
+import com.vladsch.flexmark.parser.Parser;
+import com.vladsch.flexmark.util.data.MutableDataSet;
 import gui.ui.components.ChatInput;
 import gui.ui.components.MessageBubble;
 import gui.ui.components.ToolCallCard;
+import javafx.animation.Animation;
+import javafx.animation.KeyFrame;
+import javafx.animation.Timeline;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
 import javafx.geometry.Orientation;
@@ -12,8 +19,12 @@ import javafx.scene.control.ScrollPane;
 import javafx.scene.control.SplitPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
+import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
+import javafx.scene.shape.Rectangle;
+import javafx.scene.web.WebView;
+import javafx.util.Duration;
 
 public class ChatPage extends VBox {
 
@@ -28,6 +39,37 @@ public class ChatPage extends VBox {
     private boolean programmaticScroll = false;
     private double lastVvalue = 1.0;
     private double lastContentHeight = 0;
+
+    /** 思考中占位气泡 */
+    private HBox thinkingPlaceholder;
+    /** 思考中动画 */
+    private Timeline thinkingAnimation;
+
+    private static final Parser REASONING_PARSER;
+    private static final HtmlRenderer REASONING_RENDERER;
+    private static final String REASONING_HTML_TEMPLATE;
+
+    static {
+        MutableDataSet options = new MutableDataSet();
+        options.set(Parser.EXTENSIONS, java.util.List.of(TablesExtension.create()));
+        REASONING_PARSER = Parser.builder(options).build();
+        REASONING_RENDERER = HtmlRenderer.builder(options).build();
+
+        REASONING_HTML_TEMPLATE = "<!DOCTYPE html><html><head><meta charset='UTF-8'><style>"
+            + "html{background:rgba(0,0,0,0.03);height:100%;overflow:hidden;}"
+            + "body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;"
+            + "font-size:13px;line-height:1.6;color:rgba(0,0,0,0.5);"
+            + "background:rgba(0,0,0,0.03);margin:0;padding:0 16px 8px 16px;overflow:hidden;}"
+            + "pre{background:rgba(0,0,0,0.03);border:1px solid rgba(0,0,0,0.06);border-radius:6px;"
+            + "padding:8px 12px;overflow-x:auto;font-family:'JetBrains Mono','Fira Code',monospace;"
+            + "font-size:12px;line-height:1.4;}"
+            + "code{font-family:'JetBrains Mono','Fira Code',monospace;font-size:12px;"
+            + "background:rgba(0,0,0,0.03);padding:1px 4px;border-radius:3px;}"
+            + "pre code{background:transparent;padding:0;border-radius:0;}"
+            + "p{margin:4px 0;}ul,ol{padding-left:18px;margin:4px 0;}li{margin:2px 0;}"
+            + "a{color:#3b82f6;}"
+            + "</style></head><body>%s</body></html>";
+    }
 
     public ChatPage() {
         setSpacing(0);
@@ -220,6 +262,169 @@ public class ChatPage extends VBox {
         return card;
     }
 
+    /** 思考中占位气泡：助手头像 + 灰底文字 + 动画点 */
+    public void addThinkingPlaceholder() {
+        HBox row = new HBox(12);
+        row.setAlignment(Pos.CENTER_LEFT);
+        row.setPadding(new Insets(8, 0, 8, 0));
+
+        Label avatar = new Label("\u2728");
+        avatar.setStyle("-fx-background-color: rgba(0, 0, 0, 0.05); -fx-background-radius: 999px;"
+            + " -fx-pref-width: 32px; -fx-pref-height: 32px; -fx-alignment: center;");
+        avatar.setMinSize(32, 32);
+
+        Label text = new Label("\u25CF \u601D\u8003\u4E2D");
+        text.setStyle("-fx-font-size: 14px; -fx-text-fill: rgba(0, 0, 0, 0.45);");
+
+        VBox bubble = new VBox();
+        bubble.setStyle("-fx-background-color: rgba(0,0,0,0.03); -fx-background-radius: 16px;"
+            + " -fx-padding: 12px 16px;");
+        bubble.getChildren().add(text);
+
+        Region rightSpacer = new Region();
+        HBox.setHgrow(rightSpacer, Priority.ALWAYS);
+
+        row.getChildren().addAll(avatar, bubble, rightSpacer);
+        messageContainer.getChildren().add(row);
+        thinkingPlaceholder = row;
+
+        // 动画点
+        final String[] dots = {"", ".", "..", "..."};
+        final int[] idx = {0};
+        thinkingAnimation = new Timeline(
+            new KeyFrame(Duration.millis(500), e -> {
+                idx[0] = (idx[0] + 1) % dots.length;
+                text.setText("\u25CF \u601D\u8003\u4E2D" + dots[idx[0]]);
+            })
+        );
+        thinkingAnimation.setCycleCount(Animation.INDEFINITE);
+        thinkingAnimation.play();
+
+        smartScrollToBottom();
+    }
+
+    /** 移除思考中占位气泡 */
+    public void removeThinkingPlaceholder() {
+        if (thinkingPlaceholder != null) {
+            messageContainer.getChildren().remove(thinkingPlaceholder);
+            thinkingPlaceholder = null;
+        }
+        if (thinkingAnimation != null) {
+            thinkingAnimation.stop();
+            thinkingAnimation = null;
+        }
+    }
+
+    /** 推理+回复合并为一个视觉单元：一个 avatar + 推理块（默认收起）+ 回复块 */
+    public void addAssistantMessageWithReasoning(String reasoning, String response) {
+        HBox row = new HBox(12);
+        row.setAlignment(Pos.TOP_LEFT);
+        row.setPadding(new Insets(8, 0, 8, 0));
+
+        // 共享头像
+        Label avatar = new Label("\u2728");
+        avatar.setStyle("-fx-background-color: rgba(0, 0, 0, 0.05); -fx-background-radius: 999px;"
+            + " -fx-pref-width: 32px; -fx-pref-height: 32px; -fx-alignment: center;");
+        avatar.setMinSize(32, 32);
+
+        // 回复块（先创建以确定宽度）
+        StackPane responseBubble = MessageBubble.createBubbleWebView(response);
+
+        // 推理块容器：灰底圆角，与回复块同宽
+        VBox reasoningBlock = new VBox();
+        reasoningBlock.setStyle("-fx-background-color: rgba(0,0,0,0.03);"
+            + " -fx-background-radius: 12px; -fx-padding: 0;");
+        reasoningBlock.setMaxWidth(700);
+
+        // 头部：可点击折叠
+        HBox reasoningHeader = new HBox(8);
+        reasoningHeader.setAlignment(Pos.CENTER_LEFT);
+        reasoningHeader.setPadding(new Insets(8, 16, 0, 16));
+        Label toggleArrow = new Label("\u25B8"); // ▸ 默认收起
+        toggleArrow.setStyle("-fx-font-size: 10px; -fx-text-fill: rgba(0,0,0,0.4);");
+        Label titleLabel = new Label("\uD83D\uDCAD \u5DF2\u6DF1\u5EA6\u601D\u8003");
+        titleLabel.setStyle("-fx-font-size: 12px; -fx-text-fill: rgba(0,0,0,0.45);");
+        Region headerSpacer = new Region();
+        HBox.setHgrow(headerSpacer, Priority.ALWAYS);
+        reasoningHeader.getChildren().addAll(toggleArrow, titleLabel, headerSpacer);
+        reasoningHeader.setCursor(javafx.scene.Cursor.HAND);
+        reasoningBlock.getChildren().add(reasoningHeader);
+
+        // 推理内容 WebView：始终保持 managed，通过 maxHeight=0/正确值 折叠展开
+        // 关键：内容只在宽度绑定生效 + 场景布局完成后加载一次，确保 scrollHeight 测量准确
+        String reasoningHtmlBody = REASONING_RENDERER.render(REASONING_PARSER.parse(reasoning));
+        String reasoningHtml = REASONING_HTML_TEMPLATE.replace("%s", reasoningHtmlBody);
+        WebView reasoningWv = new WebView();
+        reasoningWv.setContextMenuEnabled(false);
+        reasoningWv.setStyle("-fx-background-color: rgba(0,0,0,0.03);");
+        reasoningWv.setPrefHeight(0);
+        reasoningWv.setMaxHeight(0);
+
+        // 宽度绑定：与回复块同宽（必须在 loadContent 之前设置）
+        reasoningWv.prefWidthProperty().bind(responseBubble.widthProperty());
+        reasoningWv.maxWidthProperty().bind(responseBubble.widthProperty());
+
+        // 存储测量的内容高度
+        final double[] measuredHeight = {0};
+        final boolean[] heightReady = {false};
+        reasoningWv.getEngine().documentProperty().addListener((obs, old, doc) -> {
+            if (doc != null) {
+                Platform.runLater(() -> {
+                    try {
+                        Object h = reasoningWv.getEngine().executeScript(
+                            "(function(){return Math.max(document.body.scrollHeight,"
+                            + "document.documentElement.scrollHeight);})()");
+                        if (h instanceof Number) {
+                            double height = ((Number) h).doubleValue();
+                            if (height > 0) {
+                                measuredHeight[0] = height;
+                                heightReady[0] = true;
+                            }
+                        }
+                    } catch (Exception ignored) {}
+                });
+            }
+        });
+
+        reasoningWv.addEventFilter(javafx.scene.input.ScrollEvent.SCROLL, e -> {
+            e.consume();
+            javafx.event.Event.fireEvent(reasoningBlock, e.copyFor(reasoningBlock, reasoningBlock));
+        });
+
+        reasoningBlock.getChildren().add(reasoningWv);
+
+        // 点击切换展开/收起（仅切换高度，不操作 visibility/managed）
+        reasoningHeader.setOnMouseClicked(e -> {
+            boolean expand = reasoningWv.getMaxHeight() == 0;
+            if (expand && heightReady[0]) {
+                reasoningWv.setPrefHeight(measuredHeight[0]);
+                reasoningWv.setMaxHeight(measuredHeight[0]);
+            } else if (!expand) {
+                reasoningWv.setPrefHeight(0);
+                reasoningWv.setMaxHeight(0);
+            }
+            toggleArrow.setText(expand ? "\u25BE" : "\u25B8"); // ▾ : ▸
+        });
+
+        // 推理块宽度与回复块同宽
+        reasoningBlock.prefWidthProperty().bind(responseBubble.widthProperty());
+
+        // 组装
+        VBox contentBox = new VBox(6);
+        contentBox.getChildren().addAll(reasoningBlock, responseBubble);
+
+        Region rightSpacer = new Region();
+        HBox.setHgrow(rightSpacer, Priority.ALWAYS);
+
+        row.getChildren().addAll(avatar, contentBox, rightSpacer);
+        messageContainer.getChildren().add(row);
+        smartScrollToBottom();
+
+        // 延迟加载推理内容：等场景布局完成后，WebView 已有正确宽度
+        Platform.runLater(() -> reasoningWv.getEngine().loadContent(reasoningHtml));
+    }
+
+
     private void clearWelcomeIfNeeded() {
         if (!messageContainer.getChildren().isEmpty()
             && messageContainer.getChildren().get(0) instanceof VBox) {
@@ -262,16 +467,13 @@ public class ChatPage extends VBox {
     }
 
     public void clearMessages() {
-        // Remove all messages except the welcome VBox
-        if (!messageContainer.getChildren().isEmpty()
-            && messageContainer.getChildren().get(0) instanceof VBox) {
-            // welcome is present, keep it
-            javafx.scene.Node welcome = messageContainer.getChildren().get(0);
-            messageContainer.getChildren().clear();
-            messageContainer.getChildren().add(welcome);
-        } else {
-            messageContainer.getChildren().clear();
+        messageContainer.getChildren().clear();
+        thinkingPlaceholder = null;
+        if (thinkingAnimation != null) {
+            thinkingAnimation.stop();
+            thinkingAnimation = null;
         }
+        addWelcomeMessage();
         autoScroll = true;
         scrollToBottomBtn.setVisible(false);
     }

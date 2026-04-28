@@ -27,6 +27,19 @@ public class ChatInput extends VBox {
     private final HBox imagePreviewRow;
     private final HBox fileTagRow;
 
+    /** 是否正在等待 LLM 回复 */
+    private volatile boolean sending = false;
+    /** 停止回调 */
+    private Runnable stopCallback;
+    /** 双击 Esc 跟踪 */
+    private long lastEscTime = 0;
+    private int escCount = 0;
+    /** SVG 图标：发送（箭头）/ 停止（方块） */
+    private javafx.scene.layout.StackPane sendGraphic;
+    private javafx.scene.layout.StackPane stopGraphic;
+    private javafx.scene.shape.SVGPath sendSvg;
+    private javafx.scene.shape.SVGPath stopSvg;
+
     public ChatInput() {
         setSpacing(0);
         setPadding(new Insets(8, 24, 8, 24));
@@ -108,26 +121,41 @@ public class ChatInput extends VBox {
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
 
-        sendButton = new Button("\u27A4");
-        sendButton.setStyle("-fx-background-color: rgba(0, 0, 0, 0.08); -fx-pref-width: 40px; -fx-pref-height: 40px;"
-            + " -fx-background-radius: 10px; -fx-font-size: 18px; -fx-cursor: hand;"
-            + " -fx-text-fill: rgba(0, 0, 0, 0.4);");
-        sendButton.setOnMouseEntered(e ->
-            sendButton.setStyle("-fx-background-color: rgba(0, 0, 0, 0.15); -fx-pref-width: 40px; -fx-pref-height: 40px;"
-                + " -fx-background-radius: 10px; -fx-font-size: 18px; -fx-cursor: hand;"
-                + " -fx-text-fill: rgba(0, 0, 0, 0.7);"));
-        sendButton.setOnMouseExited(e ->
-            sendButton.setStyle("-fx-background-color: rgba(0, 0, 0, 0.08); -fx-pref-width: 40px; -fx-pref-height: 40px;"
-                + " -fx-background-radius: 10px; -fx-font-size: 18px; -fx-cursor: hand;"
-                + " -fx-text-fill: rgba(0, 0, 0, 0.4);"));
-        sendButton.setOnMousePressed(e ->
-            sendButton.setStyle("-fx-background-color: rgba(0, 0, 0, 0.22); -fx-pref-width: 40px; -fx-pref-height: 40px;"
-                + " -fx-background-radius: 10px; -fx-font-size: 18px; -fx-cursor: hand;"
-                + " -fx-text-fill: rgba(0, 0, 0, 0.8);"));
-        sendButton.setOnMouseReleased(e ->
-            sendButton.setStyle("-fx-background-color: rgba(0, 0, 0, 0.15); -fx-pref-width: 40px; -fx-pref-height: 40px;"
-                + " -fx-background-radius: 10px; -fx-font-size: 18px; -fx-cursor: hand;"
-                + " -fx-text-fill: rgba(0, 0, 0, 0.7);"));
+        // 发送/停止按钮 —— SVG 图标（跨平台一致渲染）
+        this.sendSvg = new javafx.scene.shape.SVGPath();
+        this.sendSvg.setContent("M6 8 L13 12 L6 16 Z"); // 右箭头
+        this.sendGraphic = new javafx.scene.layout.StackPane(this.sendSvg);
+        this.sendGraphic.setPrefSize(20, 20);
+
+        this.stopSvg = new javafx.scene.shape.SVGPath();
+        this.stopSvg.setContent("M7 7 L17 7 L17 17 L7 17 Z"); // 方块
+        this.stopGraphic = new javafx.scene.layout.StackPane(this.stopSvg);
+        this.stopGraphic.setPrefSize(20, 20);
+
+        sendButton = new Button();
+        sendButton.setGraphic(sendGraphic);
+        String btnBase = "-fx-pref-width: 40px; -fx-pref-height: 40px;"
+            + " -fx-background-radius: 10px; -fx-font-size: 18px; -fx-cursor: hand;";
+        sendButton.setStyle("-fx-background-color: rgba(0, 0, 0, 0.08);" + btnBase);
+        sendSvg.setStyle("-fx-fill: rgba(0,0,0,0.4);");
+        stopSvg.setStyle("-fx-fill: rgba(220,38,38,0.7);");
+
+        sendButton.setOnMouseEntered(e -> {
+            sendButton.setStyle("-fx-background-color: rgba(0, 0, 0, 0.15);" + btnBase);
+            sendSvg.setStyle("-fx-fill: rgba(0,0,0,0.7);");
+        });
+        sendButton.setOnMouseExited(e -> {
+            sendButton.setStyle("-fx-background-color: rgba(0, 0, 0, 0.08);" + btnBase);
+            sendSvg.setStyle("-fx-fill: rgba(0,0,0,0.4);");
+        });
+        sendButton.setOnMousePressed(e -> {
+            sendButton.setStyle("-fx-background-color: rgba(0, 0, 0, 0.22);" + btnBase);
+            sendSvg.setStyle("-fx-fill: rgba(0,0,0,0.8);");
+        });
+        sendButton.setOnMouseReleased(e -> {
+            sendButton.setStyle("-fx-background-color: rgba(0, 0, 0, 0.15);" + btnBase);
+            sendSvg.setStyle("-fx-fill: rgba(0,0,0,0.7);");
+        });
 
         buttonRow.getChildren().addAll(attachBtn, mentionBtn, spacer, sendButton);
 
@@ -149,15 +177,44 @@ public class ChatInput extends VBox {
 
         getChildren().addAll(inputCard, gap, statusBar);
 
-        // 发送按钮事件
-        sendButton.setOnAction(e -> sendMessage());
+        // 发送按钮事件：发送中为停止，否则发送
+        sendButton.setOnAction(e -> {
+            if (sending) {
+                triggerStop();
+            } else {
+                sendMessage();
+            }
+        });
 
         // 使用 addEventFilter（捕获阶段）确保在 TextArea 处理 ENTER 之前拦截
         inputArea.addEventFilter(javafx.scene.input.KeyEvent.KEY_PRESSED, e -> {
             if (e.isConsumed() || completionPopup.isShowing()) return;
+            // Esc 双击触发停止
+            if (e.getCode() == javafx.scene.input.KeyCode.ESCAPE) {
+                if (sending) {
+                    long now = System.currentTimeMillis();
+                    if (now - lastEscTime < 500) {
+                        escCount++;
+                        if (escCount >= 2) {
+                            e.consume();
+                            escCount = 0;
+                            triggerStop();
+                            return;
+                        }
+                    } else {
+                        escCount = 1;
+                    }
+                    lastEscTime = now;
+                }
+                return;
+            }
             if (e.getCode() == javafx.scene.input.KeyCode.ENTER && !e.isShiftDown()) {
                 e.consume();
-                sendMessage();
+                if (sending) {
+                    showAlreadySent();
+                } else {
+                    sendMessage();
+                }
             }
             // Shift+Enter 不拦截，让 TextArea 正常插入换行
         });
@@ -383,6 +440,7 @@ public class ChatInput extends VBox {
     }
 
     public void setStatusText(String text) {
+        statusBar.setStyle("-fx-font-size: 11px; -fx-text-fill: rgba(0, 0, 0, 0.36);");
         statusBar.setText(text);
     }
 
@@ -392,5 +450,54 @@ public class ChatInput extends VBox {
 
     public void setProjectPath(java.nio.file.Path path) {
         completionPopup.setProjectPath(path);
+    }
+
+    /** 设置停止回调（点击 ⏹ 或双击 Esc 时触发） */
+    public void setOnStop(Runnable callback) {
+        this.stopCallback = callback;
+    }
+
+    /** 切换到发送中状态：按钮变方块（stop），背景变红 */
+    public void setSending(boolean sending) {
+        this.sending = sending;
+        javafx.application.Platform.runLater(() -> {
+            String btnBase = "-fx-pref-width: 40px; -fx-pref-height: 40px;"
+                + " -fx-background-radius: 10px; -fx-cursor: hand;";
+            if (sending) {
+                sendButton.setGraphic(stopGraphic);
+                sendButton.setStyle("-fx-background-color: rgba(220, 38, 38, 0.12);" + btnBase);
+            } else {
+                sendButton.setGraphic(sendGraphic);
+                sendButton.setStyle("-fx-background-color: rgba(0, 0, 0, 0.08);" + btnBase);
+                sendSvg.setStyle("-fx-fill: rgba(0,0,0,0.4);");
+            }
+        });
+    }
+
+    private void triggerStop() {
+        if (stopCallback != null) {
+            stopCallback.run();
+        }
+    }
+
+    private void showAlreadySent() {
+        javafx.application.Platform.runLater(() -> {
+            Label toast = new Label("消息已发送");
+            toast.setStyle("-fx-background-color: rgba(0, 0, 0, 0.7); -fx-text-fill: white;"
+                + " -fx-background-radius: 8px; -fx-padding: 6px 16px; -fx-font-size: 13px;");
+            toast.setAlignment(javafx.geometry.Pos.CENTER);
+            javafx.scene.layout.StackPane overlay = new javafx.scene.layout.StackPane(toast);
+            overlay.setMouseTransparent(true);
+            overlay.setPadding(new javafx.geometry.Insets(0, 0, 80, 0));
+            overlay.setAlignment(javafx.geometry.Pos.BOTTOM_CENTER);
+            // 找到最顶层的 root 来显示 toast
+            if (getScene() != null && getScene().getRoot() instanceof javafx.scene.layout.Pane root) {
+                root.getChildren().add(overlay);
+                javafx.animation.PauseTransition pt = new javafx.animation.PauseTransition(
+                    javafx.util.Duration.seconds(1.5));
+                pt.setOnFinished(ev -> root.getChildren().remove(overlay));
+                pt.play();
+            }
+        });
     }
 }
