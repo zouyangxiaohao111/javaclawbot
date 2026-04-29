@@ -1,5 +1,6 @@
 package gui.ui.components;
 
+import bus.MessageBus;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.control.Button;
@@ -10,11 +11,20 @@ import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 
+import gui.ui.BackendBridge;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import session.Session;
+
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.function.Consumer;
 
 public class ChatInput extends VBox {
+
+    private static final Logger log = LoggerFactory.getLogger(ChatInput.class);
 
     private final TextArea inputArea;
     private final Button sendButton;
@@ -40,6 +50,13 @@ public class ChatInput extends VBox {
     private javafx.scene.shape.SVGPath sendSvg;
     private javafx.scene.shape.SVGPath stopSvg;
 
+    // ── 历史消息导航相关字段 ──
+    private BackendBridge backendBridge;
+    /** 当前历史消息导航索引，-1表示未处于导航状态 */
+    private int historyIndex = -1;
+    /** 开始导航前保存的草稿文本 */
+    private String draftText = "";
+
     public ChatInput() {
         setSpacing(0);
         setPadding(new Insets(8, 24, 8, 24));
@@ -61,7 +78,23 @@ public class ChatInput extends VBox {
         inputArea.setStyle("-fx-background-color: transparent; -fx-border-color: transparent; -fx-font-size: 15px; -fx-focus-color: transparent; -fx-faint-focus-color: transparent; -fx-background-insets: 0;");
         inputArea.setWrapText(true);
         inputArea.setPrefRowCount(10);
-        inputArea.setPromptText("输入你的问题...");
+        inputArea.setPromptText("输入你的问题，或使用 ALT+↑/↓ 导航历史消息");
+
+        inputArea.setOnKeyPressed(keyEvent -> {
+            // Alt+↑/↓ 历史消息导航
+            if (keyEvent.isAltDown()) {
+                switch (keyEvent.getCode()) {
+                    case UP -> {
+                        keyEvent.consume();
+                        navigateHistory(-1); // 上一条（更早的消息）
+                    }
+                    case DOWN -> {
+                        keyEvent.consume();
+                        navigateHistory(1);  // 下一条（更新的消息）
+                    }
+                }
+            }
+        });
 
         // 按钮行
         HBox buttonRow = new HBox(8);
@@ -455,6 +488,82 @@ public class ChatInput extends VBox {
     /** 设置停止回调（点击 ⏹ 或双击 Esc 时触发） */
     public void setOnStop(Runnable callback) {
         this.stopCallback = callback;
+    }
+
+    /**
+     * 设置 BackendBridge 实例，用于获取历史消息
+     */
+    public void setBackendBridge(BackendBridge bridge) {
+        this.backendBridge = bridge;
+    }
+
+    /**
+     * 历史消息导航
+     * @param direction -1 表示上一条（更早），1 表示下一条（更新）
+     */
+    private void navigateHistory(int direction) {
+        if (backendBridge == null) return;
+
+        // 获取当前会话的用户消息历史
+        List<String> userMessages = getUserMessageHistory();
+        if (userMessages.isEmpty()) return;
+
+        // 初始化导航状态
+        if (historyIndex == -1) {
+            // 首次开始导航，保存当前草稿
+            draftText = inputArea.getText();
+            if (direction == -1) {
+                historyIndex = 0; // 从最新的消息开始
+            } else {
+                return; // 向下导航但还没开始，无操作
+            }
+        } else {
+            // 更新索引
+            historyIndex -= direction;
+            if (historyIndex < 0) {
+                // 恢复到草稿状态
+//                historyIndex = 0;
+                inputArea.setText(draftText);
+                return;
+            } else if (historyIndex >= userMessages.size()) {
+                // 超过最旧消息，什么都不做
+                historyIndex = userMessages.size();
+                return;
+            }
+        }
+
+        // 显示选中的历史消息
+        String selectedMessage = userMessages.get(historyIndex);
+        inputArea.setText(selectedMessage);
+        inputArea.positionCaret(selectedMessage.length());
+    }
+
+    /**
+     * 获取当前会话中用户发送的消息列表（按时间倒序，最新的在前）
+     */
+    private List<String> getUserMessageHistory() {
+        List<String> result = new ArrayList<>();
+        if (backendBridge == null) return result;
+
+        Session session = backendBridge.getCurrentSession();
+        if (session == null) return result;
+
+        List<Map<String, Object>> messages = session.getMessages();
+        // 逆序遍历：messages 按时间正序排列（最早在前），导航需要最新在前
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            Map<String, Object> msg = messages.get(i);
+            Object role = msg.get("role");
+            if ("user".equals(role)) {
+                Object content = msg.get("content");
+                if (content != null) {
+                    String text = content.toString();
+                    if (!text.isBlank()) {
+                        result.add(text);
+                    }
+                }
+            }
+        }
+        return result;
     }
 
     /** 切换到发送中状态：按钮变方块（stop），背景变红 */
