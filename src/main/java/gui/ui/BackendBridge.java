@@ -91,6 +91,9 @@ public class BackendBridge {
     private final AtomicBoolean titleRegenerationPending = new AtomicBoolean(false);
     private int userMessageCount = 0;
 
+    /** 标题生成/更新后回调（MainStage 设置用于刷新侧栏） */
+    private volatile Runnable onTitleChanged;
+
     /**
      * 初始化所有后端组件（阻塞调用，需在后台线程执行）。
      */
@@ -293,6 +296,15 @@ public class BackendBridge {
     }
 
     /**
+     * 提交 AskUserQuestion 的用户答案，由 UI 在弹窗确认后调用。
+     */
+    public void answerUserQuestion(String toolCallId, java.util.Map<String, String> answers) {
+        if (agentLoop != null) {
+            agentLoop.answerUserQuestion(toolCallId, answers);
+        }
+    }
+
+    /**
      * 发送 /stop 命令
      */
     public void stopMessage() {
@@ -420,7 +432,15 @@ public class BackendBridge {
             } catch (Exception e) {
                 log.warning("标题生成异常: " + e.getMessage());
             }
+            // 通知 UI 刷新侧栏标题
+            if (onTitleChanged != null) {
+                Platform.runLater(onTitleChanged);
+            }
         }, executor);
+    }
+
+    public void setOnTitleChanged(Runnable callback) {
+        this.onTitleChanged = callback;
     }
 
     /**

@@ -95,8 +95,6 @@ public class MessageBubble extends HBox {
         webView.setMaxWidth(initW);
         int lineCount = (int) content.lines().count();
         webView.setPrefHeight(Math.max(40, lineCount * 22 + 24));
-        webView.getEngine().loadContent(html);
-
         webView.getEngine().documentProperty().addListener((obs, old, doc) -> {
             if (doc != null) {
                 javafx.application.Platform.runLater(() -> adjustWebViewHeight(webView));
@@ -119,6 +117,18 @@ public class MessageBubble extends HBox {
         webView.addEventFilter(ScrollEvent.SCROLL, e -> {
             e.consume();
             javafx.event.Event.fireEvent(bubble, e.copyFor(bubble, bubble));
+        });
+
+        // 延迟加载内容：等 bubble 进入场景后再加载，确保宽度已确定
+        bubble.sceneProperty().addListener(new javafx.beans.value.ChangeListener<>() {
+            @Override
+            public void changed(javafx.beans.value.ObservableValue<? extends javafx.scene.Scene> obs,
+                                javafx.scene.Scene oldScene, javafx.scene.Scene newScene) {
+                if (newScene != null) {
+                    bubble.sceneProperty().removeListener(this);
+                    Platform.runLater(() -> webView.getEngine().loadContent(html));
+                }
+            }
         });
 
         return bubble;
@@ -161,7 +171,6 @@ public class MessageBubble extends HBox {
             webView.setMaxWidth(initW);
             int lineCount = (int) content.lines().count();
             webView.setPrefHeight(Math.max(40, lineCount * 22 + 24));
-            webView.getEngine().loadContent(html);
 
             // 页面加载完成后 JS 自适应内容高度
             webView.getEngine().documentProperty().addListener((obs, old, doc) -> {
@@ -202,10 +211,11 @@ public class MessageBubble extends HBox {
                 javafx.event.Event.fireEvent(bubble, e.copyFor(bubble, bubble));
             });
 
-            // 宽度根据可用空间自适应
+            // 宽度根据可用空间自适应。先确定宽度再加载内容，避免窄宽度下测出错误高度。
             sceneProperty().addListener((obs, o, s) -> {
                 if (s != null) {
                     updateBubbleWidth(webView, bubble, s.getWidth(), content);
+                    Platform.runLater(() -> webView.getEngine().loadContent(html));
                     s.widthProperty().addListener((wObs, wOld, wNew) -> {
                         updateBubbleWidth(webView, bubble, wNew.doubleValue(), content);
                         Platform.runLater(() -> adjustWebViewHeight(webView));

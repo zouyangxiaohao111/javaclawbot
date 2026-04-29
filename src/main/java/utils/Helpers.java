@@ -6,7 +6,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.regex.Pattern;
 
 /**
@@ -199,5 +201,63 @@ public final class Helpers {
 
         int end = s.offsetByCodePoints(0, maxCodePoints);
         return s.substring(0, end);
+    }
+
+    // ── 消息构建 ──
+
+    /** 将 ToolCallRequest 列表转为 API 格式的 tool_calls dict */
+    public static List<Map<String, Object>> buildToolCallDicts(List<ToolCallRequest> toolCalls) {
+        List<Map<String, Object>> dicts = new ArrayList<>();
+        if (toolCalls == null) return dicts;
+        for (var tc : toolCalls) {
+            Map<String, Object> fn = new LinkedHashMap<>();
+            fn.put("name", tc.getName());
+            fn.put("arguments", GsonFactory.toJson(tc.getArguments()));
+            Map<String, Object> call = new LinkedHashMap<>();
+            call.put("id", tc.getId());
+            call.put("type", "function");
+            call.put("function", fn);
+            dicts.add(call);
+        }
+        return dicts;
+    }
+
+    /** 追加助手消息（role=assistant），支持 tool_calls / reasoning_content / thinking_blocks */
+    public static List<Map<String, Object>> addAssistantMessage(
+            List<Map<String, Object>> messages, String content,
+            List<Map<String, Object>> toolCalls, String reasoningContent,
+            List<Map<String, Object>> thinkingBlocks) {
+        if (messages == null) messages = new ArrayList<>();
+        Map<String, Object> msg = new LinkedHashMap<>();
+        msg.put("role", "assistant");
+        msg.put("content", content);
+        if (toolCalls != null && !toolCalls.isEmpty())
+            msg.put("tool_calls", toolCalls);
+        if (reasoningContent != null)
+            msg.put("reasoning_content", reasoningContent);
+        if (thinkingBlocks != null && !thinkingBlocks.isEmpty())
+            msg.put("thinking_blocks", thinkingBlocks);
+        messages.add(msg);
+        return new ArrayList<>(messages);
+    }
+
+    public static List<Map<String, Object>> addAssistantMessage(
+            List<Map<String, Object>> messages, String content,
+            List<Map<String, Object>> toolCalls, String reasoningContent) {
+        return addAssistantMessage(messages, content, toolCalls, reasoningContent, null);
+    }
+
+    /** 追加工具结果消息（role=tool） */
+    public static List<Map<String, Object>> addToolResult(
+            List<Map<String, Object>> messages, String toolCallId,
+            String toolName, String result) {
+        if (messages == null) messages = new ArrayList<>();
+        Map<String, Object> msg = new LinkedHashMap<>();
+        msg.put("role", "tool");
+        msg.put("tool_call_id", toolCallId);
+        msg.put("name", toolName);
+        msg.put("content", result);
+        messages.add(msg);
+        return new ArrayList<>(messages);
     }
 }

@@ -271,11 +271,13 @@ public class RunAgent {
 
 
 
-                    // 处理工具调用
-                    if (cleanContent != null && !cleanContent.isEmpty()) {
-                        // 添加助手消息
-                        messages.add(Map.of("role", "assistant", "content", cleanContent));
-                    }
+                    // 添加助手消息（复用主代理的 ContextBuilder）
+                    List<Map<String, Object>> toolCallDicts = Helpers.buildToolCallDicts(response.getToolCalls());
+                    String content = (cleanContent != null && !cleanContent.isEmpty()) ? cleanContent : null;
+                    messages = Helpers.addAssistantMessage(
+                            messages, content, toolCallDicts,
+                            response.getReasoningContent(),
+                            response.getThinkingBlocks());
 
                     // 处理每个工具调用
                     for (var toolCall : response.getToolCalls()) {
@@ -285,23 +287,16 @@ public class RunAgent {
 
                         log.info("[子代理 {}] 循环次数 {} 执行工具: name={}, id={}", agentType, iterations.get(), toolName, toolCallId);
 
-                        // 执行工具 - 现在 executeTool 可以通过 ToolUseContextHolder.getCurrent() 获取上下文
                         String toolResult = executeTool(toolName, toolArgs, toolUseContext);
 
-                        // 截断过长的工具结果日志
                         String toolResultForLog = toolResult;
                         if (toolResult.length() > 500) {
                             toolResultForLog = toolResult.substring(0, 500) + "... [truncated, total " + toolResult.length() + " chars]";
                         }
                         log.info("[子代理 {}] 循环次数 {} tool result: {}\n{}", agentType, iterations.get(), toolName, toolResultForLog);
 
-                        // 添加工具结果消息
-                        messages.add(Map.of(
-                                "role", "tool",
-                                "tool_call_id", toolCallId,
-                                "name", toolName,
-                                "content", toolResult
-                        ));
+                        // 添加工具结果消息（复用主代理的 ContextBuilder）
+                        messages = Helpers.addToolResult(messages, toolCallId, toolName, toolResult);
                     }
                 } else {
                     // 没有工具调用，返回结果

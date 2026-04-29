@@ -68,6 +68,19 @@ public class ToolCallCard extends VBox {
         contentBox.getChildren().add(resultLabel);
     }
 
+    public void addStructuredContent(javafx.scene.Node node) {
+        contentBox.getChildren().add(node);
+    }
+
+    public void setParams(String params) {
+        // Replace existing params label if present
+        if (!contentBox.getChildren().isEmpty()
+            && contentBox.getChildren().get(0) instanceof Label first
+            && first.getStyle().contains("monospace")) {
+            first.setText(params);
+        }
+    }
+
     private void toggle() {
         expanded = !expanded;
         contentBox.setVisible(expanded);

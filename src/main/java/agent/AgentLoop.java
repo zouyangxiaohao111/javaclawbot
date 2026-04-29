@@ -196,6 +196,10 @@ public class AgentLoop {
     private final ConcurrentHashMap<String, CopyOnWriteArrayList<CompletableFuture<?>>> activeLlmCalls =
             new ConcurrentHashMap<>();
 
+    /** AskUserQuestion 暂停的工具链：toolCallId → 等待用户答案的 Future */
+    private final ConcurrentHashMap<String, CompletableFuture<String>> pendingUserQuestions =
+            new ConcurrentHashMap<>();
+
     public AgentLoop(
             MessageBus bus,
             LLMProvider provider,
@@ -899,6 +903,10 @@ public class AgentLoop {
         if (queue != null) {
             queue.shutdown();
         }
+        // 取消所有等待用户输入的问题
+        pendingUserQuestions.values().forEach(f ->
+            f.completeExceptionally(new CancellationException("session stopped")));
+        pendingUserQuestions.clear();
         log.info("Agent 循环正在停止");
     }
 
@@ -2134,20 +2142,9 @@ public class AgentLoop {
                             onProgress.onProgress(toolHint(resp.getToolCalls()), true);
                         }
 
-                        List<Map<String, Object>> toolCallDicts = new ArrayList<>();
-                        for (var tc : resp.getToolCalls()) {
-                            Map<String, Object> fn = new LinkedHashMap<>();
-                            fn.put("name", tc.getName());
-                            fn.put("arguments", GsonFactory.toJson(tc.getArguments()));
+                        List<Map<String, Object>> toolCallDicts = Helpers.buildToolCallDicts(resp.getToolCalls());
 
-                            Map<String, Object> call = new LinkedHashMap<>();
-                            call.put("id", tc.getId());
-                            call.put("type", "function");
-                            call.put("function", fn);
-                            toolCallDicts.add(call);
-                        }
-
-                        List<Map<String, Object>> updated = context.addAssistantMessage(
+                        List<Map<String, Object>> updated = Helpers.addAssistantMessage(
                                 messages,
                                 clean,
                                 toolCallDicts,
@@ -2226,7 +2223,7 @@ public class AgentLoop {
 
 
 
-                    List<Map<String, Object>> updated = context.addAssistantMessage(
+                    List<Map<String, Object>> updated = Helpers.addAssistantMessage(
                             messages,
                             clean,
                             null,
@@ -2310,47 +2307,15 @@ public class AgentLoop {
                             // 清除 sessionKey 和 ToolUseContext
                             cliAgentHandler.clearCurrentSessionKey();
                         })
-                        .thenAccept(rawResult -> {
-                            if (isStopRequested(sessionKey)) {
-                                throw new CancellationException("session stopped");
+                        .thenCompose(rawResult -> {
+                            // AskUserQuestion 特殊处理：第一次返回 questions 时暂停等待用户输入
+                            if (AskUserQuestionTool.NAME.equals(tc.getName())
+                                && rawResult != null && rawResult.contains("awaiting_response")) {
+                                return handleAskUserQuestionPause(tc, rawResult, msg, messages, toolContext, tools);
                             }
 
-                            // 检测超时错误并通过 bus 发送提醒
-                            if (rawResult != null && rawResult.contains("Command timed out")) {
-                                bus.publishOutbound(new bus.OutboundMessage(
-                                        msg.getChannel(),
-                                        msg.getChatId(),
-                                        "⏱️ 命令执行超时，已中断",
-                                        List.of(),
-                                        Map.of("_progress", true)
-                                ));
-                            }
-
-                            // 检查工具结果大小，过大则持久化到磁盘
-                            String result = maybePersistToolResult(tools, tc.getName(), tc.getId(), rawResult);
-
-                            // Track file reads for post-compact restoration
-                            trackFileReadIfNeeded(tc, result);
-
-                            List<Map<String, Object>> updated =
-                                    context.addToolResult(messages, tc.getId(), tc.getName(), result);
-
-                            // 发布工具结果到 bus，供 GUI 展示
-                            bus.publishOutbound(new bus.OutboundMessage(
-                                    msg.getChannel(),
-                                    msg.getChatId(),
-                                    result != null ? result : "",
-                                    List.of(),
-                                    Map.of("_progress", true,
-                                           "_tool_result", true,
-                                           "tool_name", tc.getName(),
-                                           "tool_call_id", tc.getId())
-                            ));
-
-                            memoryStore.appendToToday(GsonFactory.getGson().toJson(updated.get(updated.size() - 1)));
-
-                            messages.clear();
-                            messages.addAll(updated);
+                            handleToolResult(tc, rawResult, sessionKey, msg, messages, tools);
+                            return CompletableFuture.<Void>completedFuture(null);
                         }).exceptionally(ex -> {
                             Throwable root = (ex instanceof CompletionException && ex.getCause() != null)
                                     ? ex.getCause()
@@ -2375,7 +2340,7 @@ public class AgentLoop {
 
                             String err = formatToolError(tc.getName(), ex);
                             List<Map<String, Object>> updated =
-                                    context.addToolResult(messages, tc.getId(), tc.getName(), err);
+                                    Helpers.addToolResult(messages, tc.getId(), tc.getName(), err);
                             messages.clear();
                             messages.addAll(updated);
                             return null;
@@ -2396,6 +2361,115 @@ public class AgentLoop {
 
     private static String safeOneLine(String s) {
         return (s == null) ? "" : s.replace("\n", " ").replace("\r", " ");
+    }
+
+    /** 正常工具结果处理：发布到 bus + 添加到消息上下文 */
+    private void handleToolResult(ToolCallRequest tc, String rawResult, String sessionKey,
+                                   InboundMessage msg, List<Map<String, Object>> messages,
+                                   ToolView tools) {
+        if (isStopRequested(sessionKey)) {
+            throw new CancellationException("session stopped");
+        }
+
+        if (rawResult != null && rawResult.contains("Command timed out")) {
+            bus.publishOutbound(new OutboundMessage(
+                    msg.getChannel(), msg.getChatId(),
+                    "⏱️ 命令执行超时，已中断", List.of(),
+                    Map.of("_progress", true)));
+        }
+
+        String result = maybePersistToolResult(tools, tc.getName(), tc.getId(), rawResult);
+        trackFileReadIfNeeded(tc, result);
+
+        List<Map<String, Object>> updated =
+                Helpers.addToolResult(messages, tc.getId(), tc.getName(), result);
+
+        bus.publishOutbound(new OutboundMessage(
+                msg.getChannel(), msg.getChatId(),
+                result != null ? result : "", List.of(),
+                Map.of("_progress", true, "_tool_result", true,
+                       "tool_name", tc.getName(), "tool_call_id", tc.getId())));
+
+        memoryStore.appendToToday(GsonFactory.getGson().toJson(updated.get(updated.size() - 1)));
+
+        messages.clear();
+        messages.addAll(updated);
+    }
+
+    /** AskUserQuestion 第一次调用：发布问题到 UI 并暂停等待用户输入 */
+    private CompletionStage<Void> handleAskUserQuestionPause(
+            ToolCallRequest tc, String rawResult,
+            InboundMessage msg, List<Map<String, Object>> messages,
+            ToolUseContext toolContext, ToolView tools) {
+        // 发布问题到 bus 供 UI 展示（不添加到 messages）
+        bus.publishOutbound(new OutboundMessage(
+                msg.getChannel(), msg.getChatId(),
+                rawResult, List.of(),
+                Map.of("_progress", true, "_tool_result", true,
+                       "tool_name", tc.getName(), "tool_call_id", tc.getId(),
+                       "_needs_user_input", true)));
+
+        CompletableFuture<String> answerFuture = new CompletableFuture<>();
+        pendingUserQuestions.put(tc.getId(), answerFuture);
+
+        return answerFuture.thenCompose(answersJson -> {
+            pendingUserQuestions.remove(tc.getId());
+            if (isStopRequested(msg.getSessionKey())) {
+                return CompletableFuture.<Void>failedFuture(
+                        new CancellationException("session stopped"));
+            }
+
+            // 用 answers 再次调用 AskUserQuestion
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> questions =
+                (List<Map<String, Object>>) tc.getArguments().get("questions");
+            Map<String, Object> argsWithAnswers = new LinkedHashMap<>(tc.getArguments());
+            @SuppressWarnings("unchecked")
+            Map<String, String> answers = GsonFactory.getGson().fromJson(answersJson, Map.class);
+            argsWithAnswers.put("answers", answers);
+
+            return tools.execute(tc.getName(), argsWithAnswers, toolContext)
+                    .thenAccept(finalResult -> {
+                        // 构建结构化结果：text 供 LLM 阅读，questions/answers 供 UI 渲染
+                        Map<String, Object> structured = new LinkedHashMap<>();
+                        structured.put("text", finalResult != null ? finalResult : "");
+                        structured.put("questions", questions != null ? questions : List.of());
+                        structured.put("answers", answers != null ? answers : Map.of());
+                        String structuredJson = GsonFactory.toJson(structured);
+
+                        String r = maybePersistToolResult(tools, tc.getName(), tc.getId(), structuredJson);
+                        trackFileReadIfNeeded(tc, r);
+
+                        List<Map<String, Object>> updated =
+                                Helpers.addToolResult(messages, tc.getId(), tc.getName(), r);
+
+                        bus.publishOutbound(new OutboundMessage(
+                                msg.getChannel(), msg.getChatId(),
+                                structuredJson, List.of(),
+                                Map.of("_progress", true, "_tool_result", true,
+                                       "tool_name", tc.getName(), "tool_call_id", tc.getId())));
+
+                        memoryStore.appendToToday(GsonFactory.getGson().toJson(
+                                updated.get(updated.size() - 1)));
+
+                        messages.clear();
+                        messages.addAll(updated);
+                    });
+        });
+    }
+
+    /**
+     * 由 UI 调用：用户回答了 AskUserQuestion 的问题。
+     * @param toolCallId 工具调用 ID
+     * @param answers 问题文本 → 答案的映射
+     */
+    public void answerUserQuestion(String toolCallId, Map<String, String> answers) {
+        CompletableFuture<String> future = pendingUserQuestions.remove(toolCallId);
+        if (future != null) {
+            future.complete(GsonFactory.getGson().toJson(answers));
+        } else {
+            log.warn("answerUserQuestion: 未找到 toolCallId={} 的待处理问题", toolCallId);
+        }
     }
 
     /**

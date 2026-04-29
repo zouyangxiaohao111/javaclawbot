@@ -1,6 +1,10 @@
 package gui.ui;
 
+import com.google.gson.Gson;
+import gui.ui.components.AskQuestionResultView;
+import gui.ui.components.QuestionDialog;
 import gui.ui.components.Sidebar;
+import gui.ui.components.TodoResultView;
 import gui.ui.components.ToolCallCard;
 import gui.ui.pages.*;
 import javafx.application.Platform;
@@ -12,7 +16,10 @@ import javafx.scene.control.Label;
 import javafx.scene.input.MouseEvent;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
+import javafx.scene.layout.Priority;
+import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
+import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
 import javafx.scene.shape.Rectangle;
 import javafx.scene.shape.SVGPath;
@@ -397,6 +404,70 @@ public class MainStage {
         return toolHint.trim();
     }
 
+    private void handleToolResult(BackendBridge.ProgressEvent progress) {
+        String tn = progress.toolName();
+        String content = progress.content();
+        if (content == null || content.isBlank()) return;
+
+        if ("AskUserQuestion".equals(tn)) {
+            if (content.contains("awaiting_response")) {
+                showAskUserQuestionDialog(content, progress.toolCallId());
+            } else if (content.contains("\"questions\"")) {
+                if (lastToolCard != null) {
+                    lastToolCard.addStructuredContent(AskQuestionResultView.build(content));
+                }
+            }
+        } else if ("TodoWrite".equals(tn)) {
+            if (lastToolCard != null) {
+                lastToolCard.addStructuredContent(TodoResultView.build(content));
+            }
+        } else {
+            if (lastToolCard != null) {
+                lastToolCard.addResult(content);
+            }
+        }
+    }
+
+    private void handleToolHint(BackendBridge.ProgressEvent progress) {
+        String toolName = progress.toolName() != null
+            ? progress.toolName()
+            : extractToolName(progress.content());
+        String params = progress.content();
+
+        if ("TodoWrite".equals(toolName)) {
+            params = "更新任务列表";
+        }
+
+        ToolCallCard card = chatPage.addToolCallCard(
+            toolName, "running", params, false);
+        lastToolCard = card;
+    }
+
+    private void showAskUserQuestionDialog(String json, String toolCallId) {
+        try {
+            Gson gson = new Gson();
+            @SuppressWarnings("unchecked")
+            Map<String, Object> root = gson.fromJson(json, Map.class);
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> questions = (List<Map<String, Object>>) root.get("questions");
+
+            if (questions == null || questions.isEmpty()) return;
+
+            QuestionDialog dialog = new QuestionDialog(questions);
+            dialog.initOwner(stage.getScene() != null ? stage.getScene().getWindow() : null);
+            dialog.showAndWait().ifPresent(answers -> {
+                if (!answers.isEmpty() && toolCallId != null) {
+                    backendBridge.answerUserQuestion(toolCallId, answers);
+                }
+            });
+        } catch (Exception e) {
+            // 解析失败则把原始 JSON 作为普通结果展示
+            if (lastToolCard != null) {
+                lastToolCard.addResult(json);
+            }
+        }
+    }
+
     private void injectBridgeToPage(Object page) {
         if (page instanceof ModelsPage p) p.setBackendBridge(backendBridge);
         else if (page instanceof AgentsPage p) p.setBackendBridge(backendBridge);
@@ -447,23 +518,12 @@ public class MainStage {
                             images.isEmpty() ? null : images,
                             progress -> {
                                 if (progress.isToolResult()) {
-                                    // 工具结果：收起到最近一个对应的工具调用卡片中
-                                    if (lastToolCard != null) {
-                                        lastToolCard.addResult(progress.content());
-                                    }
+                                    handleToolResult(progress);
                                 } else if (progress.isToolHint()) {
-                                    // 工具调用：创建展开的卡片
-                                    String toolName = progress.toolName() != null
-                                        ? progress.toolName()
-                                        : extractToolName(progress.content());
-                                    ToolCallCard card = chatPage.addToolCallCard(
-                                        toolName, "running", progress.content(), false);
-                                    lastToolCard = card;
+                                    handleToolHint(progress);
                                 } else if (progress.isReasoning()) {
-                                    // 推理/思考内容：工具调用前展示可折叠思考块
                                     chatPage.addReasoningBlock(progress.content());
                                 } else {
-                                    // 普通回复文本（clean 内容，伴随工具调用）
                                     chatPage.addAssistantMessage(progress.content());
                                 }
                             },
@@ -502,6 +562,10 @@ public class MainStage {
                     // Refresh sidebar history, ensure fresh session for welcome page
                     sidebar.refreshHistory(backendBridge.getSessionManager().listSessions());
                     backendBridge.ensureFreshSession();
+
+                    // 标题异步生成后自动刷新侧栏
+                    backendBridge.setOnTitleChanged(() ->
+                        sidebar.refreshHistory(backendBridge.getSessionManager().listSessions()));
 
                     // Inject BackendBridge into management pages
                     injectBridgeToPage(pages.get("models"));

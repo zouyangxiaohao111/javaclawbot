@@ -569,18 +569,161 @@ public class ChatPage extends VBox {
     public void loadMessages(java.util.List<java.util.Map<String, Object>> history) {
         clearMessages();
         if (history == null) return;
+
+        java.util.Map<String, ToolCallCard> cardById = new java.util.LinkedHashMap<>();
+
         for (java.util.Map<String, Object> msg : history) {
             String role = String.valueOf(msg.getOrDefault("role", ""));
-            Object contentObj = msg.get("content");
-            String content = contentObj instanceof String ? (String) contentObj : "";
-            if (content == null || content.isBlank()) continue;
+
+            if ("system".equals(role)) continue;
+
             if ("user".equals(role)) {
-                addUserMessage(content);
+                String text = extractTextContent(msg.get("content"));
+                if (text != null && !text.isBlank()) {
+                    addUserMessage(text);
+                }
             } else if ("assistant".equals(role)) {
-                addAssistantMessage(content);
+                cardById.clear();
+
+                String content = extractTextContent(msg.get("content"));
+                String reasoning = msg.get("reasoning_content") instanceof String s && !s.isBlank() ? s : null;
+                @SuppressWarnings("unchecked")
+                java.util.List<java.util.Map<String, Object>> toolCalls =
+                    (java.util.List<java.util.Map<String, Object>>) msg.get("tool_calls");
+                boolean hasToolCalls = toolCalls != null && !toolCalls.isEmpty();
+
+                if (reasoning != null && !hasToolCalls) {
+                    if (content != null && !content.isBlank()) {
+                        addAssistantMessageWithReasoning(reasoning, content);
+                    } else {
+                        addReasoningBlock(reasoning);
+                    }
+                } else if (hasToolCalls) {
+                    // clean 文本（伴随工具调用）
+                    if (content != null && !content.isBlank()) {
+                        addAssistantMessage(content);
+                    }
+                    // 推理
+                    if (reasoning != null) {
+                        addReasoningBlock(reasoning);
+                    }
+                    // 工具卡片
+                    for (var tc : toolCalls) {
+                        String tn = extractToolName(tc);
+                        String params = formatToolParams(tn, tc);
+                        ToolCallCard card = addToolCallCard(tn, "completed", params, false);
+                        cardById.put((String) tc.get("id"), card);
+                    }
+                } else if (content != null && !content.isBlank()) {
+                    addAssistantMessage(content);
+                }
+            } else if ("tool".equals(role)) {
+                String tcId = msg.get("tool_call_id") instanceof String s ? s : null;
+                String toolName = msg.get("name") instanceof String s ? s : null;
+                String result = extractTextContent(msg.get("content"));
+                if (tcId != null && result != null) {
+                    ToolCallCard card = cardById.get(tcId);
+                    if (card != null) {
+                        if ("TodoWrite".equals(toolName)) {
+                            card.addStructuredContent(
+                                gui.ui.components.TodoResultView.build(result));
+                        } else if ("AskUserQuestion".equals(toolName) && result.contains("\"questions\"")) {
+                            card.addStructuredContent(
+                                gui.ui.components.AskQuestionResultView.build(result));
+                        } else {
+                            card.addResult(result);
+                        }
+                    }
+                }
             }
         }
-        // 历史加载后滚动到底部
         Platform.runLater(() -> scrollPane.setVvalue(1.0));
+    }
+
+    private static String extractTextContent(Object contentObj) {
+        if (contentObj instanceof String s) return s;
+        if (contentObj instanceof java.util.List<?> list && !list.isEmpty()) {
+            Object first = list.get(0);
+            if (first instanceof java.util.Map<?, ?> m && "text".equals(m.get("type"))) {
+                Object text = m.get("text");
+                return text instanceof String s ? s : String.valueOf(text);
+            }
+        }
+        return contentObj != null ? String.valueOf(contentObj) : null;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static String extractToolName(java.util.Map<String, Object> tc) {
+        Object fn = tc.get("function");
+        if (fn instanceof java.util.Map<?, ?> f) {
+            Object name = f.get("name");
+            return name instanceof String s ? s : String.valueOf(name);
+        }
+        return "tool";
+    }
+
+    private static String formatToolParams(String toolName, java.util.Map<String, Object> tc) {
+        Object fn = tc.get("function");
+        if (!(fn instanceof java.util.Map<?, ?> f)) return "";
+        Object argsObj = f.get("arguments");
+        if (!(argsObj instanceof String args) || args.isBlank()) return "";
+
+        if ("AskUserQuestion".equals(toolName)) {
+            return formatAskUserQuestionParams(args);
+        }
+        if ("TodoWrite".equals(toolName)) {
+            return formatTodoWriteParams(args);
+        }
+
+        return formatGenericParams(args);
+    }
+
+    private static String formatAskUserQuestionParams(String args) {
+        try {
+            com.google.gson.Gson gson = new com.google.gson.Gson();
+            java.util.Map<String, Object> m = gson.fromJson(args, java.util.Map.class);
+            @SuppressWarnings("unchecked")
+            java.util.List<java.util.Map<String, Object>> questions =
+                (java.util.List<java.util.Map<String, Object>>) m.get("questions");
+            if (questions == null || questions.isEmpty()) return "询问用户";
+            StringBuilder sb = new StringBuilder();
+            for (var q : questions) {
+                if (sb.length() > 0) sb.append("; ");
+                String h = (String) q.getOrDefault("header", "");
+                sb.append(h.isEmpty() ? "询问" : h);
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            return "询问用户";
+        }
+    }
+
+    private static String formatTodoWriteParams(String args) {
+        try {
+            com.google.gson.Gson gson = new com.google.gson.Gson();
+            java.util.Map<String, Object> m = gson.fromJson(args, java.util.Map.class);
+            @SuppressWarnings("unchecked")
+            java.util.List<?> todos = (java.util.List<?>) m.get("todos");
+            int count = todos != null ? todos.size() : 0;
+            return count > 0 ? count + " 项任务" : "清空任务";
+        } catch (Exception e) {
+            return "更新任务";
+        }
+    }
+
+    private static String formatGenericParams(String args) {
+        try {
+            com.google.gson.Gson gson = new com.google.gson.Gson();
+            java.util.Map<String, Object> argsMap = gson.fromJson(args, java.util.Map.class);
+            StringBuilder sb = new StringBuilder();
+            for (var entry : argsMap.entrySet()) {
+                if (sb.length() > 0) sb.append(", ");
+                String v = String.valueOf(entry.getValue());
+                if (v.length() > 60) v = v.substring(0, 60) + "...";
+                sb.append(entry.getKey()).append("=").append(v);
+            }
+            return sb.toString();
+        } catch (Exception ignored) {}
+        return args.length() > 100 ? args.substring(0, 100) + "..." : args;
     }
 }

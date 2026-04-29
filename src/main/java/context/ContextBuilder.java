@@ -672,74 +672,31 @@ public class ContextBuilder {
         return mixed;
     }
 
-    /**
-     * 追加工具调用结果消息（role=tool）
-     */
-    public List<Map<String, Object>> addToolResult(
-            List<Map<String, Object>> messages,
-            String toolCallId,
-            String toolName,
-            String result
-    ) {
-        if (messages == null) {
-            messages = new ArrayList<>();
-        }
-
-        Map<String, Object> msg = new LinkedHashMap<>();
-        msg.put("role", "tool");
-        msg.put("tool_call_id", toolCallId);
-        msg.put("name", toolName);
-        msg.put("content", result);
-
-        messages.add(msg);
-        return new ArrayList<>(messages);
+    /** @deprecated 使用 Helpers.buildToolCallDicts */
+    public static List<Map<String, Object>> buildToolCallDicts(List<providers.ToolCallRequest> toolCalls) {
+        return utils.Helpers.buildToolCallDicts(toolCalls);
     }
 
-    /**
-     * 追加助手消息（role=assistant），支持携带 tool_calls / reasoning_content / thinking_blocks
-     */
-    public List<Map<String, Object>> addAssistantMessage(
-            List<Map<String, Object>> messages,
-            String content,
-            List<Map<String, Object>> toolCalls,
-            String reasoningContent,
-            List<Map<String, Object>> thinkingBlocks
-    ) {
-        if (messages == null) {
-            messages = new ArrayList<>();
-        }
-
-        Map<String, Object> msg = new LinkedHashMap<>();
-        msg.put("role", "assistant");
-        msg.put("content", content);
-
-        if (toolCalls != null && !toolCalls.isEmpty()) {
-            msg.put("tool_calls", toolCalls);
-        }
-
-        // Python：reasoning_content is not None 才放进去（空字符串也应放）
-        if (reasoningContent != null) {
-            msg.put("reasoning_content", reasoningContent);
-        }
-
-        if (thinkingBlocks != null && !thinkingBlocks.isEmpty()) {
-            msg.put("thinking_blocks", thinkingBlocks);
-        }
-
-        messages.add(msg);
-        return new ArrayList<>(messages);
+    /** @deprecated 使用 Helpers.addToolResult */
+    public static List<Map<String, Object>> addToolResult(
+            List<Map<String, Object>> messages, String toolCallId,
+            String toolName, String result) {
+        return utils.Helpers.addToolResult(messages, toolCallId, toolName, result);
     }
 
-    /**
-     * 兼容旧签名：不传 thinking_blocks
-     */
-    public List<Map<String, Object>> addAssistantMessage(
-            List<Map<String, Object>> messages,
-            String content,
-            List<Map<String, Object>> toolCalls,
-            String reasoningContent
-    ) {
-        return addAssistantMessage(messages, content, toolCalls, reasoningContent, null);
+    /** @deprecated 使用 Helpers.addAssistantMessage */
+    public static List<Map<String, Object>> addAssistantMessage(
+            List<Map<String, Object>> messages, String content,
+            List<Map<String, Object>> toolCalls, String reasoningContent,
+            List<Map<String, Object>> thinkingBlocks) {
+        return utils.Helpers.addAssistantMessage(messages, content, toolCalls, reasoningContent, thinkingBlocks);
+    }
+
+    /** @deprecated 使用 Helpers.addAssistantMessage */
+    public static List<Map<String, Object>> addAssistantMessage(
+            List<Map<String, Object>> messages, String content,
+            List<Map<String, Object>> toolCalls, String reasoningContent) {
+        return utils.Helpers.addAssistantMessage(messages, content, toolCalls, reasoningContent);
     }
 
     // ==========================
