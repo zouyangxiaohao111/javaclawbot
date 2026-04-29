@@ -1,4 +1,4 @@
-package skill;
+package skills;
 
 import config.agent.SessionMemoryConfig;
 import config.agent.SkillifyConfig;

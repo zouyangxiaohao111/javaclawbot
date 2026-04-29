@@ -212,8 +212,10 @@ public final class CustomProvider extends LLMProvider {
             usage.put("total_tokens", u.path("total_tokens").asInt(0));
         }
 
+        // DeepSeek thinking mode 要求 reasoning_content 必须原样传回 API，
+        // 即使是空字符串也不能丢，所以这里不用 nullIfBlank
         String reasoning = message.hasNonNull("reasoning_content")
-                ? nullIfBlank(message.get("reasoning_content").asText())
+                ? message.get("reasoning_content").asText()
                 : null;
 
         return new LLMResponse(content, toolCalls, finishReason, usage, reasoning, null);

@@ -483,7 +483,7 @@ public class ExecTool extends Tool {
         for (String pattern : denyPatterns) {
             if (pattern == null || pattern.isBlank()) continue;
             if (Pattern.compile(pattern).matcher(lower).find()) {
-                return "此命令包含危险操作，已被拦截。如需执行，请让用户自行在终端中手动操作。";
+                return "此命令包含危险操作，已被拦截。如需执行，请使用rm删除单个文件或者让用户自行在终端中手动操作。";
             }
         }
 

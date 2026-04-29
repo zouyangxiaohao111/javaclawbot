@@ -58,129 +58,79 @@
 
 清晰的成功标准能让你独立迭代。模糊的标准（例如“让它能用”）则需要不断确认。
 
+## 执行顺序（复杂任务）
+
+在进行大型多步骤工作之前，应遵循 **GUARDRAILS.md** 中的那些规则、当前的**范围**、以及计划运行的验证命令。如需暂停，请在聊天或**本地**草稿文件中总结进展（不要将 `HANDOFF.md` 添加到仓库中），然后使用 `/clear` 并基于该总结继续工作。
+
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Project Overview
+<!-- gitnexus:start -->
+# GitNexus — Code Intelligence
 
-javaclawbot is a Java-based AI agent framework (a fork of openclaw) providing multi-channel access (Telegram, Feishu, Discord, etc.), multi-model support (Anthropic Claude, OpenAI, DeepSeek, etc.), tool execution, session management, and CLI Agent integration.
+This project is indexed by GitNexus as **javaclawbot** (14883 symbols, 37672 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
-## Build & Run Commands
+> If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
-```bash
-# Build project (skip tests)
-mvn clean package -DskipTests
+## Always Do
 
-# Run tests
-mvn test
+- **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `gitnexus_impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
+- **MUST run `gitnexus_detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows.
+- **MUST warn the user** if impact analysis returns HIGH or CRITICAL risk before proceeding with edits.
+- When exploring unfamiliar code, use `gitnexus_query({query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
+- When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `gitnexus_context({name: "symbolName"})`.
 
-# Initialize configuration
-java -cp target/classes:target/dependency/* cli.Commands onboard
+## Never Do
 
-# Start interactive CLI agent
-java -cp target/classes:target/dependency/* cli.Commands agent
+- NEVER edit a function, class, or method without first running `gitnexus_impact` on it.
+- NEVER ignore HIGH or CRITICAL risk warnings from impact analysis.
+- NEVER rename symbols with find-and-replace — use `gitnexus_rename` which understands the call graph.
+- NEVER commit changes without running `gitnexus_detect_changes()` to check affected scope.
 
-# Single message mode
-java -cp target/classes:target/dependency/* cli.Commands agent -m "your message"
+## Resources
 
-# Start gateway service (all channels)
-java -cp target/classes:target/dependency/* cli.Commands gateway
+| Resource | Use for |
+|----------|---------|
+| `gitnexus://repo/javaclawbot/context` | Codebase overview, check index freshness |
+| `gitnexus://repo/javaclawbot/clusters` | All functional areas |
+| `gitnexus://repo/javaclawbot/processes` | All execution flows |
+| `gitnexus://repo/javaclawbot/process/{name}` | Step-by-step execution trace |
 
-# View status
-java -cp target/classes:target/dependency/* cli.Commands status
+## CLI
 
-# Cron management
-java -cp target/classes:target/dependency/* cli.Commands cron list
-java -cp target/classes:target/dependency/* cli.Commands cron add -n "name" -m "message" -e 3600
-java -cp target/classes:target/dependency/* cli.Commands cron remove JOB_ID
-```
+| Task                                         | Read this skill file                                                            |
+|----------------------------------------------|---------------------------------------------------------------------------------|
+| Understand architecture / "How does X work?" | `(~/.javaclawbot/workspace).claude/skills/gitnexus/gitnexus-exploring/SKILL.md` |
+| Blast radius / "What breaks if I change X?"  | `(~/.javaclawbot/workspace).claude/skills/gitnexus/gitnexus-impact-analysis/SKILL.md`      |
+| Trace bugs / "Why is X failing?"             | `(~/.javaclawbot/workspace).claude/skills/gitnexus/gitnexus-debugging/SKILL.md`            |
+| Rename / extract / split / refactor          | `(~/.javaclawbot/workspace).claude/skills/gitnexus/gitnexus-refactoring/SKILL.md`          |
+| Tools, resources, schema reference           | `(~/.javaclawbot/workspace).claude/skills/gitnexus/gitnexus-guide/SKILL.md`                |
+| Index, status, clean, wiki CLI commands      | `(~/.javaclawbot/workspace).claude/skills/gitnexus/gitnexus-cli/SKILL.md`                  |
 
-## Architecture
+<!-- gitnexus:end -->
 
-### Core Components
+## 项目核心类
+AgentLoop为助手系统loop入口
+ContextBuilder - 上下文构建
+ProjectRegistry - 项目路径
 
-- **AgentLoop** (`src/main/java/agent/AgentLoop.java`): Main agent execution loop that processes messages, invokes tools, and manages the conversation cycle. Handles tool call requests/responses iteratively.
+## 核心包
+src/main/java/agent/subagent - 子代理相关
+src/main/java/agent/tool - 工具相关
+src/main/java/context - 上下文相关
+src/main/java/gui/ui - ui客户端
+src/main/java/providers - 提供者
+src/main/java/skills - 技能
+src/main/java/utils - 通用工具
 
-- **LLMProvider** (`src/main/java/providers/LLMProvider.java`): Abstract base class for all LLM providers. Implements retry logic (delays: 1s, 2s, 4s), transient error detection (rate limits), and async chat with cancellation support.
-
-- **ToolRegistry** (`src/main/java/agent/tool/ToolRegistry.java`): Central tool management. Tools are registered/unregistered dynamically. Validates parameters before execution, appends hints on errors.
-
-- **ContextBuilder** (`src/main/java/context/ContextBuilder.java`): Builds system prompts combining: identity info, bootstrap files, memory context, and skills. Reads project instruction files (CODE-AGENT.md/CLAUDE.md) up to 200 lines.
-
-- **SessionManager** (`src/main/java/session/SessionManager.java`): Manages conversation sessions with persistence, cost tracking, and memory compression.
-
-### Tool System
-
-Tools implement the `Tool` interface (`src/main/java/agent/tool/Tool.java`) with:
-- `name()`: Tool identifier
-- `description()`: Human-readable description
-- `parameters()`: OpenAI-style parameter schema
-- `execute(Map<String, Object>)`: Async execution returning `CompletableFuture<String>`
-- `validateParams()`: Parameter validation
-
-Built-in tools located in `src/main/java/agent/tool/`:
-- `file/`: ReadFileTool, WriteTool, EditTool, GlobTool, GrepTool, ListFilesTool
-- `shell/`: ExecTool (bash/powershell execution with safety checks)
-- `web/`: WebSearchTool, WebFetchTool
-- `mcp/`: MCP server integration
-- `skill/`: SkillTool (skill management)
-- `cron/`: CronTool (scheduled tasks)
-- `cli/`: CliAgentTool (CLI Agent integration)
-- `message/`: MessageTool, PruneMessagesTool
-
-### Skills System
-
-Skills are loaded from `SKILL.md` files in skill directories. SkillsLoader (`src/main/java/skills/SkillsLoader.java`) loads from:
-1. Workspace skills directory (`~/.javaclawbot/workspace/skills/`)
-2. Built-in skills directory (`src/main/resources/skills/`)
-
-Skills can contain YAML frontmatter metadata and are invoked via the SkillTool.
-
-### CLI Agent Integration
-
-CLI Agent system (`src/main/java/providers/cli/`) enables calling Claude Code or OpenCode CLI through channels:
-- `CliAgentPool.java`: Manages active CLI agent sessions per project
-- `CliAgentCommandHandler.java`: Handles `/cc`, `/oc` commands from channels
-- `ProjectRegistry.java`: Manages project bindings stored in `cli-projects.json`
-
-Supported commands: `/cc <project> <prompt>`, `/oc <project> <prompt>`, `/bind`, `/unbind`, `/projects`
-
-### Channels
-
-Channel implementations in `src/main/java/channels/` inherit from `BaseChannel.java`:
-- TelegramChannel, FeishuChannel, DingTalkChannel, EmailChannel, DiscordChannel, WhatsAppChannel, QQChannel
-
-Messages flow through `MessageBus` (`src/main/java/bus/MessageBus.java`) with `InboundMessage` and `OutboundMessage`.
-
-### Provider System
-
-Provider implementations (`src/main/java/providers/`):
-- `ProviderRegistry.java`: Maps provider names to implementations
-- `ProviderFactory.java`: Creates provider instances from config
-- `ModelFallbackManager.java`: Handles model fallback on errors
-- `HotSwappableProvider.java`: Proxy allowing hot config reload
-
-Custom providers: Anthropic, OpenAI, DeepSeek, Azure OpenAI, Custom (generic endpoint)
-
-## Configuration
-
-Config file at `~/.javaclawbot/config.json`:
-- `agents.defaults`: model, max_tokens, temperature, workspace, development mode
-- `providers`: api_key, api_base per provider
-- `channels`: channel-specific config (tokens, app_ids)
-- `tools`: exec timeout, web search API key, MCP servers
-- `gateway`: host, port, heartbeat settings
-
-## Development Mode
-
-When `development: true` in config, the agent loads project instruction files (CODE-AGENT.md or CLAUDE.md) from the main project path (set via `/bind --main`). Only first 200 lines are loaded into context.
-
-## Key Dependencies
-
-- Java 17+, Maven 3.6+
-- picocli (CLI), JLine (terminal), Jackson (JSON), Hutool (utils)
-- cron-utils, TelegramBots, Lark SDK (Feishu), MCP SDK
-- GraalJS (JavaScript execution for skills)
+## 变动
+版本变动，修复bug 请放入 [CHANGELOG.md](CHANGELOG.md) 中 
+## 更新日志
+详情需要放入 [CHANGELOG.md](CHANGELOG.md) 中 
+这里需要动态总结，并每次更新，规则：
+| Date | Version | Change |
+|------|---------|--------|
+| 2026-04-23 | 1.7.0 | xxxxx. |
 
 ## JavaFX GUI 经验总结
 
