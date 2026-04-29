@@ -498,6 +498,9 @@ public class MainStage {
                         chatPage.getChatInput().setSending(false);
                     });
 
+                    // 使 chatInput 可以访问历史消息记录
+                    chatPage.getChatInput().setBackendBridge(backendBridge);
+
                     // Wire ChatInput send listener to backend
                     chatPage.getChatInput().addSendListener(text -> {
                         if (backendBridge.isWaitingForResponse()) return;
