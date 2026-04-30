@@ -16,16 +16,15 @@ import javafx.scene.control.Label;
 import javafx.scene.input.MouseEvent;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
-import javafx.scene.layout.Priority;
-import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
-import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
 import javafx.scene.shape.Rectangle;
 import javafx.scene.shape.SVGPath;
+import javafx.scene.image.Image;
 import javafx.stage.Stage;
 import javafx.stage.StageStyle;
 
+import java.io.InputStream;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -71,6 +70,28 @@ public class MainStage {
 
     private void configureStage() {
         stage.initStyle(StageStyle.TRANSPARENT);
+
+        // 设置窗口图标（任务栏/Dock/Alt+Tab 显示）
+        try {
+            InputStream icon16 = getClass().getResourceAsStream("/asset/icon/icon-16.png");
+            InputStream icon32 = getClass().getResourceAsStream("/asset/icon/icon-32.png");
+            InputStream icon64 = getClass().getResourceAsStream("/asset/icon/icon-64.png");
+            InputStream icon128 = getClass().getResourceAsStream("/asset/icon/icon-128.png");
+            InputStream icon256 = getClass().getResourceAsStream("/asset/icon/icon-256.png");
+            if (icon16 != null && icon32 != null && icon64 != null
+                && icon128 != null && icon256 != null) {
+                stage.getIcons().addAll(
+                    new Image(icon16),
+                    new Image(icon32),
+                    new Image(icon64),
+                    new Image(icon128),
+                    new Image(icon256)
+                );
+            }
+        } catch (Exception ignored) {
+            // 图标加载失败不影响程序运行
+        }
+
         stage.setWidth(DEFAULT_WIDTH);
         stage.setHeight(DEFAULT_HEIGHT);
         stage.setMinWidth(MIN_WIDTH);
@@ -264,7 +285,7 @@ public class MainStage {
     }
 
     private void loadStylesheets() {
-        String mainCss = getClass().getResource("/gui/ui/styles/main.css").toExternalForm();
+        String mainCss = getClass().getResource("/static/css/styles/main.css").toExternalForm();
         stage.getScene().getStylesheets().add(mainCss);
     }
 

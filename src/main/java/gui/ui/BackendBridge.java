@@ -4,6 +4,7 @@ import agent.AgentLoop;
 import bus.InboundMessage;
 import bus.MessageBus;
 import bus.OutboundMessage;
+import cli.BuiltinSkillsInstaller;
 import cli.RuntimeComponents;
 import config.Config;
 import config.ConfigIO;
@@ -25,7 +26,10 @@ import skills.SkillsLoader;
 import utils.Helpers;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -149,6 +153,9 @@ public class BackendBridge {
 
         // 8) SkillsLoader
         this.skillsLoader = new SkillsLoader(this.config.getWorkspacePath());
+
+        // 8b) 首次启动自动初始化：技能 + zjkycode 插件
+        ensureSkillsInitialized();
 
         // 9) 启动 bus 交互模式
         startBusInteractiveMode();
@@ -674,6 +681,63 @@ public class BackendBridge {
     }
 
     // ── Private helpers ──
+
+    /**
+     * 首次 GUI 启动时自动初始化内置技能到工作区。
+     * 仅在 workspace/skills 目录为空或不存在时执行。
+     */
+    private void ensureSkillsInitialized() {
+        Path workspacePath = this.config.getWorkspacePath();
+        Path skillsDir = workspacePath.resolve("skills");
+        Path pluginsDir = workspacePath.resolve("plugins");
+
+        // 检查 skills 目录是否已有内容
+        boolean skillsExist = Files.exists(skillsDir) && Files.isDirectory(skillsDir);
+        if (skillsExist) {
+            try (var ds = Files.newDirectoryStream(skillsDir)) {
+                if (ds.iterator().hasNext()) return;
+            } catch (IOException e) {
+                // 读取失败也继续初始化
+            }
+        }
+
+        // 发现所有内置技能
+        List<BuiltinSkillsInstaller.SkillResource> allSkills =
+            BuiltinSkillsInstaller.discoverBuiltinSkills();
+        if (allSkills.isEmpty()) return;
+
+        log.info("首次启动，初始化 " + allSkills.size() + " 个内置技能到工作区...");
+
+        // 全部安装（不覆盖已有）
+        BuiltinSkillsInstaller.InstallSummary summary =
+            BuiltinSkillsInstaller.installSelectedSkills(workspacePath, allSkills, false);
+
+        if (!summary.getInstalled().isEmpty()) {
+            log.info("已安装技能: " + String.join(", ", summary.getInstalled()));
+        }
+
+        // 额外确保 zjkycode.js 插件存在（技能自带 installAssociatedPlugin，
+        // 但如果 zjkycode 技能未被安装则单独处理）
+        String pluginResource = BuiltinSkillsInstaller.findAssociatedPlugin("zjkycode");
+        if (pluginResource != null) {
+            Path targetFile = pluginsDir.resolve("zjkycode.js");
+            if (!Files.exists(targetFile)) {
+                try {
+                    Files.createDirectories(pluginsDir);
+                    ClassLoader cl = Thread.currentThread().getContextClassLoader();
+                    if (cl == null) cl = BuiltinSkillsInstaller.class.getClassLoader();
+                    try (InputStream is = cl.getResourceAsStream(pluginResource)) {
+                        if (is != null) {
+                            Files.copy(is, targetFile, StandardCopyOption.REPLACE_EXISTING);
+                            log.info("已初始化插件: zjkycode.js");
+                        }
+                    }
+                } catch (IOException e) {
+                    log.warning("初始化 zjkycode.js 失败: " + e.getMessage());
+                }
+            }
+        }
+    }
 
     /**
      * 创建按 sessionId 隔离的 ProjectRegistry

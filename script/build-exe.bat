@@ -21,13 +21,16 @@ set "JAVA_CMD=%JAVA_BIN%\java.exe"
 set "JLINK_CMD=%JAVA_BIN%\jlink.exe"
 set "JPACKAGE_CMD=%JAVA_BIN%\jpackage.exe"
 
-set "APP_NAME=javaclawbot"
-set "APP_VERSION=1.0.0"
+set "APP_NAME=JavaClawBot"
+set "APP_VERSION=2.1.0"
 set "VENDOR=JavaClawBot"
 set "DESCRIPTION=JavaClawBot - AI Assistant"
 
 set "MAIN_JAR_NAME=javaclawbot.jar"
-set "MAIN_CLASS=gui.JavaClawBotGUI"
+set "MAIN_CLASS=gui.ui.Launcher"
+
+REM Icon file path (relative to build script: ../icon/app-icon.ico)
+set "ICON_PATH=%~dp0..\..\..\..\src\main\resources\icon\app-icon.ico"
 
 set "BASE_URL=D:\open_code\pkg_exe"
 set "JAR_FILE=%BASE_URL%\javaclawbot.jar"
@@ -300,7 +303,7 @@ REM =========================================================
 echo [STEP] Running jpackage...
 echo.
 echo [COMMAND]
-echo "%JPACKAGE_CMD%" --type exe --name "%APP_NAME%" --app-version "%APP_VERSION%" --vendor "%VENDOR%" --description "%DESCRIPTION%" --input "%TEMP_INPUT_DIR%" --main-jar "%MAIN_JAR_NAME%" --main-class "%MAIN_CLASS%" --runtime-image "%RUNTIME_DIR%" --dest "%OUTPUT_DIR%" --java-options "%JAVA_OPT_1%" --java-options "%JAVA_OPT_2%" --java-options "%JAVA_OPT_3%" --java-options "%JAVA_OPT_4%" --win-console --win-dir-chooser --win-menu --win-shortcut --verbose
+echo "%JPACKAGE_CMD%" --type exe --name "%APP_NAME%" --app-version "%APP_VERSION%" --vendor "%VENDOR%" --description "%DESCRIPTION%" --input "%TEMP_INPUT_DIR%" --main-jar "%MAIN_JAR_NAME%" --main-class "%MAIN_CLASS%" --runtime-image "%RUNTIME_DIR%" --dest "%OUTPUT_DIR%" --icon "%ICON_PATH%" --java-options "%JAVA_OPT_1%" --java-options "%JAVA_OPT_2%" --java-options "%JAVA_OPT_3%" --java-options "%JAVA_OPT_4%" --win-console --win-dir-chooser --win-menu --win-shortcut --verbose
 echo.
 
 "%JPACKAGE_CMD%" ^
@@ -314,6 +317,7 @@ echo.
   --main-class "%MAIN_CLASS%" ^
   --runtime-image "%RUNTIME_DIR%" ^
   --dest "%OUTPUT_DIR%" ^
+  --icon "%ICON_PATH%" ^
   --java-options "%JAVA_OPT_1%" ^
   --java-options "%JAVA_OPT_2%" ^
   --java-options "%JAVA_OPT_3%" ^

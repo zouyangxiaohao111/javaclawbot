@@ -252,20 +252,33 @@ public class MessageBubble extends HBox {
     }
 
     private static void adjustWebViewHeight(WebView wv) {
-        // 延迟 120ms 等待 WebView 完成 CSS 布局，避免在 reflow 中途测量到错误高度
+        adjustWebViewHeight(wv, 0, 0);
+    }
+
+    /** 带重试的高度测量：临时解除 html height:100% 再测量真实内容高度，连续两次一致后确认 */
+    private static void adjustWebViewHeight(WebView wv, double prevHeight, int attempt) {
         javafx.animation.PauseTransition delay = new javafx.animation.PauseTransition(
-            javafx.util.Duration.millis(120));
+            javafx.util.Duration.millis(attempt == 0 ? 100 : 80));
         delay.setOnFinished(ev -> {
             try {
                 Object h = wv.getEngine().executeScript(
-                    "(function(){var d=document;"
-                    + "var sh=Math.max(d.body.scrollHeight,d.documentElement.scrollHeight);"
-                    + "return Math.max(sh,d.documentElement.offsetHeight);"
-                    + "})()");
+                    "(function(){var d=document;var e=d.documentElement;"
+                    + "var oldH=e.style.height;e.style.height='auto';"
+                    + "var sh=Math.max(d.body.scrollHeight,e.scrollHeight);"
+                    + "e.style.height=oldH;"
+                    + "return sh;})()");
                 if (h instanceof Number) {
                     double height = ((Number) h).doubleValue();
                     if (height > 0) {
-                        wv.setPrefHeight(height);
+                        if (prevHeight > 0 && Math.abs(height - prevHeight) < 2) {
+                            wv.setPrefHeight(height);
+                        } else if (attempt >= 5) {
+                            wv.setPrefHeight(height);
+                        } else {
+                            adjustWebViewHeight(wv, height, attempt + 1);
+                        }
+                    } else if (attempt < 5) {
+                        adjustWebViewHeight(wv, 0, attempt + 1);
                     }
                 }
             } catch (Exception ignored) {}

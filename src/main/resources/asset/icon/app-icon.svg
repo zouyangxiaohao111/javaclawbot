@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#4F46E5"/>
+      <stop offset="100%" stop-color="#7C3AED"/>
+    </linearGradient>
+  </defs>
+  <!-- Background rounded square -->
+  <rect x="32" y="32" width="448" height="448" rx="112" ry="112" fill="url(#bg)"/>
+  <!-- Chat bubble body -->
+  <path d="M160 180 Q160 136 192 120 L320 120 Q352 136 352 180 L352 300 Q352 344 320 360 L240 360 L180 400 L180 360 Q160 344 160 300 Z"
+        fill="white" opacity="0.95"/>
+  <!-- Chat lines -->
+  <rect x="200" y="200" width="112" height="14" rx="7" fill="#4F46E5" opacity="0.3"/>
+  <rect x="200" y="234" width="80" height="14" rx="7" fill="#4F46E5" opacity="0.3"/>
+  <rect x="200" y="268" width="60" height="14" rx="7" fill="#4F46E5" opacity="0.3"/>
+  <!-- Claw mark (three small dots) -->
+  <circle cx="290" cy="310" r="8" fill="#4F46E5" opacity="0.4"/>
+  <circle cx="315" cy="310" r="8" fill="#4F46E5" opacity="0.4"/>
+  <circle cx="340" cy="310" r="8" fill="#4F46E5" opacity="0.4"/>
+</svg>

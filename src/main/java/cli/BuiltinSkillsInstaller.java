@@ -302,7 +302,7 @@ public final class BuiltinSkillsInstaller {
      *
      * @return the classpath resource path, or null if not found
      */
-    static String findAssociatedPlugin(String skillName) {
+    public static String findAssociatedPlugin(String skillName) {
         ClassLoader cl = Thread.currentThread().getContextClassLoader();
         if (cl == null) cl = BuiltinSkillsInstaller.class.getClassLoader();
 

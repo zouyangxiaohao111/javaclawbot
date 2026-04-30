@@ -55,11 +55,11 @@ public class ChatPage extends VBox {
         REASONING_PARSER = Parser.builder(options).build();
         REASONING_RENDERER = HtmlRenderer.builder(options).build();
 
-        REASONING_HTML_TEMPLATE = "<!DOCTYPE html><html><head><meta charset='UTF-8'><style>"
-            + "html{background:rgba(0,0,0,0.03);height:100%;overflow:hidden;}"
+        REASONING_HTML_TEMPLATE = "<!DOCTYPE html><html style='height:100%;background:rgba(0,0,0,0.03);'>"
+            + "<head><meta charset='UTF-8'><style>"
             + "body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;"
             + "font-size:13px;line-height:1.6;color:rgba(0,0,0,0.5);"
-            + "background:rgba(0,0,0,0.03);margin:0;padding:0 16px 8px 16px;overflow:hidden;}"
+            + "background:rgba(0,0,0,0.03);margin:0;padding:8px 16px;overflow:hidden;}"
             + "pre{background:rgba(0,0,0,0.03);border:1px solid rgba(0,0,0,0.06);border-radius:6px;"
             + "padding:8px 12px;overflow-x:auto;font-family:'JetBrains Mono','Fira Code',monospace;"
             + "font-size:12px;line-height:1.4;}"
@@ -280,25 +280,15 @@ public class ChatPage extends VBox {
         reasoningWv.setStyle("-fx-background-color: rgba(0,0,0,0.03);");
         reasoningWv.setPrefHeight(0);
         reasoningWv.setMaxHeight(0);
+        // 宽度绑定：先确定宽度再加载内容，避免窄宽度下测量到错误高度
+        reasoningWv.setPrefWidth(600);
+        reasoningWv.setMaxWidth(600);
 
         final double[] measuredHeight = {0};
         final boolean[] heightReady = {false};
         reasoningWv.getEngine().documentProperty().addListener((obs, old, doc) -> {
             if (doc != null) {
-                Platform.runLater(() -> {
-                    try {
-                        Object h = reasoningWv.getEngine().executeScript(
-                            "(function(){return Math.max(document.body.scrollHeight,"
-                            + "document.documentElement.scrollHeight);})()");
-                        if (h instanceof Number) {
-                            double height = ((Number) h).doubleValue();
-                            if (height > 0) {
-                                measuredHeight[0] = height;
-                                heightReady[0] = true;
-                            }
-                        }
-                    } catch (Exception ignored) {}
-                });
+                Platform.runLater(() -> measureWebViewHeightWithRetry(reasoningWv, measuredHeight, heightReady, 0));
             }
         });
 
@@ -318,7 +308,7 @@ public class ChatPage extends VBox {
                 reasoningWv.setPrefHeight(0);
                 reasoningWv.setMaxHeight(0);
             }
-            toggleArrow.setText(expand ? "▾" : "▸");
+            toggleArrow.setText(expand ? "\u25BE" : "\u25B8");
         });
 
         Region rightSpacer = new Region();
@@ -327,7 +317,21 @@ public class ChatPage extends VBox {
         messageContainer.getChildren().add(row);
         smartScrollToBottom();
 
-        Platform.runLater(() -> reasoningWv.getEngine().loadContent(reasoningHtml));
+        // 宽度确定后再加载内容
+        reasoningBlock.sceneProperty().addListener(new javafx.beans.value.ChangeListener<>() {
+            @Override
+            public void changed(javafx.beans.value.ObservableValue<? extends javafx.scene.Scene> obs,
+                                javafx.scene.Scene oldScene, javafx.scene.Scene newScene) {
+                if (newScene != null) {
+                    reasoningBlock.sceneProperty().removeListener(this);
+                    // 按实际可用宽度设置 WebView 宽度
+                    double w = Math.min(600, newScene.getWidth() - 256 - 32 - 44);
+                    reasoningWv.setPrefWidth(w);
+                    reasoningWv.setMaxWidth(w);
+                    Platform.runLater(() -> reasoningWv.getEngine().loadContent(reasoningHtml));
+                }
+            }
+        });
     }
 
     public ToolCallCard addToolCallCard(String toolName, String status, String params) {
@@ -457,20 +461,7 @@ public class ChatPage extends VBox {
         final boolean[] heightReady = {false};
         reasoningWv.getEngine().documentProperty().addListener((obs, old, doc) -> {
             if (doc != null) {
-                Platform.runLater(() -> {
-                    try {
-                        Object h = reasoningWv.getEngine().executeScript(
-                            "(function(){return Math.max(document.body.scrollHeight,"
-                            + "document.documentElement.scrollHeight);})()");
-                        if (h instanceof Number) {
-                            double height = ((Number) h).doubleValue();
-                            if (height > 0) {
-                                measuredHeight[0] = height;
-                                heightReady[0] = true;
-                            }
-                        }
-                    } catch (Exception ignored) {}
-                });
+                Platform.runLater(() -> measureWebViewHeightWithRetry(reasoningWv, measuredHeight, heightReady, 0));
             }
         });
 
@@ -512,6 +503,56 @@ public class ChatPage extends VBox {
         Platform.runLater(() -> reasoningWv.getEngine().loadContent(reasoningHtml));
     }
 
+
+    /**
+     * 带重试的 WebView 高度测量，解决渲染延迟导致的留白问题。
+     * 连续两次测量结果一致（误差 < 2px）时确认高度，最多重试 5 次。
+     */
+    private void measureWebViewHeightWithRetry(WebView wv, double[] result,
+                                                boolean[] ready, int attempt) {
+        try {
+            Object h = wv.getEngine().executeScript(
+                "(function(){var d=document;var e=d.documentElement;"
+                + "var oldH=e.style.height;e.style.height='auto';"
+                + "var sh=Math.max(d.body.scrollHeight,e.scrollHeight);"
+                + "e.style.height=oldH;"
+                + "return sh;})()");
+            if (h instanceof Number) {
+                double height = ((Number) h).doubleValue();
+                if (height > 0) {
+                    if (result[0] > 0 && Math.abs(height - result[0]) < 2) {
+                        // 两次测量一致，确认高度
+                        if (height != result[0]) {
+                            wv.setPrefHeight(height);
+                        }
+                        ready[0] = true;
+                        return;
+                    }
+                    result[0] = height;
+                    if (attempt >= 5) {
+                        // 达到最大重试次数，使用当前测量值
+                        ready[0] = true;
+                        return;
+                    }
+                    // 继续重试
+                    javafx.animation.PauseTransition delay = new javafx.animation.PauseTransition(
+                        javafx.util.Duration.millis(100));
+                    final int next = attempt + 1;
+                    delay.setOnFinished(ev -> measureWebViewHeightWithRetry(wv, result, ready, next));
+                    delay.play();
+                    return;
+                }
+            }
+            // 高度为 0，继续重试
+            if (attempt < 5) {
+                javafx.animation.PauseTransition delay = new javafx.animation.PauseTransition(
+                    javafx.util.Duration.millis(100));
+                final int next = attempt + 1;
+                delay.setOnFinished(ev -> measureWebViewHeightWithRetry(wv, result, ready, next));
+                delay.play();
+            }
+        } catch (Exception ignored) {}
+    }
 
     private void clearWelcomeIfNeeded() {
         if (!messageContainer.getChildren().isEmpty()

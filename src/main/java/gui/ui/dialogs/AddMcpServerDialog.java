@@ -192,7 +192,7 @@ public class AddMcpServerDialog extends Stage {
         root.getChildren().addAll(title, tabBar, formPanel, rawPanel, buttonBox);
 
         Scene scene = new Scene(root);
-        scene.getStylesheets().add(getClass().getResource("/gui/ui/styles/main.css").toExternalForm());
+        scene.getStylesheets().add(getClass().getResource("/static/css/styles/main.css").toExternalForm());
         setScene(scene);
 
         // 默认选中 RAW 模式

@@ -109,7 +109,8 @@ public final class ReadFileTool extends Tool {
                 "- Any lines longer than 2000 characters will be truncated",
                 "- Results are returned using cat -n format, with line numbers starting at 1",
                 "- This tool can only read files, not directories. To read a directory, use an ls command via the Bash tool.",
-                "- This tool can read image files (jpg, jpeg, png, gif, webp, bmp, ico, svg) and returns them as base64 data URIs with MIME type prefix (max 10MB).",
+                // "- This tool can read image files (jpg, jpeg, png, gif, webp, bmp, ico, svg) and returns them as base64 data URIs with MIME type prefix (max 10MB).",
+                // [DISABLED] 暂时禁用图片读取功能
                 "- You will regularly be asked to read screenshots. If the user provides a path to a screenshot, ALWAYS use this tool to view the file at the path. This tool will work with all temporary file paths.",
                 "- If you read a file that exists but has empty contents you will receive a system reminder warning in place of file contents."
         ));
@@ -184,12 +185,13 @@ public final class ReadFileTool extends Tool {
             }
 
             // --- Check if file is an image ---
-            String extension = getFileExtension(resolvedPath.toString());
-            String mimeType = IMAGE_MIME_TYPES.get(extension);
-            if (mimeType != null) {
-                // Handle image file: read as binary and encode to base64
-                return readImageAsBase64(resolvedPath, mimeType);
-            }
+            // [DISABLED] 暂时禁用图片读取功能
+            // String extension = getFileExtension(resolvedPath.toString());
+            // String mimeType = IMAGE_MIME_TYPES.get(extension);
+            // if (mimeType != null) {
+            //     // Handle image file: read as binary and encode to base64
+            //     return readImageAsBase64(resolvedPath, mimeType);
+            // }
 
             // --- Port of Claude Code: file_unchanged dedup ---
             if (!hasLineLimit && fileStateCache.isUnchanged(resolvedPath)) {
