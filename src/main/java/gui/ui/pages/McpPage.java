@@ -63,7 +63,17 @@ public class McpPage extends VBox {
             AddMcpServerDialog dialog = new AddMcpServerDialog(stage);
             dialog.showAndWait();
             if (dialog.isConfirmed()) {
-                // TODO: 添加新服务器
+                String name = dialog.getServerName();
+                try {
+                    if (dialog.isRawMode()) {
+                        backendBridge.addMcpServerRaw(name, dialog.getRawJson());
+                    } else {
+                        backendBridge.addMcpServer(name, dialog.getCommand());
+                    }
+                    refresh();
+                } catch (Exception ex) {
+                    System.err.println("添加 MCP 服务器失败: " + ex.getMessage());
+                }
             }
         });
 
