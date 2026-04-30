@@ -258,15 +258,19 @@ public class ChatInput extends VBox {
                 }
                 return;
             }
-            if (e.getCode() == javafx.scene.input.KeyCode.ENTER && !e.isShiftDown()) {
-                e.consume();
-                if (sending) {
-                    showAlreadySent();
+            if (e.getCode() == javafx.scene.input.KeyCode.ENTER) {
+                if (e.isShiftDown()) {
+                    // Shift+Enter：主动插入换行，不依赖 TextArea 默认行为
+                    inputArea.insertText(inputArea.getCaretPosition(), "\n");
                 } else {
-                    sendMessage();
+                    if (sending) {
+                        showAlreadySent();
+                    } else {
+                        sendMessage();
+                    }
                 }
+                e.consume();
             }
-            // Shift+Enter 不拦截，让 TextArea 正常插入换行
         });
     }
 
@@ -283,66 +287,32 @@ public class ChatInput extends VBox {
     }
 
     /**
-     * 将消息中的 @文件名 引用解析为完整的文件路径上下文。
-     * 例如 "@License 解释一下" -> "用户提供文件：/path/to/License\n解释一下"
+     * 提取消息中 @绝对路径 的引用，构建文件上下文。
+     * @ 补全已填入绝对路径（如 @D:\code\...\Config.java），无需再解析。
      */
     private String resolveFileMentions(String text) {
-        StringBuilder result = new StringBuilder();
-        StringBuilder remaining = new StringBuilder(text);
-        java.util.Set<String> resolvedPaths = new java.util.LinkedHashSet<>();
-
-        // 在 workspace/project 目录中查找 @ 引用的文件
-        java.nio.file.Path base = completionPopup.getBasePath();
-        if (base == null) return text;
-
-        // 查找所有 @word 格式的引用
-        java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("@(\\S+)").matcher(text);
+        java.util.Set<String> paths = new java.util.LinkedHashSet<>();
+        java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("@([^\\s]+)").matcher(text);
         while (matcher.find()) {
             String ref = matcher.group(1);
-            // 去除末尾标点符号
-            ref = ref.replaceAll("[.,;:!?)]+$", "");
+            ref = ref.replaceAll("[.,;:!?)\"\'\\]]+$", "");
             if (ref.isEmpty()) continue;
-
-            // 尝试在 base 目录下查找匹配的文件
-            java.nio.file.Path resolved = resolveFileName(base, ref);
-            if (resolved != null) {
-                resolvedPaths.add(resolved.toString());
+            try {
+                java.nio.file.Path p = java.nio.file.Path.of(ref);
+                if (p.isAbsolute() && java.nio.file.Files.exists(p)) {
+                    paths.add(p.normalize().toString());
+                }
+            } catch (Exception ignored) {
             }
         }
+        if (paths.isEmpty()) return text;
 
-        // 构建最终消息：文件路径 + 原始消息（去除 @引用）
-        if (!resolvedPaths.isEmpty()) {
-            for (String path : resolvedPaths) {
-                result.append("用户提供文件：").append(path).append("\n");
-            }
-            result.append("\n");
+        StringBuilder sb = new StringBuilder();
+        for (String p : paths) {
+            sb.append("用户提供文件：").append(p).append("\n");
         }
-        result.append(text);
-        return result.toString();
-    }
-
-    /**
-     * 在 base 目录下查找匹配 name 的文件（支持部分名称匹配）
-     */
-    private java.nio.file.Path resolveFileName(java.nio.file.Path base, String name) {
-        // 先尝试直接路径解析
-        java.nio.file.Path direct = base.resolve(name);
-        if (java.nio.file.Files.exists(direct)) return direct.toAbsolutePath().normalize();
-
-        // 在 base 下搜索匹配的文件名（限制深度避免性能问题）
-        try {
-            try (var stream = java.nio.file.Files.list(base)) {
-                return stream
-                    .filter(p -> {
-                        String fn = p.getFileName().toString();
-                        return fn.equalsIgnoreCase(name) || fn.toLowerCase().startsWith(name.toLowerCase());
-                    })
-                    .findFirst()
-                    .orElse(null);
-            }
-        } catch (Exception ignored) {
-            return null;
-        }
+        sb.append("\n").append(text);
+        return sb.toString();
     }
 
     private void selectFiles() {

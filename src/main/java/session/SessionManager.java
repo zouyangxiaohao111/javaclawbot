@@ -201,6 +201,32 @@ public final class SessionManager {
             Map<String, Object> safeMetadata = castMap(deepSanitize(session.getMetadata()));
             List<Map<String, Object>> safeMessages = castListOfMap(deepSanitize(session.getMessages()));
 
+            // 保护已有标题：如果当前 session.meta 无 title 但磁盘文件已有 title，保留磁盘版本
+            // 防止 AgentLoop 异步 save 覆盖掉 triggerTitleGeneration 刚写入的标题
+            if (!safeMetadata.containsKey("title") || safeMetadata.get("title") instanceof String s && s.isBlank()) {
+                try {
+                    if (Files.exists(target)) {
+                        try (BufferedReader diskReader = Files.newBufferedReader(target, StandardCharsets.UTF_8)) {
+                            String firstLine = diskReader.readLine();
+                            if (firstLine != null) {
+                                Map<String, Object> diskMeta = objectMapper.readValue(
+                                    firstLine, new TypeReference<Map<String, Object>>() {});
+                                Object diskMd = diskMeta.get("metadata");
+                                if (diskMd instanceof Map) {
+                                    Object diskTitle = ((Map<?, ?>) diskMd).get("title");
+                                    if (diskTitle instanceof String diskTitleStr && !diskTitleStr.isBlank()) {
+                                        safeMetadata = new LinkedHashMap<>(safeMetadata);
+                                        safeMetadata.put("title", diskTitleStr);
+                                        session.getMetadata().put("title", diskTitleStr);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch (Exception ignored) {
+                }
+            }
+
             try (BufferedWriter w = Files.newBufferedWriter(
                     tmp,
                     StandardCharsets.UTF_8,
