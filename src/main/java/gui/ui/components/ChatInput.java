@@ -461,10 +461,13 @@ public class ChatInput extends VBox {
         Stage stage = new Stage();
         stage.initStyle(StageStyle.TRANSPARENT);
 
-        // 计算屏幕尺寸
-        javafx.stage.Screen screen = javafx.stage.Screen.getPrimary();
-        double maxW = Math.min(screen.getVisualBounds().getWidth() * 0.8, 1200);
-        double maxH = Math.min(screen.getVisualBounds().getHeight() * 0.8, 900);
+        // 以主窗体为 owner，限制弹窗不超出主窗体
+        javafx.stage.Window owner = getScene() != null ? getScene().getWindow() : null;
+        double ownerW = owner != null ? owner.getWidth() : 1200;
+        double ownerH = owner != null ? owner.getHeight() : 800;
+
+        double maxW = Math.min(ownerW * 0.85, 1000);
+        double maxH = Math.min(ownerH * 0.85, 750);
 
         // 加载原图（background loading 避免卡 UI）
         javafx.scene.image.Image img = new javafx.scene.image.Image(
@@ -511,11 +514,13 @@ public class ChatInput extends VBox {
         hint.setStyle("-fx-text-fill: rgba(255,255,255,0.5); -fx-font-size: 12px; -fx-padding: 4px 12px;"
             + " -fx-background-color: rgba(0,0,0,0.3); -fx-background-radius: 12px;");
         javafx.scene.layout.StackPane.setAlignment(hint, javafx.geometry.Pos.BOTTOM_CENTER);
-        javafx.scene.layout.StackPane.setMargin(hint, new Insets(0, 0, 16, 0));
+        javafx.scene.layout.StackPane.setMargin(hint, new Insets(0, 0, 12, 0));
+
+        // 先设置 closeBtn 约束，再创建 root
+        javafx.scene.layout.StackPane.setAlignment(closeBtn, javafx.geometry.Pos.TOP_RIGHT);
+        javafx.scene.layout.StackPane.setMargin(closeBtn, new Insets(8, 8, 0, 0));
 
         javafx.scene.layout.StackPane root = new javafx.scene.layout.StackPane(imgView, closeBtn, hint);
-        javafx.scene.layout.StackPane.setAlignment(closeBtn, javafx.geometry.Pos.TOP_RIGHT);
-        javafx.scene.layout.StackPane.setMargin(closeBtn, new Insets(12, 12, 0, 0));
         root.setStyle("-fx-background-color: rgba(0,0,0,0.75); -fx-background-radius: 12px;");
 
         // 点击空白区域关闭
@@ -525,16 +530,21 @@ public class ChatInput extends VBox {
             }
         });
 
-        Scene scene = new Scene(root, maxW + 80, maxH + 80);
+        // Scene 尺寸匹配图片实际尺寸（含 padding 40px），不超出主窗体
+        double sceneW = Math.min(maxW + 40, ownerW * 0.95);
+        double sceneH = Math.min(maxH + 40, ownerH * 0.95);
+        Scene scene = new Scene(root, sceneW, sceneH);
         scene.setFill(Color.TRANSPARENT);
         scene.setOnKeyPressed(e -> {
             if (e.getCode() == KeyCode.ESCAPE) stage.close();
         });
 
         stage.setScene(scene);
-        // 相对于 owner window 居中
-        if (getScene() != null && getScene().getWindow() != null) {
-            stage.initOwner(getScene().getWindow());
+        if (owner != null) {
+            stage.initOwner(owner);
+            // 弹窗居中于主窗口
+            stage.setX(owner.getX() + (owner.getWidth() - sceneW) / 2);
+            stage.setY(owner.getY() + (owner.getHeight() - sceneH) / 2);
         }
         stage.show();
     }
