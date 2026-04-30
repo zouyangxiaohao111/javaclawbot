@@ -9,6 +9,9 @@ import config.Config;
 import config.ConfigIO;
 import config.ConfigReloader;
 import config.channel.ChannelsConfig;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 import config.mcp.MCPServerConfig;
 import corn.CronService;
 import javafx.application.Platform;
@@ -21,6 +24,7 @@ import session.SessionManager;
 import skills.SkillsLoader;
 import utils.Helpers;
 
+import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
@@ -452,6 +456,61 @@ public class BackendBridge {
             log.fine("配置已从磁盘重新加载");
         } catch (Exception e) {
             log.warning("重新加载配置失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 通过表单模式添加 MCP 服务器
+     */
+    public boolean addMcpServer(String name, String command) {
+        if (config.getTools().getMcpServers().containsKey(name)) {
+            throw new IllegalArgumentException("服务器名称已存在: " + name);
+        }
+        MCPServerConfig cfg = new MCPServerConfig();
+        cfg.setCommand(command);
+        config.getTools().getMcpServers().put(name, cfg);
+        try {
+            ConfigIO.saveConfig(config, null);
+            return true;
+        } catch (IOException e) {
+            config.getTools().getMcpServers().remove(name);
+            throw new RuntimeException("保存配置失败: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 通过 RAW JSON 模式添加 MCP 服务器
+     */
+    public boolean addMcpServerRaw(String name, String jsonStr) {
+        if (config.getTools().getMcpServers().containsKey(name)) {
+            throw new IllegalArgumentException("服务器名称已存在: " + name);
+        }
+        // 使用与 ConfigIO 一致的 ObjectMapper 配置（SNAKE_CASE）
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.setPropertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE);
+        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+
+        MCPServerConfig cfg;
+        try {
+            cfg = mapper.readValue(jsonStr, MCPServerConfig.class);
+        } catch (Exception e) {
+            throw new IllegalArgumentException("JSON 解析失败: " + e.getMessage(), e);
+        }
+
+        // 验证：command 或 url 至少一个非空
+        boolean hasCommand = cfg.getCommand() != null && !cfg.getCommand().isBlank();
+        boolean hasUrl = cfg.getUrl() != null && !cfg.getUrl().isBlank();
+        if (!hasCommand && !hasUrl) {
+            throw new IllegalArgumentException("command 或 url 至少需要配置一个");
+        }
+
+        config.getTools().getMcpServers().put(name, cfg);
+        try {
+            ConfigIO.saveConfig(config, null);
+            return true;
+        } catch (IOException e) {
+            config.getTools().getMcpServers().remove(name);
+            throw new RuntimeException("保存配置失败: " + e.getMessage(), e);
         }
     }
 
