@@ -35,8 +35,10 @@ public class MessageBubble extends HBox {
         PARSER = Parser.builder(options).build();
         RENDERER = HtmlRenderer.builder(options).build();
 
-        HTML_TEMPLATE = "<!DOCTYPE html><html><head><meta charset='UTF-8'><style>"
+        HTML_TEMPLATE = "<!DOCTYPE html><html style='height:100%;background:transparent;'>"
+            + "<head><meta charset='UTF-8'><style>"
             + "html,body{overflow:hidden;}"
+            + "html{height:100%;}body{min-height:100%;}"
             + "body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;"
             + "font-size:14px;line-height:1.6;color:#1c1c1e;background:transparent;margin:0;padding:12px 16px;}"
             + "pre{background:rgba(0,0,0,0.04);border:1px solid rgba(0,0,0,0.08);border-radius:8px;"
@@ -250,16 +252,24 @@ public class MessageBubble extends HBox {
     }
 
     private static void adjustWebViewHeight(WebView wv) {
-        try {
-            Object h = wv.getEngine().executeScript(
-                "(function(){return Math.max(document.body.scrollHeight,"
-                + "document.documentElement.scrollHeight);})()");
-            if (h instanceof Number) {
-                double height = ((Number) h).doubleValue();
-                if (height > 0) {
-                    wv.setPrefHeight(height);
+        // 延迟 120ms 等待 WebView 完成 CSS 布局，避免在 reflow 中途测量到错误高度
+        javafx.animation.PauseTransition delay = new javafx.animation.PauseTransition(
+            javafx.util.Duration.millis(120));
+        delay.setOnFinished(ev -> {
+            try {
+                Object h = wv.getEngine().executeScript(
+                    "(function(){var d=document;"
+                    + "var sh=Math.max(d.body.scrollHeight,d.documentElement.scrollHeight);"
+                    + "return Math.max(sh,d.documentElement.offsetHeight);"
+                    + "})()");
+                if (h instanceof Number) {
+                    double height = ((Number) h).doubleValue();
+                    if (height > 0) {
+                        wv.setPrefHeight(height);
+                    }
                 }
-            }
-        } catch (Exception ignored) {}
+            } catch (Exception ignored) {}
+        });
+        delay.play();
     }
 }

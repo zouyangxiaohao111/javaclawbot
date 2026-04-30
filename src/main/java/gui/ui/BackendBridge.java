@@ -424,12 +424,15 @@ public class BackendBridge {
                     sessionManager.save(session);
                     log.info("标题生成成功: sessionId=" + sessionId + ", title=" + title);
                 } else if (!force) {
-                    // 首次生成失败，使用默认标题
-                    String defaultTitle = "新对话-" + java.time.LocalDate.now()
-                        .format(java.time.format.DateTimeFormatter.ofPattern("yy-MM-dd"));
-                    session.getMetadata().put("title", defaultTitle);
+                    // LLM 生成失败，用首条用户消息截取作为标题
+                    String fallback = extractFirstUserMessage(session);
+                    if (fallback == null || fallback.isBlank()) {
+                        fallback = "新对话-" + java.time.LocalDate.now()
+                            .format(java.time.format.DateTimeFormatter.ofPattern("yy-MM-dd"));
+                    }
+                    session.getMetadata().put("title", fallback);
                     sessionManager.save(session);
-                    log.info("标题生成失败，使用默认标题: sessionId=" + sessionId + ", title=" + defaultTitle);
+                    log.info("标题自动生成: sessionId=" + sessionId + ", title=" + fallback);
                 } else {
                     log.info("标题更新跳过（已有标题或生成失败）: sessionId=" + sessionId);
                 }
@@ -441,6 +444,33 @@ public class BackendBridge {
                 Platform.runLater(onTitleChanged);
             }
         }, executor);
+    }
+
+    /** 从会话历史中提取首条用户消息（截取 20 字）作为标题回退 */
+    private static String extractFirstUserMessage(Session session) {
+        if (session == null) return null;
+        for (Map<String, Object> msg : session.getMessages()) {
+            if ("user".equals(msg.get("role"))) {
+                Object content = msg.get("content");
+                String text = null;
+                if (content instanceof String s) {
+                    text = s;
+                } else if (content instanceof List<?> list) {
+                    for (Object item : list) {
+                        if (item instanceof Map<?, ?> m && "text".equals(m.get("type"))) {
+                            text = (String) m.get("text");
+                            break;
+                        }
+                    }
+                }
+                if (text != null && !text.isBlank()) {
+                    text = text.replaceAll("\\s+", " ").trim();
+                    if (text.length() > 20) text = text.substring(0, 20);
+                    return text;
+                }
+            }
+        }
+        return null;
     }
 
     public void setOnTitleChanged(Runnable callback) {

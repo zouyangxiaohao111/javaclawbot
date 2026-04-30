@@ -3,6 +3,7 @@ package gui.ui.components;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.control.Label;
+import javafx.scene.control.OverrunStyle;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.control.TextArea;
 import javafx.scene.input.KeyCode;
@@ -12,12 +13,17 @@ import javafx.scene.layout.VBox;
 import javafx.stage.Popup;
 import javafx.stage.Window;
 
+import agent.tool.file.RipgrepConfig;
+
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
 /**
@@ -25,9 +31,9 @@ import java.util.stream.Stream;
  */
 public class CompletionPopup {
 
-    private static final int MAX_VISIBLE = 8;
+    private static final int MAX_VISIBLE = 10;
     private static final double ITEM_HEIGHT = 28;
-    private static final double POPUP_WIDTH = 340;
+    private static final double POPUP_WIDTH = 440;
 
     private final TextArea inputArea;
     private final VBox itemContainer;
@@ -76,15 +82,48 @@ public class CompletionPopup {
         scrollPane.setMinWidth(POPUP_WIDTH);
         scrollPane.setPrefWidth(POPUP_WIDTH);
         scrollPane.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
+        scrollPane.setVbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
 
         popup = new Popup();
-        popup.setAutoHide(true);
+        // 不用 autoHide——会拦截双击事件
+        popup.setAutoHide(false);
         popup.getContent().add(scrollPane);
 
+        // Scene 级 key handler：只在 popup 显示时注入，避免干扰 inputArea 原生换行
+        javafx.event.EventHandler<javafx.scene.input.KeyEvent> popupKeyHandler = this::handleKeyPress;
         inputArea.textProperty().addListener((obs, old, text) -> updateFilter(text));
-        inputArea.addEventFilter(javafx.scene.input.KeyEvent.KEY_PRESSED, this::handleKeyPress);
-        inputArea.focusedProperty().addListener((obs, old, focused) -> {
-            if (!focused) hide();
+        // 点 popup 之外区域关闭（含切窗口场景：Stage 失焦时场景内 MOUSE_PRESSED 不会触发）
+        inputArea.sceneProperty().addListener((obs, old, scene) -> {
+            if (scene != null) {
+                scene.addEventFilter(javafx.scene.input.MouseEvent.MOUSE_PRESSED, e -> {
+                    if (popup.isShowing()) {
+                        javafx.scene.Node target = e.getTarget() instanceof javafx.scene.Node n ? n : null;
+                        if (target != null && target != inputArea && !isInsidePopup(target)) {
+                            hide();
+                        }
+                    }
+                });
+                // Stage 失焦时也关闭 popup（Alt+Tab 切窗口）
+                scene.windowProperty().addListener((prop, oldWin, newWin) -> {
+                    if (newWin != null) {
+                        newWin.focusedProperty().addListener((fobs, fOld, fNew) -> {
+                            if (!fNew) hide();
+                        });
+                    }
+                });
+            }
+        });
+
+        // 用 show/hide 控制 scene 级 key filter 的注册/移除，避免常态干扰 TextArea
+        popup.showingProperty().addListener((obs, wasShowing, isShowing) -> {
+            javafx.scene.Scene scene = inputArea.getScene();
+            if (scene != null) {
+                if (isShowing) {
+                    scene.addEventFilter(javafx.scene.input.KeyEvent.KEY_PRESSED, popupKeyHandler);
+                } else {
+                    scene.removeEventFilter(javafx.scene.input.KeyEvent.KEY_PRESSED, popupKeyHandler);
+                }
+            }
         });
     }
 
@@ -114,7 +153,8 @@ public class CompletionPopup {
         } else if (e.getCode() == KeyCode.DOWN) {
             e.consume();
             selectDown();
-        } else if (e.getCode() == KeyCode.TAB || e.getCode() == KeyCode.ENTER) {
+        } else if ((e.getCode() == KeyCode.TAB || e.getCode() == KeyCode.ENTER)
+                && !e.isShiftDown()) {
             e.consume();
             completeSelected();
         } else if (e.getCode() == KeyCode.ESCAPE) {
@@ -155,58 +195,130 @@ public class CompletionPopup {
     }
 
     private void filterFiles(String partial) {
-        // Prefer project directory over workspace (e.g. @file completion in bound project)
         Path basePath = (projectPath != null && Files.exists(projectPath)) ? projectPath : workspacePath;
         if (basePath == null || !Files.exists(basePath)) { hide(); return; }
 
         filtered.clear();
-        String lower = partial.toLowerCase();
-        List<Path> children = new ArrayList<>();
 
-        // Determine target directory and filter prefix
-        final Path searchDir;
-        final String nameFilter;
-        int lastSlash = partial.lastIndexOf('/');
-        if (lastSlash >= 0) {
-            String dirPart = partial.substring(0, lastSlash);
-            nameFilter = partial.substring(lastSlash + 1).toLowerCase();
-            Path resolved = basePath.resolve(dirPart);
-            if (Files.isDirectory(resolved)) {
-                searchDir = resolved;
-            } else {
-                hide(); return;
-            }
-        } else {
-            searchDir = basePath;
-            nameFilter = lower;
-        }
+        List<String> matches = searchFiles(basePath, partial);
 
-        try (Stream<Path> stream = Files.list(searchDir)) {
-            String filter = nameFilter;
-            stream.filter(p -> {
-                String name = p.getFileName().toString();
-                if (name.startsWith(".")) return false;
-                if (filter.isEmpty()) return true;
-                return name.toLowerCase().contains(filter);
-            })
-            .sorted(Comparator.comparing(p -> !Files.isDirectory(p)))
-            .limit(MAX_VISIBLE)
-            .forEach(children::add);
-        } catch (IOException ignored) { hide(); return; }
+        if (matches.isEmpty()) { hide(); return; }
 
-        for (Path p : children) {
-            String name = p.getFileName().toString();
+        for (String relPath : matches) {
+            Path p = basePath.resolve(relPath);
             boolean isDir = Files.isDirectory(p);
-            String relPath = basePath.relativize(p).toString();
+            String name = p.getFileName().toString();
             filtered.add(new CompletionItem(
                 name + (isDir ? "/" : ""),
                 relPath,
                 isDir ? CompletionKind.DIR : CompletionKind.FILE));
         }
 
-        if (filtered.isEmpty()) { hide(); return; }
         selectedIndex = 0;
         showPopup();
+    }
+
+    /** 用 ripgrep --files 快速递归搜索文件名，返回相对于 basePath 的路径列表 */
+    private List<String> searchFiles(Path basePath, String partial) {
+        // 解析：@docs/plan → 在 docs/ 下搜 *plan*；@Config → 全局搜 **/*Config*
+        final Path searchDir;
+        final String nameFilter;
+        int lastSlash = partial.lastIndexOf('/');
+        if (lastSlash >= 0) {
+            Path resolved = basePath.resolve(partial.substring(0, lastSlash));
+            if (!Files.isDirectory(resolved)) return List.of();
+            searchDir = resolved;
+            nameFilter = partial.substring(lastSlash + 1);
+        } else {
+            searchDir = basePath;
+            nameFilter = partial;
+        }
+
+        String glob = nameFilter.isEmpty() ? "*" : "*" + nameFilter + "*";
+
+        try {
+            RipgrepConfig config = RipgrepConfig.getRipgrepConfig();
+            ProcessBuilder pb = new ProcessBuilder(
+                config.getExecutablePath().toString(),
+                "--files", "--hidden",
+                "--iglob", "!.git",
+                "--iglob", glob,
+                searchDir.toString()
+            );
+            pb.redirectErrorStream(false);
+            Process proc = pb.start();
+
+            List<String> lines = new ArrayList<>();
+            try (BufferedReader r = new BufferedReader(new InputStreamReader(proc.getInputStream()))) {
+                String line;
+                int n = 0;
+                while ((line = r.readLine()) != null && n < MAX_VISIBLE) {
+                    if (line.endsWith("\r")) line = line.substring(0, line.length() - 1);
+                    if (!line.isBlank()) { lines.add(line); n++; }
+                }
+            }
+            boolean done = proc.waitFor(3, TimeUnit.SECONDS);
+            if (!done) proc.destroyForcibly();
+            if (lines.isEmpty()) return List.of();
+
+            List<String> out = new ArrayList<>();
+            for (String abs : lines) {
+                try {
+                    Path p = Path.of(abs);
+                    out.add(basePath.relativize(p).toString().replace('\\', '/'));
+                } catch (Exception e) {
+                    out.add(abs);
+                }
+            }
+            out.sort(Comparator.comparing(s -> {
+                Path full = basePath.resolve(s);
+                return !Files.isDirectory(full);
+            }));
+            return out;
+        } catch (Exception e) {
+            // rg 进程启动失败，回退到 Files.walk
+            return walkSearchFiles(basePath, partial);
+        }
+    }
+
+    /** 回退方案：纯 Java NIO 递归搜索（rg 不可用时） */
+    private List<String> walkSearchFiles(Path basePath, String partial) {
+        final java.util.Set<String> skipDirs = java.util.Set.of(
+            ".git", ".svn", ".hg", "node_modules", "target", "__pycache__",
+            ".idea", ".vscode", "build", "dist", ".cache");
+
+        final Path searchDir;
+        final String nameFilter;
+        int lastSlash = partial.lastIndexOf('/');
+        if (lastSlash >= 0) {
+            Path resolved = basePath.resolve(partial.substring(0, lastSlash));
+            if (!Files.isDirectory(resolved)) return List.of();
+            searchDir = resolved;
+            nameFilter = partial.substring(lastSlash + 1).toLowerCase();
+        } else {
+            searchDir = basePath;
+            nameFilter = partial.toLowerCase();
+        }
+
+        List<Path> results = new ArrayList<>();
+        try (Stream<Path> stream = Files.walk(searchDir, 5)) {
+            stream.filter(p -> {
+                String name = p.getFileName().toString().toLowerCase();
+                if (name.startsWith(".")) return false;
+                for (int i = 0; i < p.getNameCount(); i++) {
+                    if (skipDirs.contains(p.getName(i).toString())) return false;
+                }
+                if (nameFilter.isEmpty()) return true;
+                return name.contains(nameFilter);
+            })
+            .sorted(Comparator.comparing(p -> !Files.isDirectory(p)))
+            .limit(MAX_VISIBLE)
+            .forEach(results::add);
+        } catch (IOException ignored) {}
+
+        return results.stream()
+            .map(p -> basePath.relativize(p).toString().replace('\\', '/'))
+            .toList();
     }
 
     private void showPopup() {
@@ -217,6 +329,15 @@ public class CompletionPopup {
         double x = bounds.getMinX();
         double y = bounds.getMinY() - scrollPane.getMaxHeight() - 4;
         popup.show(window, x, Math.max(y, 0));
+    }
+
+    private boolean isInsidePopup(javafx.scene.Node target) {
+        javafx.scene.Node node = target;
+        while (node != null) {
+            if (node == scrollPane) return true;
+            node = node.getParent();
+        }
+        return false;
     }
 
     private void hide() {
@@ -233,12 +354,11 @@ public class CompletionPopup {
     }
 
     private HBox createItemRow(CompletionItem item, boolean selected) {
-        HBox row = new HBox(10);
+        HBox row = new HBox(8);
         row.setAlignment(Pos.CENTER_LEFT);
         row.setPadding(new Insets(4, 10, 4, 10));
         row.setPrefHeight(ITEM_HEIGHT);
         row.setMinHeight(ITEM_HEIGHT);
-        row.setMaxWidth(POPUP_WIDTH - 20);
         row.setStyle(selected
             ? "-fx-background-color: rgba(59,130,246,0.1); -fx-background-radius: 6px;"
             : "-fx-background-color: transparent; -fx-background-radius: 6px;");
@@ -246,14 +366,17 @@ public class CompletionPopup {
         Label icon = new Label(item.kind() == CompletionKind.COMMAND ? "/" :
             item.kind() == CompletionKind.DIR ? "\uD83D\uDCC1" : "\uD83D\uDCC4");
         icon.setStyle("-fx-font-size: 13px;");
+        icon.setMinWidth(18);
 
         Label nameLabel = new Label(item.text());
         nameLabel.setStyle("-fx-font-size: 13px; -fx-font-weight: 500;");
+        nameLabel.setMinWidth(100);
+        nameLabel.setMaxWidth(160);
 
         Label descLabel = new Label(item.description());
         descLabel.setStyle("-fx-font-size: 11px; -fx-text-fill: rgba(0,0,0,0.4);");
+        descLabel.setTextOverrun(OverrunStyle.LEADING_ELLIPSIS);
         HBox.setHgrow(descLabel, Priority.ALWAYS);
-        descLabel.setAlignment(Pos.CENTER_RIGHT);
 
         row.getChildren().addAll(icon, nameLabel, descLabel);
 
@@ -265,14 +388,14 @@ public class CompletionPopup {
     }
 
     private void selectUp() {
-        if (filtered.isEmpty()) return;
-        selectedIndex = (selectedIndex - 1 + filtered.size()) % filtered.size();
+        if (filtered.isEmpty() || selectedIndex <= 0) return;
+        selectedIndex--;
         rebuildItems();
     }
 
     private void selectDown() {
-        if (filtered.isEmpty()) return;
-        selectedIndex = (selectedIndex + 1) % filtered.size();
+        if (filtered.isEmpty() || selectedIndex >= filtered.size() - 1) return;
+        selectedIndex++;
         rebuildItems();
     }
 
@@ -289,18 +412,18 @@ public class CompletionPopup {
             inputArea.setText(prefix + item.text() + " ");
             inputArea.positionCaret(inputArea.getText().length());
         } else {
-            // Replace from @... to the relative path (for unambiguous resolution at send time)
+            // 填入绝对路径，免去 send 时的 Path.resolve 解析
             int atIdx = text.lastIndexOf('@');
             if (atIdx >= 0) {
                 String prefix = text.substring(0, atIdx + 1);
                 String afterAt = text.substring(atIdx + 1);
-                int lastSlash = afterAt.lastIndexOf('/');
+                int lastSlash = Math.max(afterAt.lastIndexOf('/'), afterAt.lastIndexOf('\\'));
                 if (lastSlash >= 0) {
                     prefix = text.substring(0, atIdx + 1 + lastSlash + 1);
                 }
-                // 使用相对路径保证文件引用唯一可解析
-                String completionText = item.description() != null ? item.description() : item.text();
-                inputArea.setText(prefix + completionText);
+                Path base = getBasePath();
+                String absPath = base.resolve(item.description()).toAbsolutePath().normalize().toString();
+                inputArea.setText(prefix + absPath);
                 inputArea.positionCaret(inputArea.getText().length());
             }
         }
