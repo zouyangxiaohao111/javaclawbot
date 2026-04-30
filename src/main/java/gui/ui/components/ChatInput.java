@@ -3,13 +3,19 @@ package gui.ui.components;
 import bus.MessageBus;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
+import javafx.scene.Scene;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.TextArea;
+import javafx.scene.input.KeyCode;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
+import javafx.scene.paint.Color;
+import javafx.scene.shape.SVGPath;
+import javafx.stage.Stage;
+import javafx.stage.StageStyle;
 
 import gui.ui.BackendBridge;
 import org.slf4j.Logger;
@@ -17,7 +23,6 @@ import org.slf4j.LoggerFactory;
 import session.Session;
 
 import javafx.scene.input.Clipboard;
-import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
 import javafx.scene.image.Image;
 import javafx.scene.image.PixelReader;
@@ -389,14 +394,37 @@ public class ChatInput extends VBox {
         imgView.setFitWidth(80);
         imgView.setFitHeight(60);
         imgView.setPreserveRatio(true);
-        imgView.setStyle("-fx-background-radius: 6px; -fx-cursor: hand;");
 
-        javafx.scene.layout.StackPane container = new javafx.scene.layout.StackPane(imgView);
+        // 点击缩略图查看大图
+        imgView.setOnMouseClicked(e -> {
+            e.consume();
+            showImagePreview(path);
+        });
+
+        // 右上角关闭按钮（SVG 绘制 ×），固定位置独立于 imgView
+        SVGPath closeSvg = new SVGPath();
+        closeSvg.setContent("M5 5 L13 13 M13 5 L5 13");
+        closeSvg.setStyle("-fx-stroke: white; -fx-stroke-width: 1.5px; -fx-stroke-line-cap: round;");
+
+        javafx.scene.layout.StackPane closeBtn = new javafx.scene.layout.StackPane(closeSvg);
+        closeBtn.setPrefSize(18, 18);
+        closeBtn.setMaxSize(18, 18);
+        closeBtn.setStyle("-fx-background-color: rgba(0,0,0,0.45); -fx-background-radius: 9px; -fx-cursor: hand;");
+        closeBtn.setPadding(new Insets(0, 0, 0, 0));
+
+        // 先创建空的 container，再分别添加子节点并设置约束
+        javafx.scene.layout.StackPane container = new javafx.scene.layout.StackPane();
         container.setStyle("-fx-background-radius: 6px;"
             + " -fx-border-color: rgba(0,0,0,0.1); -fx-border-radius: 6px; -fx-border-width: 1px;");
+        container.getChildren().add(imgView);
+        container.getChildren().add(closeBtn);
+        // closeBtn 右上角偏移 (-2, -2) 让部分区域超出 container 边界（需要 container 裁剪子节点）
+        javafx.scene.layout.StackPane.setAlignment(closeBtn, javafx.geometry.Pos.TOP_RIGHT);
+        javafx.scene.layout.StackPane.setMargin(closeBtn, new Insets(-2, -2, 0, 0));
 
-        // 点击删除
-        container.setOnMouseClicked(e -> {
+        // 关闭按钮点击：删除缩略图
+        closeBtn.setOnMouseClicked(e -> {
+            e.consume();
             imagePaths.remove(path);
             imagePreviewRow.getChildren().remove(container);
             if (imagePaths.isEmpty()) {
@@ -425,6 +453,76 @@ public class ChatInput extends VBox {
         fileTagRow.getChildren().add(tag);
         fileTagRow.setVisible(true);
         fileTagRow.setManaged(true);
+    }
+
+    /** 大图查看弹窗：无边框，半透明背景 */
+    private void showImagePreview(java.nio.file.Path path) {
+        Stage stage = new Stage();
+        stage.initStyle(StageStyle.TRANSPARENT);
+
+        // 以主窗体为 owner，限制弹窗不超出主窗体
+        javafx.stage.Window owner = getScene() != null ? getScene().getWindow() : null;
+        double ownerW = owner != null ? owner.getWidth() : 1200;
+        double ownerH = owner != null ? owner.getHeight() : 800;
+
+        double maxW = Math.min(ownerW * 0.85, 1000);
+        double maxH = Math.min(ownerH * 0.85, 750);
+
+        // 加载原图
+        javafx.scene.image.Image img = new javafx.scene.image.Image(
+            path.toUri().toString(), maxW, maxH, true, true, true);
+        javafx.scene.image.ImageView imgView = new javafx.scene.image.ImageView(img);
+        imgView.setPreserveRatio(true);
+        imgView.setFitWidth(maxW);
+        imgView.setFitHeight(maxH);
+
+        // 右上角关闭按钮（SVG ×）
+        SVGPath closeSvg = new SVGPath();
+        closeSvg.setContent("M6 6 L18 18 M18 6 L6 18");
+        closeSvg.setStyle("-fx-stroke: white; -fx-stroke-width: 2px; -fx-stroke-line-cap: round;");
+        javafx.scene.layout.StackPane closeBtn = new javafx.scene.layout.StackPane(closeSvg);
+        closeBtn.setPrefSize(28, 28);
+        closeBtn.setStyle("-fx-background-color: rgba(255,255,255,0.15); -fx-background-radius: 14px; -fx-cursor: hand;");
+        closeBtn.setOnMouseClicked(e -> stage.close());
+
+        // 底部提示
+        Label hint = new Label("点击空白区域或 Esc 关闭");
+        hint.setStyle("-fx-text-fill: rgba(255,255,255,0.5); -fx-font-size: 12px; -fx-padding: 4px 12px;"
+            + " -fx-background-color: rgba(0,0,0,0.3); -fx-background-radius: 12px;");
+        javafx.scene.layout.StackPane.setAlignment(hint, javafx.geometry.Pos.BOTTOM_CENTER);
+        javafx.scene.layout.StackPane.setMargin(hint, new Insets(0, 0, 12, 0));
+
+        // 先设置 closeBtn 约束，再创建 root
+        javafx.scene.layout.StackPane.setAlignment(closeBtn, javafx.geometry.Pos.TOP_RIGHT);
+        javafx.scene.layout.StackPane.setMargin(closeBtn, new Insets(8, 8, 0, 0));
+
+        javafx.scene.layout.StackPane root = new javafx.scene.layout.StackPane(imgView, closeBtn, hint);
+        root.setStyle("-fx-background-color: rgba(0,0,0,0.75); -fx-background-radius: 12px;");
+
+        // 点击空白区域关闭
+        root.setOnMouseClicked(e -> {
+            if (e.getTarget() == root) {
+                stage.close();
+            }
+        });
+
+        // Scene 尺寸匹配图片实际尺寸（含 padding 40px），不超出主窗体
+        double sceneW = Math.min(maxW + 40, ownerW * 0.95);
+        double sceneH = Math.min(maxH + 40, ownerH * 0.95);
+        Scene scene = new Scene(root, sceneW, sceneH);
+        scene.setFill(Color.TRANSPARENT);
+        scene.setOnKeyPressed(e -> {
+            if (e.getCode() == KeyCode.ESCAPE) stage.close();
+        });
+
+        stage.setScene(scene);
+        if (owner != null) {
+            stage.initOwner(owner);
+            // 弹窗居中于主窗口
+            stage.setX(owner.getX() + (owner.getWidth() - sceneW) / 2);
+            stage.setY(owner.getY() + (owner.getHeight() - sceneH) / 2);
+        }
+        stage.show();
     }
 
     /** 检测粘贴快捷键：macOS 用 Meta+V，Windows/Linux 用 Ctrl+V */
