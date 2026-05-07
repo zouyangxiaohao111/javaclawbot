@@ -299,6 +299,7 @@ public class MainStage {
         pages.put("skills", new SkillsPage());
         pages.put("mcp", new McpPage(stage));
         pages.put("crontasks", new CronPage());
+        pages.put("devconsole", new DevConsolePage());
         pages.put("settings", new SettingsPage());
 
         // 添加到 StackPane
