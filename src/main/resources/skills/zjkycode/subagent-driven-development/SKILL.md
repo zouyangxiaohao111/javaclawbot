@@ -4,8 +4,8 @@ description: 在当前会话中执行具有独立任务的实施计划时使用
 ---
 
 # 子代理驱动开发
-执行前询问用户,是否支持cli-agent启动claude code 或者 opencode执行该计划。如果用户说使用cc或者claude code oc ,直接使用cli-agent工具启动子代理,不需要使用spawn_session启动子代理
-通过为每个任务派发新的子代理来执行计划，每个任务后进行两阶段审查：先规范合规性审查，再代码质量审查。
+执行前询问用户,是否支持cli-agent启动claude code 或者 opencode执行该计划。如果用户说使用cc或者claude code oc ,直接使用cli-agent工具启动子代理,不需要使用Agent启动子代理
+通过为每个任务派发新的子代理来执行计划，每个任务后进行两阶段审查：先规范合规性审查，再代码质量审查（质量检查使用zjkycode/requesting-code-review）。
 
 **为什么使用子代理：** 你将任务委托给具有隔离上下文的专门代理。通过精确构建他们的指令和上下文，你确保他们保持专注并成功完成任务。他们绝不应该继承你会话的上下文或历史——你构建他们确切需要的内容。这也为你自己的协调工作保留了上下文。
 
@@ -265,13 +265,14 @@ digraph process {
 ## 集成
 
 **必需的工作流技能：**
-- **zjkycode:using-git-worktrees** - 必需：开始前设置隔离工作区
-- **zjkycode:writing-plans** - 创建此技能执行的计划
-- **zjkycode:requesting-code-review** - 审查者子代理的代码审查模板
-- **zjkycode:finishing-a-development-branch** - 所有任务完成后完成开发
+- **zjkycode/using-git-worktrees** - 必需：开始前设置隔离工作区
+- **zjkycode/writing-plans** - 创建此技能执行的计划
+- **zjkycode/requesting-code-review** - 审查者子代理的代码审查模板
+- **zjkycode/finishing-a-development-branch** - 所有任务完成后完成开发
 
 **子代理应使用：**
-- **zjkycode:test-driven-development** - 子代理为每个任务遵循 TDD
+- **zjkycode/test-driven-development** - 子代理为每个任务遵循 TDD
+- **zjkycode/requesting-code-review** - 审查者子代理的代码审查模板
 
 **替代工作流：**
-- **zjkycode:executing-plans** - 用于并行会话而非同会话执行
+- **zjkycode/executing-plans** - 用于并行会话而非同会话执行

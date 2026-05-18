@@ -277,16 +277,24 @@ public class BackendBridge {
                     if (out == null) continue;
 
                     // 过滤非本会话消息
-                    if (!isTargetCliOutbound(out)) continue;
+                    if (!isTargetCliOutbound(out)) {
+                        log.debug("[Outbound] 消息被过滤: channel={}, chatId={}", out.getChannel(), out.getChatId());
+                        continue;
+                    }
 
                     // 解析目标标签上下文
                     String outChatId = out.getChatId();
                     String tabId = getTabIdFromChatId(outChatId);
                     TabSessionContext ctx = tabId != null ? tabContexts.get(tabId) : null;
                     if (ctx == null) {
-                        log.debug("收到未知标签的 outbound 消息，忽略: chatId={}", outChatId);
+                        log.warn("[Outbound] 收到未知标签的 outbound 消息，忽略: chatId={}, tabId={}, 当前标签={}",
+                            outChatId, tabId, tabContexts.keySet());
                         continue;
                     }
+
+                    log.info("[Outbound] 收到消息: tabId={}, channel={}, chatId={}, content={}",
+                        tabId, out.getChannel(), outChatId,
+                        out.getContent() != null ? out.getContent().substring(0, Math.min(50, out.getContent().length())) : "null");
 
                     Map<String, Object> meta = out.getMetadata() != null ? out.getMetadata() : Map.of();
                     boolean isProgress = Boolean.TRUE.equals(meta.get("_progress"));
@@ -407,8 +415,9 @@ public class BackendBridge {
 
         CompletableFuture.runAsync(() -> {
             try {
+                // 使用 tabId 作为 chatId，让 getSessionKey() 自动计算 "cli:{tabId}"
                 InboundMessage in = new InboundMessage(
-                        CLI_CHANNEL, "user", ctx.sessionKey, text, mediaPaths, null);
+                        CLI_CHANNEL, "user", ctx.tabId, text, mediaPaths, null);
                 bus.publishInbound(in).toCompletableFuture().join();
             } catch (Exception e) {
                 ctx.waitingForResponse = false;
@@ -445,8 +454,9 @@ public class BackendBridge {
 
         CompletableFuture.runAsync(() -> {
             try {
+                // 使用 tabId 作为 chatId，让 getSessionKey() 自动计算 "cli:{tabId}"
                 InboundMessage stopMsg = new InboundMessage(
-                        CLI_CHANNEL, "user", ctx.sessionKey, "/stop", null, null);
+                        CLI_CHANNEL, "user", ctx.tabId, "/stop", null, null);
                 bus.publishInbound(stopMsg).toCompletableFuture().join();
             } catch (Exception ignored) {
             }
@@ -470,7 +480,7 @@ public class BackendBridge {
      * 如果当前标签无活跃会话（欢迎页状态），则创建新会话。
      * 在用户发送首条消息时自动调用。
      */
-    private void ensureSession() {
+    public void ensureSession() {
         if (activeTabId == null) {
             // 没有活跃标签时自动创建默认标签
             activeTabId = "default";
@@ -481,6 +491,8 @@ public class BackendBridge {
 
         ctx.session = sessionManager.createNew(ctx.sessionKey);
 
+        log.info("[Session创建] tabId={}, sessionId={}, sessionKey={}", activeTabId, ctx.session.getSessionId(), ctx.sessionKey);
+
         // 为新会话创建独立的 ProjectRegistry
         ProjectRegistry newRegistry = createProjectRegistry(ctx.session.getSessionId());
         ctx.projectRegistry = newRegistry;
@@ -489,6 +501,14 @@ public class BackendBridge {
             agentLoop.updateProjectRegistry(newRegistry);
         }
         notifyRegistryChanged();
+    }
+
+    /**
+     * 获取当前活跃标签的 sessionId
+     */
+    public String getActiveSessionId() {
+        TabSessionContext ctx = getActiveContext();
+        return ctx != null && ctx.session != null ? ctx.session.getSessionId() : null;
     }
 
     /**
@@ -579,14 +599,13 @@ public class BackendBridge {
      * @param force 为 true 时即使已有标题也重新生成（对话深入后更新）
      */
     private void triggerTitleGeneration(TabSessionContext ctx, boolean force) {
-        triggerTitleGeneration(force);
-    }
-
-    private void triggerTitleGeneration(boolean force) {
+        // 使用传入的 ctx.session 而不是 getCurrentSession()，避免标签切换导致的竞态条件
         if (provider == null || sessionManager == null) return;
+        if (ctx == null || ctx.session == null) return;
+
         CompletableFuture.runAsync(() -> {
             try {
-                Session session = getCurrentSession();
+                Session session = ctx.session;
                 if (session == null) {
                     return;
                 }
@@ -653,7 +672,9 @@ public class BackendBridge {
                 resetTitleFlags(force);
             }
             // 通知 UI 刷新侧栏标题
+            log.info("[标题回调] 准备触发 onTitleChanged, isNull={}", onTitleChanged == null);
             if (onTitleChanged != null) {
+                log.info("[标题回调] 触发 onTitleChanged 回调");
                 Platform.runLater(onTitleChanged);
             }
         }, executor);

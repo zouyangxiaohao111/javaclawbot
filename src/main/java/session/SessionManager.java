@@ -633,10 +633,15 @@ public final class SessionManager {
         } catch (Exception e) {
             // 原子移动失败，尝试普通移动
             try {
-                Files.move(tmpFile, mapFile, StandardCopyOption.REPLACE_EXISTING);
+                // 确保临时文件存在再移动
+                if (Files.exists(tmpFile)) {
+                    Files.move(tmpFile, mapFile, StandardCopyOption.REPLACE_EXISTING);
+                } else {
+                    LOG.log(Level.WARNING, "临时文件不存在，跳过移动: " + tmpFile);
+                }
             } catch (Exception ex) {
                 LOG.log(Level.WARNING, "移动会话映射文件失败", ex);
-                // 清理临时文件
+                // 清理临时文件（安全删除）
                 deleteIfExists(tmpFile);
             }
         }

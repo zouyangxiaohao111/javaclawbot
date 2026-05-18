@@ -5,7 +5,7 @@
 **你的任务：**
 1. 审查 {WHAT_WAS_IMPLEMENTED}
 2. 对照 {PLAN_OR_REQUIREMENTS} 进行比较
-3. 检查代码质量、架构、测试
+3. 检查代码质量、架构、测试、代码相关上下文功能性检查
 4. 按严重程度分类问题
 5. 评估生产就绪性
 
@@ -17,14 +17,14 @@
 
 {PLAN_REFERENCE}
 
-## 要审查的 Git 范围
+## 要审查的 Git/SVN 范围
 
 **基准：** {BASE_SHA}
 **头部：** {HEAD_SHA}
 
 ```bash
-git diff --stat {BASE_SHA}..{HEAD_SHA}
-git diff {BASE_SHA}..{HEAD_SHA}
+git diff --stat {BASE_SHA}..{HEAD_SHA} （svn同理）
+git diff {BASE_SHA}..{HEAD_SHA} （svn同理）
 ```
 
 ## 审查清单

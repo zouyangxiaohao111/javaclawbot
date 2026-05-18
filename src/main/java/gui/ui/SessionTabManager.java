@@ -2,6 +2,7 @@ package gui.ui;
 
 import gui.ui.components.SessionTabBar;
 import gui.ui.components.TabItem;
+import gui.ui.components.ToolCallCard;
 import gui.ui.pages.ChatPage;
 import javafx.application.Platform;
 import javafx.geometry.Pos;
@@ -11,11 +12,17 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * 管理会话与标签的映射关系
+ *
+ * 设计原则：
+ * 1. 每个标签有唯一的、稳定的 tabId（UUID）
+ * 2. TabSessionContext 保持所有会话状态（waitingForResponse, userMessageCount 等）
+ * 3. 切换标签时只改变可见性，不改变状态
+ * 4. 标题生成后通过回调更新标签标题
  */
 @Slf4j
 public class SessionTabManager {
@@ -25,7 +32,6 @@ public class SessionTabManager {
     private final VBox chatArea; // 包含 tabBar + chatPages 的容器
     private final Map<String, ChatPage> tabChatPages = new ConcurrentHashMap<>();
     private final Map<String, String> tabSessionMap = new ConcurrentHashMap<>(); // tabId → sessionId
-    private final AtomicInteger tabCounter = new AtomicInteger(0);
     private String activeTabId = null;
     private int maxConcurrent = 4; // 默认值
 
@@ -47,6 +53,41 @@ public class SessionTabManager {
         tabBar.setOnTabSelected(this::switchToTab);
         tabBar.setOnTabClosed(this::closeTab);
         tabBar.setOnNewTab(this::createNewTab);
+
+        // 设置标题生成回调，当标题生成成功时更新标签标题
+        backendBridge.setOnTitleChanged(() -> {
+            log.info("[标题回调] 触发，tabSessionMap大小={}, 内容={}", tabSessionMap.size(), tabSessionMap);
+            // 遍历所有标签，找到对应的 sessionId 并更新标题
+            try {
+                var sessions = backendBridge.getSessionManager().listSessions();
+                log.info("[标题回调] 会话列表大小={}", sessions.size());
+                for (var entry : tabSessionMap.entrySet()) {
+                    String tabId = entry.getKey();
+                    String sessionId = entry.getValue();
+                    log.info("[标题回调] 检查标签: tabId={}, sessionId={}", tabId, sessionId);
+                    if (sessionId == null) continue;
+
+                    for (var s : sessions) {
+                        if (sessionId.equals(s.get("session_id"))) {
+                            Object md = s.get("metadata");
+                            log.info("[标题回调] 找到会话: sessionId={}, metadata={}", sessionId, md);
+                            if (md instanceof Map<?, ?> metaMap) {
+                                Object t = metaMap.get("title");
+                                log.info("[标题回调] 标题值: {}", t);
+                                if (t instanceof String ts && !ts.isBlank()) {
+                                    log.info("[标题回调] 更新标签标题: tabId={}, title={}", tabId, ts);
+                                    Platform.runLater(() -> updateTabTitle(tabId, ts));
+                                }
+                            }
+                            break;
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("[标题回调] 异常: {}", e.getMessage());
+                e.printStackTrace();
+            }
+        });
     }
 
     /**
@@ -68,8 +109,11 @@ public class SessionTabManager {
             return;
         }
 
-        String tabId = "tab-" + tabCounter.incrementAndGet();
-        String title = "新对话 " + tabCounter.get();
+        // 使用 UUID 确保 tabId 稳定
+        String tabId = UUID.randomUUID().toString().substring(0, 8);
+        String title = "新对话";
+
+        log.info("[标签创建] tabId={}, sessionKey=cli:{}", tabId, tabId);
 
         // 创建标签
         TabItem tab = tabBar.addTab(tabId, title);
@@ -78,10 +122,91 @@ public class SessionTabManager {
         // 创建 ChatPage
         ChatPage chatPage = new ChatPage();
         chatPage.setBackendBridge(backendBridge);
+
+        // 注册消息发送回调
+        final String currentTabId = tabId;
+        // 用于跟踪 edit_file/write_file 的参数 (toolCallId → file_path)
+        final Map<String, String> fileEditParams = new java.util.HashMap<>();
+        // 用于跟踪最后一个工具卡片
+        final ToolCallCard[] lastToolCard = {null};
+
+        chatPage.getChatInput().addSendListener(text -> {
+            log.info("[消息发送] tabId={}, text={}", currentTabId, text.length() > 50 ? text.substring(0, 50) + "..." : text);
+            // 确保当前标签是活跃的
+            backendBridge.setActiveTab(currentTabId);
+
+            // 确保 session 已创建并记录 sessionId
+            backendBridge.ensureSession();
+            String sessionId = backendBridge.getActiveSessionId();
+            if (sessionId != null && !tabSessionMap.containsKey(currentTabId)) {
+                tabSessionMap.put(currentTabId, sessionId);
+                log.info("[Session映射] tabId={}, sessionId={}", currentTabId, sessionId);
+            }
+
+            // 添加思考占位符
+            chatPage.addThinkingPlaceholder();
+            chatPage.setStatusText("● 思考中...");
+            // 更新标签状态
+            tabBar.updateTabStatus(currentTabId, TabItem.Status.RUNNING);
+
+            backendBridge.sendMessage(text,
+                progress -> {
+                    // 进度回调在 JavaFX 线程中执行
+                    if (progress.isToolResult()) {
+                        // 处理工具结果（TodoWrite、AskUserQuestion 等）
+                        handleToolResult(chatPage, lastToolCard, fileEditParams, progress);
+                    } else if (progress.isToolHint()) {
+                        // 处理工具提示（显示工具调用卡片）
+                        handleToolHint(chatPage, lastToolCard, fileEditParams, progress);
+                    } else if (progress.isReasoning()) {
+                        // 显示推理内容
+                        chatPage.addReasoningBlock(progress.content());
+                    } else {
+                        // 流式进度文本：替换上一个气泡，避免 WebView 累积卡死 GUI
+                        chatPage.addAssistantMessage(progress.content(), true);
+                    }
+                },
+                response -> {
+                    // 最终回复
+                    log.info("[最终回复] tabId={}, response={}", currentTabId,
+                        response != null ? response.substring(0, Math.min(50, response.length())) : "null");
+                    chatPage.removeThinkingPlaceholder();
+                    chatPage.clearStreamingBubble();
+                    // 推理+回复合并为一个视觉单元
+                    String reasoning = backendBridge.getLastReasoningContent();
+                    if (reasoning != null && !reasoning.isBlank()) {
+                        chatPage.addAssistantMessageWithReasoning(reasoning, response);
+                    } else {
+                        chatPage.addAssistantMessage(response, false);
+                    }
+                    chatPage.setStatusText("● 模型就绪 · " + getCurrentModelName());
+                    chatPage.setContextUsage(backendBridge.getContextUsageRatio());
+                    // 更新标签状态
+                    tabBar.updateTabStatus(currentTabId, TabItem.Status.COMPLETED);
+                    // 重置工具卡片
+                    lastToolCard[0] = null;
+                },
+                error -> {
+                    // 错误
+                    log.error("[错误回复] tabId={}, error={}", currentTabId, error);
+                    chatPage.removeThinkingPlaceholder();
+                    chatPage.clearStreamingBubble();
+                    chatPage.addAssistantMessage("⚠ " + error, false);
+                    chatPage.setStatusText("● 错误");
+                    // 更新标签状态
+                    tabBar.updateTabStatus(currentTabId, TabItem.Status.ERROR);
+                    // 重置工具卡片
+                    lastToolCard[0] = null;
+                }
+            );
+            chatPage.addUserMessage(text);
+        });
+
         tabChatPages.put(tabId, chatPage);
 
         // 创建后端上下文
         backendBridge.createTabContext(tabId);
+        log.info("[后端上下文] 创建完成: tabId={}, sessionKey=cli:{}", tabId, tabId);
 
         // 将 ChatPage 添加到 chatArea
         chatPage.setVisible(false);
@@ -89,10 +214,13 @@ public class SessionTabManager {
         VBox.setVgrow(chatPage, Priority.ALWAYS);
         chatArea.getChildren().add(chatPage);
 
+        // 设置初始状态文本（包含模型名称）
+        chatPage.setStatusText("● 模型就绪 · " + getCurrentModelName());
+
         // 激活新标签
         switchToTab(tabId);
 
-        log.info("创建新标签: tabId={}", tabId);
+        log.info("[标签创建完成] tabId={}, 当前标签数={}", tabId, tabBar.getTabCount());
     }
 
     /**
@@ -100,6 +228,8 @@ public class SessionTabManager {
      */
     public void switchToTab(String tabId) {
         if (activeTabId != null && activeTabId.equals(tabId)) return;
+
+        log.info("[标签切换] 从 {} 切换到 {}", activeTabId, tabId);
 
         // 隐藏当前标签内容
         if (activeTabId != null) {
@@ -116,6 +246,9 @@ public class SessionTabManager {
         if (newPage != null) {
             newPage.setVisible(true);
             newPage.setManaged(true);
+            log.info("[标签切换] ChatPage 已显示: tabId={}", tabId);
+        } else {
+            log.warn("[标签切换] ChatPage 不存在: tabId={}", tabId);
         }
 
         // 更新标签栏状态
@@ -124,7 +257,9 @@ public class SessionTabManager {
         // 更新后端活跃标签
         backendBridge.setActiveTab(tabId);
 
-        log.info("切换标签: tabId={}", tabId);
+        // 检查 session 映射
+        String sessionId = tabSessionMap.get(tabId);
+        log.info("[标签切换] sessionId={}", sessionId);
     }
 
     /**
@@ -179,7 +314,8 @@ public class SessionTabManager {
             return;
         }
 
-        String tabId = "tab-" + tabCounter.incrementAndGet();
+        // 使用 UUID 确保 tabId 稳定
+        String tabId = UUID.randomUUID().toString().substring(0, 8);
         // 尝试从会话元数据获取标题，否则使用截断的 sessionId
         String title = "会话 " + sessionId.substring(0, Math.min(8, sessionId.length()));
         try {
@@ -206,6 +342,74 @@ public class SessionTabManager {
         // 创建 ChatPage
         ChatPage chatPage = new ChatPage();
         chatPage.setBackendBridge(backendBridge);
+
+        // 注册消息发送回调 - 每个标签页独立的状态
+        final String currentTabId = tabId;
+        // 用于跟踪 edit_file/write_file 的参数 (toolCallId → file_path)
+        final Map<String, String> fileEditParams = new java.util.HashMap<>();
+        // 用于跟踪最后一个工具卡片
+        final ToolCallCard[] lastToolCard = {null};
+
+        chatPage.getChatInput().addSendListener(text -> {
+            // 确保当前标签是活跃的
+            backendBridge.setActiveTab(currentTabId);
+
+            // 添加思考占位符
+            chatPage.addThinkingPlaceholder();
+            chatPage.setStatusText("● 思考中...");
+            // 更新标签状态
+            tabBar.updateTabStatus(currentTabId, TabItem.Status.RUNNING);
+
+            backendBridge.sendMessage(text,
+                progress -> {
+                    // 进度回调在 JavaFX 线程中执行
+                    if (progress.isToolResult()) {
+                        // 处理工具结果（TodoWrite、AskUserQuestion 等）
+                        handleToolResult(chatPage, lastToolCard, fileEditParams, progress);
+                    } else if (progress.isToolHint()) {
+                        // 处理工具提示（显示工具调用卡片）
+                        handleToolHint(chatPage, lastToolCard, fileEditParams, progress);
+                    } else if (progress.isReasoning()) {
+                        // 显示推理内容
+                        chatPage.addReasoningBlock(progress.content());
+                    } else {
+                        // 流式进度文本：替换上一个气泡，避免 WebView 累积卡死 GUI
+                        chatPage.addAssistantMessage(progress.content(), true);
+                    }
+                },
+                response -> {
+                    // 最终回复
+                    chatPage.removeThinkingPlaceholder();
+                    chatPage.clearStreamingBubble();
+                    // 推理+回复合并为一个视觉单元
+                    String reasoning = backendBridge.getLastReasoningContent();
+                    if (reasoning != null && !reasoning.isBlank()) {
+                        chatPage.addAssistantMessageWithReasoning(reasoning, response);
+                    } else {
+                        chatPage.addAssistantMessage(response, false);
+                    }
+                    chatPage.setStatusText("● 模型就绪 · " + getCurrentModelName());
+                    chatPage.setContextUsage(backendBridge.getContextUsageRatio());
+                    // 更新标签状态
+                    tabBar.updateTabStatus(currentTabId, TabItem.Status.COMPLETED);
+                    // 重置工具卡片
+                    lastToolCard[0] = null;
+                },
+                error -> {
+                    // 错误
+                    chatPage.removeThinkingPlaceholder();
+                    chatPage.clearStreamingBubble();
+                    chatPage.addAssistantMessage("⚠ " + error, false);
+                    chatPage.setStatusText("● 错误");
+                    // 更新标签状态
+                    tabBar.updateTabStatus(currentTabId, TabItem.Status.ERROR);
+                    // 重置工具卡片
+                    lastToolCard[0] = null;
+                }
+            );
+            chatPage.addUserMessage(text);
+        });
+
         tabChatPages.put(tabId, chatPage);
 
         // 创建后端上下文并恢复会话
@@ -307,10 +511,62 @@ public class SessionTabManager {
     }
 
     /**
+     * 获取当前模型名称
+     */
+    private String getCurrentModelName() {
+        try {
+            if (backendBridge != null && backendBridge.getConfig() != null) {
+                String model = backendBridge.getConfig().getAgents().getDefaults().getModel();
+                log.info("[模型名称] 获取到模型: {}", model);
+                if (model != null && !model.isBlank()) {
+                    return model;
+                }
+            } else {
+                log.warn("[模型名称] backendBridge 或 config 为 null");
+            }
+        } catch (Exception e) {
+            log.warn("获取模型名称失败: {}", e.getMessage());
+        }
+        return "未知模型";
+    }
+
+    /**
      * 更新标签标题
      */
     public void updateTabTitle(String tabId, String title) {
         tabBar.updateTabTitle(tabId, title);
+    }
+
+    /**
+     * 从会话列表更新所有标签的标题
+     * 当标题生成完成后调用
+     */
+    public void updateTitlesFromSessions() {
+        log.info("[标题更新] 开始更新标签标题，tabSessionMap大小={}", tabSessionMap.size());
+        try {
+            var sessions = backendBridge.getSessionManager().listSessions();
+            for (var entry : tabSessionMap.entrySet()) {
+                String tabId = entry.getKey();
+                String sessionId = entry.getValue();
+                if (sessionId == null) continue;
+
+                for (var s : sessions) {
+                    if (sessionId.equals(s.get("session_id"))) {
+                        Object md = s.get("metadata");
+                        if (md instanceof Map<?, ?> metaMap) {
+                            Object t = metaMap.get("title");
+                            if (t instanceof String ts && !ts.isBlank()) {
+                                log.info("[标题更新] 更新标签: tabId={}, title={}", tabId, ts);
+                                Platform.runLater(() -> updateTabTitle(tabId, ts));
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.warn("[标题更新] 异常: {}", e.getMessage());
+        }
     }
 
     /**
@@ -344,5 +600,212 @@ public class SessionTabManager {
             alert.setContentText("已达到最大并发数 (" + currentMax + ")，请关闭空闲标签后重试");
             alert.show();
         });
+    }
+
+    /**
+     * 处理工具结果（TodoWrite、AskUserQuestion 等）
+     */
+    private void handleToolResult(ChatPage chatPage, ToolCallCard[] lastToolCard,
+                                  Map<String, String> fileEditParams,
+                                  BackendBridge.ProgressEvent progress) {
+        String tn = progress.toolName();
+        String content = progress.content();
+        String tcId = progress.toolCallId();
+        if (content == null || content.isBlank()) return;
+
+        // 仅当结果为合法 JSON 且 status="awaiting_response" 时进入对话框流程
+        if (isAwaitingResponse(content)) {
+            showAskUserQuestionDialog(content, tcId);
+        } else if ("AskUserQuestion".equals(tn)) {
+            if (content.contains("\"questions\"")) {
+                if (lastToolCard[0] != null) {
+                    lastToolCard[0].setStatus("completed");
+                    lastToolCard[0].addStructuredContent(
+                        gui.ui.components.AskQuestionResultView.build(content));
+                }
+            } else if (lastToolCard[0] != null) {
+                lastToolCard[0].setStatus("completed");
+                lastToolCard[0].addResult(content);
+            }
+        } else if ("TodoWrite".equals(tn)) {
+            chatPage.getFileDiffBadge().updateTodoFromJson(content);
+            if (lastToolCard[0] != null) {
+                lastToolCard[0].setStatus("completed");
+                lastToolCard[0].addStructuredContent(
+                    gui.ui.components.TodoResultView.build(content));
+            }
+        } else if ("edit_file".equals(tn) || "write_file".equals(tn)) {
+            // Structured file-change summary
+            String filePath = tcId != null ? fileEditParams.remove(tcId) : null;
+            if (filePath == null) {
+                filePath = extractFilePathFromResult(content);
+            }
+            if (lastToolCard[0] != null) {
+                lastToolCard[0].setStatus("completed");
+                if (filePath != null && backendBridge != null) {
+                    agent.tool.file.FileBackupManager fbm = backendBridge.getFileBackupManager();
+                    int[] stats = parseDiffStats(content);
+                    lastToolCard[0].setFileEditResult(filePath, stats[0], stats[1], fbm, null);
+                    // Notify FileDiffBadge
+                    if (fbm != null) {
+                        try {
+                            java.nio.file.Path p = java.nio.file.Path.of(filePath);
+                            java.util.List<agent.tool.file.FileBackupManager.BackupEntry> vers = fbm.getVersions(p);
+                            if (!vers.isEmpty()) {
+                                chatPage.getFileDiffBadge().addModifiedFile(p, vers.get(vers.size() - 1));
+                            }
+                        } catch (Exception ignored) {}
+                    }
+                } else {
+                    lastToolCard[0].addResult(content);
+                }
+            }
+        } else {
+            if (lastToolCard[0] != null) {
+                lastToolCard[0].setStatus("completed");
+                lastToolCard[0].addResult(content);
+            }
+        }
+    }
+
+    /**
+     * 处理工具提示（显示工具调用卡片）
+     */
+    private void handleToolHint(ChatPage chatPage, ToolCallCard[] lastToolCard,
+                                Map<String, String> fileEditParams,
+                                BackendBridge.ProgressEvent progress) {
+        String toolName = progress.toolName() != null
+            ? progress.toolName()
+            : extractToolName(progress.content());
+        String params = progress.content();
+
+        if ("TodoWrite".equals(toolName)) {
+            params = "更新任务列表";
+        }
+
+        // Store file_path for edit_file/write_file cards
+        if (("edit_file".equals(toolName) || "write_file".equals(toolName))
+                && progress.toolCallId() != null) {
+            String filePath = extractFilePathFromParams(params);
+            if (filePath != null) {
+                fileEditParams.put(progress.toolCallId(), filePath);
+            }
+            // Show friendly params
+            if (filePath != null) {
+                params = java.nio.file.Path.of(filePath).getFileName().toString();
+            }
+        }
+
+        ToolCallCard card = chatPage.addToolCallCard(toolName, "running", params, false);
+        lastToolCard[0] = card;
+    }
+
+    /**
+     * 检查工具结果是否为合法的 awaiting_response 格式
+     */
+    private static boolean isAwaitingResponse(String rawResult) {
+        try {
+            com.google.gson.Gson gson = new com.google.gson.Gson();
+            Map<String, Object> map = gson.fromJson(rawResult, Map.class);
+            return "awaiting_response".equals(map.get("status")) && map.containsKey("questions");
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /**
+     * 显示 AskUserQuestion 对话框
+     */
+    private void showAskUserQuestionDialog(String json, String toolCallId) {
+        try {
+            com.google.gson.Gson gson = new com.google.gson.Gson();
+            @SuppressWarnings("unchecked")
+            Map<String, Object> root = gson.fromJson(json, Map.class);
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> questions = (List<Map<String, Object>>) root.get("questions");
+
+            if (questions == null || questions.isEmpty()) return;
+
+            gui.ui.components.QuestionDialog dialog = new gui.ui.components.QuestionDialog(questions);
+            // 使用 Platform.runLater 确保在 JavaFX 线程中显示对话框
+            Platform.runLater(() -> {
+                dialog.showAndWait().ifPresentOrElse(answers -> {
+                    if (!answers.isEmpty() && toolCallId != null) {
+                        backendBridge.answerUserQuestion(toolCallId, answers);
+                    }
+                }, () -> {
+                    // 用户取消/关闭对话框 — 注入空答案解除 AgentLoop 阻塞
+                    if (toolCallId != null) {
+                        backendBridge.answerUserQuestion(toolCallId, java.util.Map.of());
+                    }
+                });
+            });
+        } catch (Exception e) {
+            log.warn("显示 AskUserQuestion 对话框失败: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * 提取工具名称
+     */
+    private static String extractToolName(String toolHint) {
+        if (toolHint == null || toolHint.isBlank()) return "tool";
+        int paren = toolHint.indexOf('(');
+        if (paren > 0) return toolHint.substring(0, paren).trim();
+        return toolHint.trim();
+    }
+
+    /**
+     * 从工具参数中提取 file_path
+     */
+    private static String extractFilePathFromParams(String params) {
+        if (params == null || params.isBlank()) return null;
+        int idx = params.indexOf("file_path=");
+        if (idx < 0) return null;
+        String after = params.substring(idx + "file_path=".length());
+        int end = after.length();
+        for (String delim : new String[]{", old_string=", ", new_string=", ", content=", ", replace_all="}) {
+            int d = after.indexOf(delim);
+            if (d > 0 && d < end) end = d;
+        }
+        return after.substring(0, end).trim();
+    }
+
+    /**
+     * 从工具结果中提取 file_path
+     */
+    private static String extractFilePathFromResult(String result) {
+        if (result == null || result.isBlank()) return null;
+        String prefix = "The file ";
+        int start = result.indexOf(prefix);
+        if (start >= 0) {
+            String after = result.substring(start + prefix.length());
+            String[] endMarkers = {" has been updated", " has been updated successfully", "."};
+            for (String m : endMarkers) {
+                int end = after.indexOf(m);
+                if (end > 0) return after.substring(0, end).trim();
+            }
+        }
+        String createPrefix = "File created successfully at: ";
+        start = result.indexOf(createPrefix);
+        if (start >= 0) {
+            String after = result.substring(start + createPrefix.length());
+            int end = after.indexOf('\n');
+            return end > 0 ? after.substring(0, end).trim() : after.trim();
+        }
+        return null;
+    }
+
+    /**
+     * 解析 unified diff 统计
+     */
+    private static int[] parseDiffStats(String result) {
+        int added = 0, removed = 0;
+        if (result == null || result.isBlank()) return new int[]{added, removed};
+        for (String line : result.split("\n")) {
+            if (line.startsWith("+") && !line.startsWith("+++")) added++;
+            else if (line.startsWith("-") && !line.startsWith("---")) removed++;
+        }
+        return new int[]{added, removed};
     }
 }

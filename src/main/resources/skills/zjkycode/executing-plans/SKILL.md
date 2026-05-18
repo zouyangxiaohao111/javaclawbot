@@ -11,7 +11,7 @@ description: 当你有书面实施计划需要在单独会话中执行并有审�
 
 **开始时宣布：** "我正在使用 executing-plans 技能来实施这个计划。"
 
-**注意：** 告诉你的人类伙伴，zjkycode 在有子代理访问权限时工作得更好。如果在支持子代理的平台（如 Claude Code 或 Codex）上运行，其工作质量会显著提高。如果子代理可用，使用 zjkycode:subagent-driven-development 而不是这个技能。
+**注意：** 告诉你的人类伙伴，zjkycode 在有子代理访问权限时工作得更好。如果在支持子代理的平台（如 Claude Code 或 Codex）上运行，其工作质量会显著提高。如果子代理可用，使用 zjkycode/subagent-driven-development 而不是这个技能。
 
 ## 流程
 
@@ -29,11 +29,13 @@ description: 当你有书面实施计划需要在单独会话中执行并有审�
 3. 按指定运行验证
 4. 标记为已完成
 
-### 步骤 3：完成开发
+### 步骤 3：代码审查（在任务都完成后）
+- 执行技能： zjkycode/receiving-code-review 来进行执行代码审查
+### 步骤 4：审查完成
+所有任务完成并通过审查验证后：
 
-所有任务完成并验证后：
 - 宣布： "我正在使用 finishing-a-development-branch 技能来完成这项工作。"
-- **必需的子技能：** 使用 zjkycode:finishing-a-development-branch
+- **必需的子技能：** 使用 zjkycode/finishing-a-development-branch
 - 遵循该技能验证测试、展示选项、执行选择
 
 ## 何时停止并寻求帮助
@@ -65,6 +67,7 @@ description: 当你有书面实施计划需要在单独会话中执行并有审�
 ## 整合
 
 **必需的工作流技能：**
-- **zjkycode:using-git-worktrees** - 必需：在开始之前设置隔离工作区
-- **zjkycode:writing-plans** - 创建此技能执行的计划
-- **zjkycode:finishing-a-development-branch** - 所有任务完成后完成开发
+- **zjkycode/using-git-worktrees** - 必需：在开始之前设置隔离工作区
+- **zjkycode/receiving-code-review** - 必需：进行执行代码审查
+- **zjkycode/writing-plans** - 创建此技能执行的计划
+- **zjkycode/finishing-a-development-branch** - 所有任务完成后完成开发

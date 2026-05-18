@@ -2,6 +2,39 @@
 
 All notable changes to NexusAI will be documented in this file.
 
+## [2.3.10] - 2026-05-18
+
+### Added
+- **多会话标签页独立状态管理**：每个标签页独立维护 TodoWrite、文件变更、工具卡片等状态
+  - 每个标签页独立的 `lastToolCard` 和 `fileEditParams`
+  - TodoWrite 卡片、AskUserQuestion 卡片、工具链路卡片正确显示
+  - 推理内容（reasoning）正确显示
+  - 思考占位符（thinkingPlaceholder）正确添加和移除
+  - 流式气泡（streamingBubble）正确清除
+  - 推理+回复合并显示（addAssistantMessageWithReasoning）
+- **标签标题实时更新**：标题生成完成后自动更新所有标签页标题
+  - 使用 UUID 确保标签 ID 稳定
+  - 通过 `onTitleChanged` 回调机制更新标签标题
+- **模型名称动态显示**：状态栏显示实际使用的模型名称，而非写死的 "Claude Sonnect"
+  - 在标签创建时设置初始状态文本
+  - 消息回复后更新状态文本
+
+### Fixed
+- **会话状态丢失**：修复切换标签时会话状态丢失的问题
+  - 使用 UUID 作为 tabId，确保标签 ID 稳定
+  - 切换标签时只改变可见性，不改变状态
+- **标签 ID 不稳定**：修复删除标签后重建导致 ID 变化的问题
+- **SessionManager 文件操作问题**：修复 `NoSuchFileException: sessions.json.tmp` 错误
+  - 在移动临时文件之前检查文件是否存在
+- **标题同步问题**：修复标题生成后标签标题不更新的问题
+  - 遍历所有标签，找到对应的 sessionId 并更新标题
+- **sessionKey 计算错误**：修复 `InboundMessage.getSessionKey()` 返回 `"cli:cli:tab-1"` 的问题
+  - 使用 `ctx.tabId` 作为 chatId，而非 `ctx.sessionKey`
+- **sendListener 未注册**：修复消息发送回调未注册的问题
+  - 在 `SessionTabManager.createNewTab()` 中注册 sendListener
+- **triggerTitleGeneration 竞态条件**：修复标签切换导致的竞态条件
+  - 使用传入的 `ctx.session` 而不是 `getCurrentSession()`
+
 ## [2.3.9] - 2026-05-18
 
 ### Added

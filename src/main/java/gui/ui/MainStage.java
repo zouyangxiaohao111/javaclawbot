@@ -684,9 +684,15 @@ public class MainStage {
                     // Refresh sidebar history
                     sidebar.refreshHistory(backendBridge.getSessionManager().listSessions());
 
-                    // 标题异步生成后自动刷新侧栏
-                    backendBridge.setOnTitleChanged(() ->
-                        sidebar.refreshHistory(backendBridge.getSessionManager().listSessions()));
+                    // 标题异步生成后自动刷新侧栏和标签标题
+                    backendBridge.setOnTitleChanged(() -> {
+                        // 刷新侧栏历史列表
+                        sidebar.refreshHistory(backendBridge.getSessionManager().listSessions());
+                        // 更新标签标题（SessionTabManager 的回调已被覆盖，这里直接处理）
+                        if (tabManager != null) {
+                            tabManager.updateTitlesFromSessions();
+                        }
+                    });
 
                     // Inject BackendBridge into management pages
                     injectBridgeToPage(pages.get("models"));

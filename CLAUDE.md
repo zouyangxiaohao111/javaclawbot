@@ -111,3 +111,6 @@ src/main/java/utils - 通用工具
 | Date | Version | Change |
 |------|---------|--------|
 | 2026-04-23 | 1.7.0 | xxxxx. |
+
+## GUI开发手册
+见 [GUI开发手册.md](GUI.md)
