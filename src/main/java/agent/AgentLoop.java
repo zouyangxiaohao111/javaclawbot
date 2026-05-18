@@ -681,8 +681,9 @@ public class AgentLoop {
         // MCP 重载工具：按名称刷新指定 MCP server
         sharedTools.register(new agent.tool.mcp.McpReloadTool(mcpManager));
 
-        // 数据库查询工具
-        dataSourceManager.start();
+        // 数据库查询工具,by zcw 修改成异步驱动，防止启动时出现由于数据库初始化造成的中断
+        CompletableFuture.runAsync(() -> dataSourceManager.start());
+        // dataSourceManager.start();
         sharedTools.register(new DbTool(dataSourceManager));
         sharedTools.register(new ListDataSourceTool(dataSourceManager));
 

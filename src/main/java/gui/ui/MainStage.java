@@ -1,11 +1,7 @@
 package gui.ui;
 
 import com.google.gson.Gson;
-import gui.ui.components.AskQuestionResultView;
-import gui.ui.components.QuestionDialog;
-import gui.ui.components.Sidebar;
-import gui.ui.components.TodoResultView;
-import gui.ui.components.ToolCallCard;
+import gui.ui.components.*;
 import gui.ui.pages.*;
 import gui.ui.pages.DatabasesPage;
 import javafx.application.Platform;
@@ -45,7 +41,7 @@ public class MainStage {
 
     private BackendBridge backendBridge;
     private Sidebar sidebar;
-    private ChatPage chatPage;
+    private SessionTabManager tabManager;
     private ToolCallCard lastToolCard;
     /** 用于"新对话"按钮触发时阻止 pageChangeListener 恢复历史会话 */
     private volatile boolean suppressPageResume = false;
@@ -292,10 +288,22 @@ public class MainStage {
         stage.getScene().getStylesheets().add(mainCss);
     }
 
+    private SessionTabBar tabBar;
+
+    /** 获取当前活跃标签的 ChatPage */
+    private ChatPage getActiveChatPage() {
+        return tabManager != null ? tabManager.getActiveChatPage() : null;
+    }
+
     private void setupPages() {
-        // 创建所有页面
-        chatPage = new ChatPage();
-        pages.put("chat", chatPage);
+        // 创建聊天区域（标签栏 + ChatPage 容器）
+        javafx.scene.layout.VBox chatArea = new javafx.scene.layout.VBox();
+        chatArea.setFillWidth(true);
+        tabBar = new SessionTabBar();
+        javafx.scene.layout.VBox.setVgrow(tabBar, javafx.scene.layout.Priority.NEVER);
+        chatArea.getChildren().add(tabBar);
+
+        pages.put("chat", chatArea);
         pages.put("models", new ModelsPage());
         pages.put("agents", new AgentsPage());
         pages.put("channels", new ChannelsPage());
@@ -356,21 +364,33 @@ public class MainStage {
                                 String sid = (String) recent.get("session_id");
                                 if (sid != null && !sid.isBlank()) {
                                     backendBridge.resumeSession(sid);
+                                    // 更新标签标题为会话的 title
+                                    if (tabManager != null) {
+                                        String sessionTitle = "会话 " + sid.substring(0, Math.min(8, sid.length()));
+                                        Object md = recent.get("metadata");
+                                        if (md instanceof Map<?, ?> metaMap) {
+                                            Object t = metaMap.get("title");
+                                            if (t instanceof String ts && !ts.isBlank()) {
+                                                sessionTitle = ts;
+                                            }
+                                        }
+                                        tabManager.updateTabTitle(tabManager.getActiveTabId(), sessionTitle);
+                                    }
                                     // setBackupManager 必须在 loadMessages 之前设置，
                                     // 否则历史工具卡片的 [查看对比]/[回滚] 按钮无法找到备份文件
                                     agent.tool.file.FileBackupManager fbm2 = backendBridge.getFileBackupManager();
                                     if (fbm2 != null) {
-                                        chatPage.getFileDiffBadge().setBackupManager(fbm2);
+                                        getActiveChatPage().getFileDiffBadge().setBackupManager(fbm2);
                                         // loadFromBackupManager 在 loadMessages 之后调用
                                     }
                                     List<Map<String, Object>> history = backendBridge.getSessionHistory(sid);
-                                    chatPage.loadMessages(history);
+                                    getActiveChatPage().loadMessages(history);
                                     // 在 loadMessages 清空后再重新加载备份数据
                                     if (fbm2 != null) {
-                                        chatPage.getFileDiffBadge().loadFromBackupManager();
+                                        getActiveChatPage().getFileDiffBadge().loadFromBackupManager();
                                     }
-                                    chatPage.setContextUsage(backendBridge.getContextUsageRatio());
-                                    chatPage.refreshProjectBadge();
+                                    getActiveChatPage().setContextUsage(backendBridge.getContextUsageRatio());
+                                    getActiveChatPage().refreshProjectBadge();
                                     return;
                                 }
                             }
@@ -378,9 +398,9 @@ public class MainStage {
                         // 非今天或无历史会话 → 欢迎页流程
                         backendBridge.resetTitleCounter();
                         backendBridge.newSession();
-                        chatPage.clearMessages();
-                        chatPage.setContextUsage(backendBridge.getContextUsageRatio());
-                        chatPage.refreshProjectBadge();
+                        getActiveChatPage().clearMessages();
+                        getActiveChatPage().setContextUsage(backendBridge.getContextUsageRatio());
+                        getActiveChatPage().refreshProjectBadge();
                         sidebar.refreshHistory(backendBridge.getSessionManager().listSessions());
                         resetFileBadgeForNewSession();
                     });
@@ -394,9 +414,9 @@ public class MainStage {
                 // 仅清空会话引用和 GUI，不创建新会话（懒创建）
                 backendBridge.newSession();
                 Platform.runLater(() -> {
-                    chatPage.clearMessages();
-                    chatPage.setContextUsage(backendBridge.getContextUsageRatio());
-                    chatPage.refreshProjectBadge();
+                    getActiveChatPage().clearMessages();
+                    getActiveChatPage().setContextUsage(backendBridge.getContextUsageRatio());
+                    getActiveChatPage().refreshProjectBadge();
                     sidebar.refreshHistory(backendBridge.getSessionManager().listSessions());
                     resetFileBadgeForNewSession();
                 });
@@ -411,20 +431,20 @@ public class MainStage {
                     agent.tool.file.FileBackupManager fbm = backendBridge.getFileBackupManager();
                     Platform.runLater(() -> {
                         if (fbm != null) {
-                            chatPage.getFileDiffBadge().setBackupManager(fbm);
+                            getActiveChatPage().getFileDiffBadge().setBackupManager(fbm);
                             // loadFromBackupManager 要在 loadMessages 之后调用，
                             // 因为 loadMessages 内部的 clearMessages → clearFiles 会清掉刚加载的数据
                         }
                     });
                     List<Map<String, Object>> history = backendBridge.getSessionHistory(sessionId);
                     Platform.runLater(() -> {
-                        chatPage.loadMessages(history);
+                        getActiveChatPage().loadMessages(history);
                         // 在 loadMessages 清空后再重新加载备份数据到 fileDiffBadge
                         if (fbm != null) {
-                            chatPage.getFileDiffBadge().loadFromBackupManager();
+                            getActiveChatPage().getFileDiffBadge().loadFromBackupManager();
                         }
-                        chatPage.setContextUsage(backendBridge.getContextUsageRatio());
-                        chatPage.refreshProjectBadge();
+                        getActiveChatPage().setContextUsage(backendBridge.getContextUsageRatio());
+                        getActiveChatPage().refreshProjectBadge();
                         showPage("chat");
                     });
                 });
@@ -493,7 +513,7 @@ public class MainStage {
                 lastToolCard.addResult(content);
             }
         } else if ("TodoWrite".equals(tn)) {
-            chatPage.getFileDiffBadge().updateTodoFromJson(content);
+            getActiveChatPage().getFileDiffBadge().updateTodoFromJson(content);
             if (lastToolCard != null) {
                 lastToolCard.setStatus("completed");
                 lastToolCard.addStructuredContent(TodoResultView.build(content));
@@ -516,7 +536,7 @@ public class MainStage {
                             java.nio.file.Path p = java.nio.file.Path.of(filePath);
                             java.util.List<agent.tool.file.FileBackupManager.BackupEntry> vers = fbm.getVersions(p);
                             if (!vers.isEmpty()) {
-                                chatPage.getFileDiffBadge().addModifiedFile(p, vers.get(vers.size() - 1));
+                                getActiveChatPage().getFileDiffBadge().addModifiedFile(p, vers.get(vers.size() - 1));
                             }
                         } catch (Exception ignored) {}
                     }
@@ -555,7 +575,7 @@ public class MainStage {
             }
         }
 
-        ToolCallCard card = chatPage.addToolCallCard(
+        ToolCallCard card = getActiveChatPage().addToolCallCard(
             toolName, "running", params, false);
         lastToolCard = card;
     }
@@ -619,9 +639,9 @@ public class MainStage {
             p.setOnModelChanged(model -> {
                 // 热刷新 provider 和 AgentLoop，使模型变更即时生效
                 backendBridge.refreshProvider();
-                chatPage.setStatusText("\u25CF 模型就绪 \u00B7 " + model);
+                getActiveChatPage().setStatusText("\u25CF 模型就绪 \u00B7 " + model);
                 if (backendBridge != null) {
-                    chatPage.setContextUsage(backendBridge.getContextUsageRatio());
+                    getActiveChatPage().setContextUsage(backendBridge.getContextUsageRatio());
                 }
             });
         }
@@ -633,100 +653,33 @@ public class MainStage {
             try {
                 backendBridge.initialize();
                 Platform.runLater(() -> {
-                    // Wire stop callback
-                    chatPage.getChatInput().setOnStop(() -> {
-                        backendBridge.stopMessage();
-                        chatPage.setStatusText("\u25CF 已停止");
-                        chatPage.getChatInput().setSending(false);
-                        chatPage.clearStreamingBubble();
-                    });
+                    // 创建标签管理器
+                    javafx.scene.layout.VBox chatArea = (javafx.scene.layout.VBox) pages.get("chat");
+                    tabManager = new SessionTabManager(tabBar, backendBridge, chatArea);
+                    tabManager.createDefaultTab();
 
-                    // 使 chatInput 可以访问历史消息记录
-                    chatPage.getChatInput().setBackendBridge(backendBridge);
-
-                    // Wire ChatInput send listener to backend
-                    chatPage.getChatInput().addSendListener(text -> {
-                        if (backendBridge.isWaitingForResponse()) return;
-                        java.util.List<String> images = chatPage.getChatInput().getAttachedImages();
-                        // 收集图片路径用于聊天区预览展示
-                        java.util.List<java.nio.file.Path> imagePaths = new java.util.ArrayList<>();
-                        if (images != null) {
-                            for (String p : images) {
-                                imagePaths.add(java.nio.file.Path.of(p));
-                            }
+                    // Wire sidebar events to tab manager
+                    sidebar.addNewChatListener(() -> {
+                        if (tabManager != null) {
+                            suppressPageResume = true;
+                            tabManager.createNewTab();
+                            sidebar.refreshHistory(backendBridge.getSessionManager().listSessions());
                         }
-                        chatPage.addUserMessage(text, imagePaths);
-                        chatPage.getChatInput().setSending(true);
-                        chatPage.addThinkingPlaceholder();
-                        chatPage.setStatusText("\u25CF \u601D\u8003\u4E2D...");
-                        // 更新上下文使用率（首轮为估算值，后续为真实值）
-                        chatPage.setContextUsage(backendBridge.getContextUsageRatio());
-                        java.util.List<String> allMedia = chatPage.getChatInput().getAllAttachmentPaths();
-                        backendBridge.sendMessage(
-                            text,
-                            allMedia.isEmpty() ? null : allMedia,
-                            progress -> {
-                                if (progress.isToolResult()) {
-                                    handleToolResult(progress);
-                                } else if (progress.isToolHint()) {
-                                    handleToolHint(progress);
-                                } else if (progress.isReasoning()) {
-                                    chatPage.addReasoningBlock(progress.content());
-                                } else {
-                                    // 流式进度文本：替换上一个气泡，避免 WebView 累积卡死 GUI
-                                    chatPage.addAssistantMessage(progress.content(), true);
-                                }
-                            },
-                            response -> {
-                                chatPage.removeThinkingPlaceholder();
-                                chatPage.getChatInput().setSending(false);
-                                chatPage.clearStreamingBubble();
-                                // 推理+回复合并为一个视觉单元
-                                String reasoning = backendBridge.getLastReasoningContent();
-                                if (reasoning != null && !reasoning.isBlank()) {
-                                    chatPage.addAssistantMessageWithReasoning(reasoning, response);
-                                } else {
-                                    chatPage.addAssistantMessage(response, false);
-                                }
-                                chatPage.setStatusText("\u25CF 模型就绪 \u00B7 "
-                                    + backendBridge.getConfig().getAgents().getDefaults().getModel());
-                                chatPage.setContextUsage(backendBridge.getContextUsageRatio());
-                                sidebar.refreshHistory(backendBridge.getSessionManager().listSessions());
-                            },
-                            error -> {
-                                chatPage.removeThinkingPlaceholder();
-                                chatPage.getChatInput().setSending(false);
-                                chatPage.clearStreamingBubble();
-                                chatPage.addAssistantMessage("\u26A0 " + error, false);
-                                chatPage.setStatusText("\u25CF 错误");
-                            }
-                        );
                     });
-
-                    // Set workspace and project dir for @file completion
-                    chatPage.getChatInput().setWorkspacePath(
-                        backendBridge.getConfig().getWorkspacePath());
-                    chatPage.getChatInput().setProjectPath(backendBridge.getProjectDir());
-
-                    // 设置后端桥接引用（用于会话切换时刷新项目徽标）
-                    chatPage.setBackendBridge(backendBridge);
-
-                    // 设置项目注册信息（状态栏右下角徽标 + Popover）
-                    chatPage.setProjectInfo(
-                        backendBridge.getProjectRegistry(),
-                        backendBridge.getConfig().getWorkspacePath());
-
-                    // Inject FileBackupManager into FileDiffBadge (for rollback/diff actions)
-                    agent.tool.file.FileBackupManager fbm = backendBridge.getFileBackupManager();
-                    if (fbm != null) {
-                        chatPage.getFileDiffBadge().setBackupManager(fbm);
-                        chatPage.getFileDiffBadge().loadFromBackupManager();
-                    }
-
-                    // Initial status
-                    chatPage.setStatusText("\u25CF 模型就绪 \u00B7 "
-                        + backendBridge.getConfig().getAgents().getDefaults().getModel());
-                    chatPage.setContextUsage(0.0);
+                    sidebar.addResumeListener(sessionId -> {
+                        if (tabManager != null) {
+                            tabManager.switchToSession(sessionId);
+                            showPage("chat");
+                            sidebar.refreshHistory(backendBridge.getSessionManager().listSessions());
+                        }
+                    });
+                    sidebar.addDeleteListener(sessionId -> {
+                        if (tabManager != null) {
+                            tabManager.closeTabBySession(sessionId);
+                            backendBridge.deleteSession(sessionId);
+                            sidebar.refreshHistory(backendBridge.getSessionManager().listSessions());
+                        }
+                    });
 
                     // Refresh sidebar history
                     sidebar.refreshHistory(backendBridge.getSessionManager().listSessions());
@@ -734,9 +687,6 @@ public class MainStage {
                     // 标题异步生成后自动刷新侧栏
                     backendBridge.setOnTitleChanged(() ->
                         sidebar.refreshHistory(backendBridge.getSessionManager().listSessions()));
-
-                    // ProjectRegistry 变更后自动刷新右下角项目徽标
-                    backendBridge.setOnRegistryChanged(chatPage::refreshProjectBadge);
 
                     // Inject BackendBridge into management pages
                     injectBridgeToPage(pages.get("models"));
@@ -749,8 +699,7 @@ public class MainStage {
                     injectBridgeToPage(pages.get("settings"));
                 });
             } catch (Exception e) {
-                Platform.runLater(() ->
-                    chatPage.setStatusText("\u25CF 初始化失败: " + e.getMessage()));
+                e.printStackTrace();
             }
         }, "javaclawbot-fx-init").start();
     }
@@ -827,8 +776,8 @@ public class MainStage {
         if (backendBridge == null) return;
         agent.tool.file.FileBackupManager fbm = backendBridge.getFileBackupManager();
         if (fbm != null) {
-            chatPage.getFileDiffBadge().setBackupManager(fbm);
-            chatPage.getFileDiffBadge().loadFromBackupManager();
+            getActiveChatPage().getFileDiffBadge().setBackupManager(fbm);
+            getActiveChatPage().getFileDiffBadge().loadFromBackupManager();
         }
     }
 }

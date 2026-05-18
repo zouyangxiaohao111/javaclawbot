@@ -2,6 +2,31 @@
 
 All notable changes to NexusAI will be documented in this file.
 
+## [2.3.9] - 2026-05-18
+
+### Added
+- **多会话标签栏支持**：顶部标签栏支持多会话并行，类似浏览器标签设计
+  - 颜色圆点状态指示器：珊瑚色(运行中，脉冲动画)/绿色(已完成)/灰色(空闲)/红色(错误)
+  - + 按钮创建新标签，支持可配置并发限制（max_concurrent）
+  - 标签切换时聊天内容即时切换，每个标签独立会话上下文
+  - 标签标题从会话 metadata.title 动态获取，不再显示 sessionId
+  - 超出并发限制时弹出 Alert 提示用户
+  - 超出限制点击历史会话时，在当前标签加载并更新标题
+
+### Changed
+- **BackendBridge 多会话改造**：引入 TabSessionContext 内部类，每个标签独立会话上下文（sessionKey/progressCallback/responseCallback/waitingForResponse 等）
+- **MainStage 标签栏集成**：单 chatPage 替换为 SessionTabBar + SessionTabManager 架构
+
+### Fixed
+- **欢迎页被压缩**：VBox.setVgrow 布局修复，ChatPage 正确填充可用空间
+- **+ 按钮不显示**：chatArea.setFillWidth(true) + tabBar 设为 Priority.NEVER
+- **标签显示 sessionId**：改为从 metadata.title 获取显示标题
+
+### New Files
+- `gui/ui/components/TabItem.java` - 单个标签组件（颜色圆点 + 脉冲动画）
+- `gui/ui/components/SessionTabBar.java` - 标签栏容器（+ 按钮）
+- `gui/ui/SessionTabManager.java` - 会话-标签映射管理器
+
 ## [2.3.8] - 2026-05-16
 
 ### Changed

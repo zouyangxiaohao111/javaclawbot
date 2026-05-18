@@ -81,6 +81,13 @@ function getBootstrapContent() {
 - \`Skill\` 工具 → skill 工具
 - \`Read\`、\`Write\`、\`Edit\`、\`Bash\` → read_file、write_file、edit_file、exec
 
+**视觉伙伴技能特别说明：**
+在Windows上运行时特别说明，
+方式\t进程链\tOwner PID\t结果
+PS1 脚本\tbash → powershell → cmd → node\t设置 → 父进程退出 → 被杀\t❌
+直接 node\tbash → node\t未设置 → 不检测\t✅
+一句话总结：start-server.ps1 的"父进程退出自动清理"机制在 Bash 工具的后台执行模式下被误触发，而直接 node server.cjs 没有这个机制，所以稳定运行。
+
 **技能位置：**
 zjkycode 技能位于 \`${workspace}/skills/zjkycode/\`
 该技能包下面的所有技能加载都需要加前缀,示例: zjkycode/brainstorming

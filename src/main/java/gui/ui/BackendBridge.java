@@ -19,9 +19,7 @@ import javafx.application.Platform;
 import javafx.scene.control.Alert;
 import javafx.scene.control.ButtonType;
 import lombok.extern.slf4j.Slf4j;
-import providers.CustomProvider;
 import providers.LLMProvider;
-import providers.ProviderRegistry;
 import providers.cli.ProjectRegistry;
 import session.Session;
 import session.SessionManager;
@@ -29,17 +27,19 @@ import skills.SkillsLoader;
 import utils.Helpers;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
@@ -91,24 +91,101 @@ public class BackendBridge {
         return t;
     });
 
-    // ── 会话 ──
+    // ── 多会话支持 ──
+
+    /**
+     * 单个标签会话的上下文
+     */
+    static class TabSessionContext {
+        final String tabId;
+        final String sessionKey; // "cli:{tabId}"
+        volatile Session session;
+        volatile ProjectRegistry projectRegistry;
+        final AtomicReference<Consumer<ProgressEvent>> progressCallback = new AtomicReference<>();
+        final AtomicReference<Consumer<String>> responseCallback = new AtomicReference<>();
+        final AtomicInteger userMessageCount = new AtomicInteger(0);
+        volatile boolean waitingForResponse = false;
+        volatile boolean titleGenerated = false;
+        volatile String lastReasoningContent;
+
+        TabSessionContext(String tabId) {
+            this.tabId = tabId;
+            this.sessionKey = CLI_CHANNEL + ":" + tabId;
+        }
+    }
+
     private static final String CLI_CHANNEL = "cli";
-    private static final String CLI_CHAT_ID = "direct";
-    private final String sessionKey = CLI_CHANNEL + ":" + CLI_CHAT_ID;
-    /** 当前活跃会话；null 表示无会话（欢迎页状态），仅用户发送消息时懒创建 */
-    private Session currentSession;
+    /** 多会话上下文：tabId → TabSessionContext */
+    private final ConcurrentHashMap<String, TabSessionContext> tabContexts = new ConcurrentHashMap<>();
+    /** 当前激活的标签 ID */
+    private volatile String activeTabId = null;
 
-    // ── 当前消息回调（一次只处理一条消息）──
-    private final AtomicReference<Consumer<ProgressEvent>> currentProgressCallback = new AtomicReference<>();
-    private final AtomicReference<Consumer<String>> currentResponseCallback = new AtomicReference<>();
-    private volatile boolean waitingForResponse = false;
-    /** 最近一次回复的推理内容 */
-    private volatile String lastReasoningContent;
+    /**
+     * 从 chatId（如 "cli:tab1"）提取 tabId。
+     * 格式为 "{channel}:{tabId}"，提取冒号之后的部分。
+     */
+    private static String getTabIdFromChatId(String chatId) {
+        if (chatId == null) return null;
+        int idx = chatId.indexOf(':');
+        return idx >= 0 ? chatId.substring(idx + 1) : chatId;
+    }
 
-    // ── 标题生成计数器 ──
+    /** 获取或创建指定标签的上下文 */
+    private TabSessionContext getOrCreateContext(String tabId) {
+        return tabContexts.computeIfAbsent(tabId, TabSessionContext::new);
+    }
+
+    /** 获取当前激活标签的上下文，null 表示无活跃标签 */
+    private TabSessionContext getActiveContext() {
+        String id = activeTabId;
+        return id != null ? tabContexts.get(id) : null;
+    }
+
+    // ── 标签管理公共 API ──
+
+    /** 为新标签创建会话上下文 */
+    public void createTabContext(String tabId) {
+        getOrCreateContext(tabId);
+    }
+
+    /** 设置当前激活标签 */
+    public void setActiveTab(String tabId) {
+        this.activeTabId = tabId;
+    }
+
+    /** 销毁标签上下文 */
+    public void destroyTabContext(String tabId) {
+        tabContexts.remove(tabId);
+    }
+
+    /** 恢复指定标签的会话 */
+    public void resumeSession(String tabId, String sessionId) {
+        if (sessionManager == null) return;
+        TabSessionContext ctx = getOrCreateContext(tabId);
+        sessionManager.resumeSession(ctx.sessionKey, sessionId);
+        sessionManager.evictFromCache(ctx.sessionKey);
+        ctx.session = sessionManager.getOrCreate(ctx.sessionKey);
+        ProjectRegistry sessionRegistry = createProjectRegistry(sessionId);
+        ctx.projectRegistry = sessionRegistry;
+        this.projectRegistry = sessionRegistry;
+        if (agentLoop != null) {
+            agentLoop.updateProjectRegistry(sessionRegistry);
+        }
+        notifyRegistryChanged();
+        int count = countUserMessages(ctx.session);
+        ctx.userMessageCount.set(count);
+        if (count >= 3) {
+            titleGenerationPending.set(true);
+            titleRegenerationPending.set(true);
+        } else {
+            titleGenerationPending.set(false);
+            titleRegenerationPending.set(false);
+        }
+    }
+
+    // ── 标题生成计数器（保留全局，实际按 tab 隔离在 ctx 中）──
     private final AtomicBoolean titleGenerationPending = new AtomicBoolean(false);
     private final AtomicBoolean titleRegenerationPending = new AtomicBoolean(false);
-    private int userMessageCount = 0;
 
     /** 标题生成/更新后回调（MainStage 设置用于刷新侧栏） */
     private volatile Runnable onTitleChanged;
@@ -173,12 +250,7 @@ public class BackendBridge {
         // 9) 启动 bus 交互模式
         startBusInteractiveMode();
 
-        // 10) 恢复 plan mode 状态
-        try {
-            Session session = sessionManager.getOrCreate(sessionKey);
-            agentLoop.ensurePlanModeState(sessionKey, session);
-        } catch (Exception ignored) {
-        }
+        // 10) 恢复 plan mode 状态（延迟到有活跃标签时由各 tab 独立恢复）
     }
 
     /**
@@ -207,6 +279,15 @@ public class BackendBridge {
                     // 过滤非本会话消息
                     if (!isTargetCliOutbound(out)) continue;
 
+                    // 解析目标标签上下文
+                    String outChatId = out.getChatId();
+                    String tabId = getTabIdFromChatId(outChatId);
+                    TabSessionContext ctx = tabId != null ? tabContexts.get(tabId) : null;
+                    if (ctx == null) {
+                        log.debug("收到未知标签的 outbound 消息，忽略: chatId={}", outChatId);
+                        continue;
+                    }
+
                     Map<String, Object> meta = out.getMetadata() != null ? out.getMetadata() : Map.of();
                     boolean isProgress = Boolean.TRUE.equals(meta.get("_progress"));
                     boolean isToolHint = Boolean.TRUE.equals(meta.get("_tool_hint"));
@@ -220,8 +301,8 @@ public class BackendBridge {
                         // 系统命令回复（/stop、/help、/init、/memory 等）
                         // 走 responseCallback 路径以确保正确渲染为最终消息（而非流式替换气泡）
                         String content = out.getContent() != null ? out.getContent() : "";
-                        Consumer<String> cb = currentResponseCallback.getAndSet(null);
-                        waitingForResponse = false;
+                        Consumer<String> cb = ctx.responseCallback.getAndSet(null);
+                        ctx.waitingForResponse = false;
                         Platform.runLater(() -> {
                             if (cb != null) {
                                 cb.accept(content);
@@ -229,7 +310,7 @@ public class BackendBridge {
                         });
                     } else if (isProgress) {
                         String content = out.getContent() != null ? out.getContent() : "";
-                        Consumer<ProgressEvent> cb = currentProgressCallback.get();
+                        Consumer<ProgressEvent> cb = ctx.progressCallback.get();
                         if (cb != null) {
                             Platform.runLater(() -> cb.accept(
                                 new ProgressEvent(content, isToolHint, isToolResult, toolName, toolCallId, isReasoning)));
@@ -240,20 +321,21 @@ public class BackendBridge {
                         // 提取推理内容
                         Object rcObj = meta.get("_reasoning_content");
                         if (rcObj instanceof String s && !s.isBlank()) {
-                            lastReasoningContent = s;
+                            ctx.lastReasoningContent = s;
                         } else {
-                            lastReasoningContent = null;
+                            ctx.lastReasoningContent = null;
                         }
-                        Consumer<String> cb = currentResponseCallback.getAndSet(null);
-                        waitingForResponse = false;
+                        Consumer<String> cb = ctx.responseCallback.getAndSet(null);
+                        ctx.waitingForResponse = false;
 
                         // 标题生成：回复完成后触发，确保 session 已包含本轮完整对话
                         // force=true 优先：深度对话后的标题再生成，此时不再触发普通生成
-                        if (userMessageCount >= 3 && titleRegenerationPending.compareAndSet(false, true)) {
+                        int msgCount = ctx.userMessageCount.get();
+                        if (msgCount >= 3 && titleRegenerationPending.compareAndSet(false, true)) {
                             titleGenerationPending.set(true);  // 阻止后续 force=false 触发
-                            triggerTitleGeneration(true);
-                        } else if (userMessageCount >= 1 && titleGenerationPending.compareAndSet(false, true)) {
-                            triggerTitleGeneration(false);
+                            triggerTitleGeneration(ctx, true);
+                        } else if (msgCount >= 1 && titleGenerationPending.compareAndSet(false, true)) {
+                            triggerTitleGeneration(ctx, false);
                         }
 
                         Platform.runLater(() -> {
@@ -278,7 +360,7 @@ public class BackendBridge {
         try {
             String ch = out.getChannel();
             String cid = out.getChatId();
-            return CLI_CHANNEL.equals(ch) && CLI_CHAT_ID.equals(cid);
+            return CLI_CHANNEL.equals(ch) && tabContexts.containsKey(getTabIdFromChatId(cid));
         } catch (Exception e) {
             return false;
         }
@@ -310,21 +392,27 @@ public class BackendBridge {
             return;
         }
 
-        // 懒创建：如果当前无活跃会话，先创建
+        // 懒创建：如果当前无活跃标签，先创建
         ensureSession();
 
-        currentProgressCallback.set(onProgress);
-        currentResponseCallback.set(onResponse);
-        waitingForResponse = true;
+        TabSessionContext ctx = getActiveContext();
+        if (ctx == null) {
+            if (onError != null) Platform.runLater(() -> onError.accept("无活跃标签上下文"));
+            return;
+        }
+
+        ctx.progressCallback.set(onProgress);
+        ctx.responseCallback.set(onResponse);
+        ctx.waitingForResponse = true;
 
         CompletableFuture.runAsync(() -> {
             try {
                 InboundMessage in = new InboundMessage(
-                        CLI_CHANNEL, "user", CLI_CHAT_ID, text, mediaPaths, null);
+                        CLI_CHANNEL, "user", ctx.sessionKey, text, mediaPaths, null);
                 bus.publishInbound(in).toCompletableFuture().join();
             } catch (Exception e) {
-                waitingForResponse = false;
-                currentResponseCallback.set(null);
+                ctx.waitingForResponse = false;
+                ctx.responseCallback.set(null);
                 if (onError != null) {
                     Platform.runLater(() -> onError.accept(e.getMessage()));
                 }
@@ -332,7 +420,7 @@ public class BackendBridge {
         }, executor);
 
         // 标题生成计数器（实际触发在收到回复后，确保 session 已包含本轮对话）
-        userMessageCount++;
+        ctx.userMessageCount.incrementAndGet();
     }
 
     /**
@@ -348,16 +436,17 @@ public class BackendBridge {
      * 发送 /stop 命令
      */
     public void stopMessage() {
-        if (!waitingForResponse) return;
+        TabSessionContext ctx = getActiveContext();
+        if (ctx == null || !ctx.waitingForResponse) return;
 
         // 立即重置等待状态，避免 stop 后 always-waiting 导致无法继续对话
-        waitingForResponse = false;
-        currentResponseCallback.set(null);
+        ctx.waitingForResponse = false;
+        ctx.responseCallback.set(null);
 
         CompletableFuture.runAsync(() -> {
             try {
                 InboundMessage stopMsg = new InboundMessage(
-                        CLI_CHANNEL, "user", CLI_CHAT_ID, "/stop", null, null);
+                        CLI_CHANNEL, "user", ctx.sessionKey, "/stop", null, null);
                 bus.publishInbound(stopMsg).toCompletableFuture().join();
             } catch (Exception ignored) {
             }
@@ -372,23 +461,30 @@ public class BackendBridge {
      * 获取当前活跃会话；null 表示无会话（欢迎页状态）。
      */
     public Session getCurrentSession() {
-        return currentSession;
+        TabSessionContext ctx = getActiveContext();
+        return ctx != null ? ctx.session : null;
     }
 
     /**
      * 确保当前有一个活跃会话（懒创建）。
-     * 如果 currentSession 为 null（欢迎页状态），则创建新会话。
+     * 如果当前标签无活跃会话（欢迎页状态），则创建新会话。
      * 在用户发送首条消息时自动调用。
      */
     private void ensureSession() {
-        if (currentSession != null) return;
+        if (activeTabId == null) {
+            // 没有活跃标签时自动创建默认标签
+            activeTabId = "default";
+        }
+        TabSessionContext ctx = getOrCreateContext(activeTabId);
+        if (ctx.session != null) return;
         if (sessionManager == null) return;
 
-        currentSession = sessionManager.createNew(sessionKey);
+        ctx.session = sessionManager.createNew(ctx.sessionKey);
 
         // 为新会话创建独立的 ProjectRegistry
-        ProjectRegistry newRegistry = createProjectRegistry(currentSession.getSessionId());
-        this.projectRegistry = newRegistry;
+        ProjectRegistry newRegistry = createProjectRegistry(ctx.session.getSessionId());
+        ctx.projectRegistry = newRegistry;
+        this.projectRegistry = newRegistry; // 更新全局引用供 AgentLoop 使用
         if (agentLoop != null) {
             agentLoop.updateProjectRegistry(newRegistry);
         }
@@ -400,13 +496,17 @@ public class BackendBridge {
      * 不创建新会话，不发送 /clear —— 会话在用户发送消息时懒创建。
      */
     public void newSession() {
-        currentSession = null;
-        userMessageCount = 0;
+        // 清空当前活跃标签上下文
+        TabSessionContext ctx = getActiveContext();
+        if (ctx != null) {
+            ctx.session = null;
+            ctx.userMessageCount.set(0);
+            ctx.projectRegistry = null;
+        }
         titleGenerationPending.set(false);
         titleRegenerationPending.set(false);
 
         // 清空 ProjectRegistry，避免徽标/Popover 残留旧会话的项目绑定
-        // 实际会话创建时 ensureSession() 会用 createProjectRegistry() 重新初始化
         this.projectRegistry = new ProjectRegistry(null);
         notifyRegistryChanged();
     }
@@ -416,15 +516,20 @@ public class BackendBridge {
      */
     public void resumeSession(String sessionId) {
         if (sessionManager == null) return;
-        sessionManager.resumeSession(sessionKey, sessionId);
-        // 清除缓存，强制下次 getOrCreate 从磁盘加载
-        sessionManager.evictFromCache(sessionKey);
 
-        // 将 currentSession 指向恢复的会话
-        this.currentSession = sessionManager.getOrCreate(sessionKey);
+        TabSessionContext ctx = getActiveContext();
+        if (ctx == null) return;
+
+        sessionManager.resumeSession(ctx.sessionKey, sessionId);
+        // 清除缓存，强制下次 getOrCreate 从磁盘加载
+        sessionManager.evictFromCache(ctx.sessionKey);
+
+        // 将 session 指向恢复的会话
+        ctx.session = sessionManager.getOrCreate(ctx.sessionKey);
 
         // 为恢复的会话加载对应的 ProjectRegistry，避免上一轮绑定遗留
         ProjectRegistry sessionRegistry = createProjectRegistry(sessionId);
+        ctx.projectRegistry = sessionRegistry;
         this.projectRegistry = sessionRegistry;
         if (agentLoop != null) {
             agentLoop.updateProjectRegistry(sessionRegistry);
@@ -432,9 +537,8 @@ public class BackendBridge {
         notifyRegistryChanged();
 
         // 根据会话已有消息数初始化标题生成计数器，避免恢复历史后重复触发
-        Session session = sessionManager.getOrCreate(sessionKey);
-        int count = countUserMessages(session);
-        userMessageCount = count;
+        int count = countUserMessages(ctx.session);
+        ctx.userMessageCount.set(count);
         if (count >= 3) {
             // 已有足够对话轮次，不再触发标题生成/更新
             titleGenerationPending.set(true);
@@ -462,9 +566,11 @@ public class BackendBridge {
      */
     public List<Map<String, Object>> getSessionHistory(String sessionId) {
         if (sessionManager == null) return List.of();
-        sessionManager.resumeSession(sessionKey, sessionId);
-        sessionManager.evictFromCache(sessionKey);
-        Session session = sessionManager.getOrCreate(sessionKey);
+        TabSessionContext ctx = getActiveContext();
+        if (ctx == null) return List.of();
+        sessionManager.resumeSession(ctx.sessionKey, sessionId);
+        sessionManager.evictFromCache(ctx.sessionKey);
+        Session session = sessionManager.getOrCreate(ctx.sessionKey);
         return session.getHistory();
     }
 
@@ -472,6 +578,10 @@ public class BackendBridge {
      * 异步生成/更新会话标题
      * @param force 为 true 时即使已有标题也重新生成（对话深入后更新）
      */
+    private void triggerTitleGeneration(TabSessionContext ctx, boolean force) {
+        triggerTitleGeneration(force);
+    }
+
     private void triggerTitleGeneration(boolean force) {
         if (provider == null || sessionManager == null) return;
         CompletableFuture.runAsync(() -> {
@@ -768,7 +878,10 @@ public class BackendBridge {
      * 重置标题生成计数器（切换会话时调用）
      */
     public void resetTitleCounter() {
-        userMessageCount = 0;
+        TabSessionContext ctx = getActiveContext();
+        if (ctx != null) {
+            ctx.userMessageCount.set(0);
+        }
         titleGenerationPending.set(false);
         titleRegenerationPending.set(false);
     }
@@ -977,10 +1090,11 @@ public class BackendBridge {
     /** 获取当前会话的 FileBackupManager（用于 UI 层 diff/回滚操作，按 sessionId 隔离） */
     public agent.tool.file.FileBackupManager getFileBackupManager() {
         if (agentLoop == null) return null;
-        if (currentSession != null) {
-            return agentLoop.getOrCreateBackupManager(currentSession.getSessionId());
+        TabSessionContext ctx = getActiveContext();
+        if (ctx != null && ctx.session != null) {
+            return agentLoop.getOrCreateBackupManager(ctx.session.getSessionId());
         }
-        return agentLoop.getOrCreateBackupManager(sessionKey);
+        return agentLoop.getOrCreateBackupManager("cli:default");
     }
 
     public CronService getCronService() {
@@ -1011,16 +1125,19 @@ public class BackendBridge {
     }
 
     public String getSessionKey() {
-        return sessionKey;
+        TabSessionContext ctx = getActiveContext();
+        return ctx != null ? ctx.sessionKey : "cli:default";
     }
 
     public boolean isWaitingForResponse() {
-        return waitingForResponse;
+        TabSessionContext ctx = getActiveContext();
+        return ctx != null && ctx.waitingForResponse;
     }
 
     /** 获取最近一次回复的推理内容（可能为 null） */
     public String getLastReasoningContent() {
-        return lastReasoningContent;
+        TabSessionContext ctx = getActiveContext();
+        return ctx != null ? ctx.lastReasoningContent : null;
     }
 
     /**
@@ -1031,7 +1148,9 @@ public class BackendBridge {
      */
     public double getContextUsageRatio() {
         if (agentLoop == null || sessionManager == null) return 0.0;
-        Session session = sessionManager.getOrCreate(sessionKey);
+        TabSessionContext ctx = getActiveContext();
+        if (ctx == null) return 0.0;
+        Session session = sessionManager.getOrCreate(ctx.sessionKey);
         if (session == null) return 0.0;
         UsageAccumulator usageAcc = session.obtainLastUsage();
         List<Map<String, Object>> messages = session.getMessages();
