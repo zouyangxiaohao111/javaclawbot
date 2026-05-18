@@ -117,6 +117,23 @@
 
 **重要提示**：`memory/YYYY-MM-DD.md` 为原始对话上下文，内容很大，读取它之前必须先使用 `memory_search` 工具搜索相关记忆，获取对应行号后再使用 `read_file` 工具读取详细信息。
 
+## Windows中特别说明
+Bash on Windows 限制
+- 引号、管道、特殊字符频繁导致解析失败
+- **中文 + 嵌套引号的 git commit -m 消息**会导致 `unexpected EOF`：必须用纯英文短消息
+- **Java 路径含空格 (Program Files)** 时 Maven 编译不要在 bash 中直接执行：用 `cmd /c compile.bat`
+- 避免 `cat`/`grep` 管道，用 `read_file`/`Grep` 工具替代
+## 工具选择对比速查
+
+**陷阱 1：Bash 管道/引号在 Windows 下经常无输出**
+- ❌ 错误：`cmd /c 'type file.java | find /c "class"'` → 无输出后继续疑惑重试
+- ✅ 正确：立刻放弃管道，改用 `wc -l file.java` 或直接用 `read_file`
+
+**陷阱 2：编译脚本无输出**
+- ❌ 错误：反复调整 `cmd /c maven-compiled.bat 2>&1 | tail -50`
+- ✅ 正确：用 `read_file` 看编译脚本内容，或用 `cmd /c "mvn compile -l log.txt"` 然后 `read_file log.txt`
+
+**铁律**：任何 Bash 命令**一次无有效输出**，禁止再用 Bash 做管道/过滤，立即切到 `read_file` / `Grep`。
 # 环境
 **名词解释**： 工作空间 代表你的默认获取的技能配置记忆等空间  项目空间：代表绑定的项目对应的目录
 你已被召唤在以下环境中操作：

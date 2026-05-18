@@ -2,31 +2,10 @@
 
 All notable changes to NexusAI will be documented in this file.
 
-## [Unreleased] - 2026-05-16
-
-### Changed
-- **Provider Tab 边框交互增强**：所有供应商标签默认显示可见边框（hairline #e6dfd8），未选中时不再"视觉消失"；选中 tab 使用珊瑚色边框（primary #cc785c）+ 深奶油背景（cream-strong #e8e0d2）+ ✓ 三重视觉信号，hover 时边框加深
-- **更新检查改为弹窗模式**：点击"检查更新"不再在页面内展开/切换状态，而是弹出模态弹窗统一显示所有状态（检查中→已是最新/发现新版本→下载中→就绪/失败）；主页只保留"检查更新"按钮 + 版本号，彻底消除滚动条跳动问题
-- **设置页面 Claude 设计风格对齐**：新增 `COLOR_SURFACE_CREAM_STRONG` 颜色常量，选中 tab 背景从 surface-card (#efe9de) 换为 cream-strong (#e8e0d2)，边框从 hairline 换为 coral primary
-- **数据库连接表单 Navicat 风格改造**：`AddDataSourceDialog` 从手动输入 JDBC URL 改为简版/高级双模式。简版模式（默认）：选择数据库类型（MySQL/PG/MariaDB/Oracle/SQLServer/H2/SQLite）→ 填主机/端口/库名 → JDBC URL 自动拼接+深色预览区实时显示；选文件型DB（H2/SQLite）自动隐藏主机/端口，显示文件路径+浏览按钮；端口根据类型自动填充默认值；用户名默认填充 root。高级模式：一键切换手动输入 JDBC URL，兼容已有复杂配置。编辑模式：智能解析已有 jdbcUrl 反填到简版字段。Claude 设计风格（暖奶油底色+f Coral 珊瑚色按钮）
-
-### Fixed
-- **设置页面背景未平铺**：ScrollPane viewport 默认为白色，与 canvas 奶油色背景产生断层。修复：ScrollPane 增加 `-fx-background: COLOR_CANVAS` + `setFitToHeight(true)`
-- **更新弹窗被截断（只显示一半）**：`root.setMaxWidth(460)` 限制内容高度 + 内容变化后未重新计算弹窗尺寸。修复：移除 maxWidth 约束，5 个状态渲染方法（UpToDate/UpdateAvailable/Downloading/Ready/Error）末尾各增加 `updateDialog.sizeToScene()` 调用
-
-## [2.3.8] - 2026-05-15
+## [2.3.8] - 2026-05-16
 
 ### Changed
 - **设置页面 Claude 风格重构**：采用 Claude 设计语言（奶油色画布 #faf9f5、珊瑚橙主色 #cc785c、衬线标题），模型选择从下拉框改为卡片式选择器，支持提供者标签切换；快速模型自动联动默认模型的提供者，减少选择步骤；Gateway 默认显示关闭状态，点击启动弹窗提示"功能未开放"；移除 API 密钥显示；通道列表增加描述信息
-
-### Fixed
-- **自定义供应商添加/删除失效**：`ConfigConvert.updateProvidersConfig()` 只更新已存在于 target 的 provider，不添加新 provider，导致通过 GUI 添加的自定义供应商（如"小米"）在配置重新加载时被永久丢弃。修复：新 provider 直接 `target.put(name, sourcePc)`
-- **模型页面删除供应商后滚动位置重置**：点击删除按钮后页面跳回顶部。修复：`scrollPane` 提升为类字段，`refresh()` 保存 vvalue 并通过 `Platform.runLater` 延迟到布局完成后恢复（避免 vvalue 被 clamp 到旧范围）
-- **删除按钮点击穿透导致弹窗弹出**：`ev.getTarget() instanceof Button` 不可靠（target 可能是 Button 内的 Text 子节点），且 MOUSE_CLICKED 事件可能未被完全消费。修复：`ModelCard` 改用 `addEventFilter` 在捕获阶段消费事件；`ModelsPage` 卡片点击处理改为沿节点树上溯检查 Button 祖先
-- **删除回调中静默吞异常**：`catch (Exception ignored) {}` 覆盖了配置保存失败的场景。修复：关键路径（添加/删除供应商）改为 `log.warn` 记录异常
-- **配置自动重载后静默吞异常**：`BackendBridge.getConfig()` 外层 `catch (Exception ignored)` 掩盖 `isConfigChanged` 可能的异常，`SettingsPage.refresh()` 未更新上下文使用率刷新
-
-### Changed
 - **默认供应商精简**：移除 anthropic、openai、openrouter、groq、gemini、moonshot、aihubmix、siliconflow、openaiCodex、githubCopilot 共 10 个国内不常用供应商，仅保留 8 个：custom、deepseek、zhipu、dashscope、volcengine、vllm、minimax、小米。需时通过 GUI 手动添加
 - **默认模型列表精简**：
   - deepseek：deepseek-v4-pro、deepseek-v4-flash
@@ -36,6 +15,20 @@ All notable changes to NexusAI will be documented in this file.
 - **添加模型弹窗默认值**：Max Tokens 8192→65536，Temperature 空→1，Top P 空→0.95，Context Window 空→512000
 - **所有供应商均可删除**：移除模型页面内置/自定义供应商区分逻辑，所有供应商卡片统一显示"自定义"徽章和 ✕ 删除按钮
 - **默认开发者模式**：`AgentDefaults.development` 默认值从 `false` 改为 `true`
+- **Provider Tab 边框交互增强**：所有供应商标签默认显示可见边框（hairline #e6dfd8），未选中时不再"视觉消失"；选中 tab 使用珊瑚色边框（primary #cc785c）+ 深奶油背景（cream-strong #e8e0d2）+ ✓ 三重视觉信号，hover 时边框加深
+- **更新检查改为弹窗模式**：点击"检查更新"不再在页面内展开/切换状态，而是弹出模态弹窗统一显示所有状态（检查中→已是最新/发现新版本→下载中→就绪/失败）；主页只保留"检查更新"按钮 + 版本号，彻底消除滚动条跳动问题
+- **设置页面 Claude 设计风格对齐**：新增 `COLOR_SURFACE_CREAM_STRONG` 颜色常量，选中 tab 背景从 surface-card (#efe9de) 换为 cream-strong (#e8e0d2)，边框从 hairline 换为 coral primary
+- **数据库连接表单 Navicat 风格改造**：`AddDataSourceDialog` 从手动输入 JDBC URL 改为简版/高级双模式。简版模式（默认）：选择数据库类型（MySQL/PG/MariaDB/Oracle/SQLServer/H2/SQLite）→ 填主机/端口/库名 → JDBC URL 自动拼接+深色预览区实时显示；选文件型DB（H2/SQLite）自动隐藏主机/端口，显示文件路径+浏览按钮；端口根据类型自动填充默认值；用户名默认填充 root。高级模式：一键切换手动输入 JDBC URL，兼容已有复杂配置。编辑模式：智能解析已有 jdbcUrl 反填到简版字段。Claude 设计风格（暖奶油底色+f Coral 珊瑚色按钮）
+- **聊天页面无限滚动加载历史消息**：默认展示 80 条消息（原 200 条），用户滚动到顶部时自动加载更多历史消息（每次 50 条），加载时显示"加载历史消息中..."提示，加载完成后保持用户当前滚动位置不变；支持完整历史消息加载，无数量限制；工具调用卡片状态正确恢复（绿点显示 completed 状态）
+
+### Fixed
+- **自定义供应商添加/删除失效**：`ConfigConvert.updateProvidersConfig()` 只更新已存在于 target 的 provider，不添加新 provider，导致通过 GUI 添加的自定义供应商（如"小米"）在配置重新加载时被永久丢弃。修复：新 provider 直接 `target.put(name, sourcePc)`
+- **模型页面删除供应商后滚动位置重置**：点击删除按钮后页面跳回顶部。修复：`scrollPane` 提升为类字段，`refresh()` 保存 vvalue 并通过 `Platform.runLater` 延迟到布局完成后恢复（避免 vvalue 被 clamp 到旧范围）
+- **删除按钮点击穿透导致弹窗弹出**：`ev.getTarget() instanceof Button` 不可靠（target 可能是 Button 内的 Text 子节点），且 MOUSE_CLICKED 事件可能未被完全消费。修复：`ModelCard` 改用 `addEventFilter` 在捕获阶段消费事件；`ModelsPage` 卡片点击处理改为沿节点树上溯检查 Button 祖先
+- **删除回调中静默吞异常**：`catch (Exception ignored) {}` 覆盖了配置保存失败的场景。修复：关键路径（添加/删除供应商）改为 `log.warn` 记录异常
+- **配置自动重载后静默吞异常**：`BackendBridge.getConfig()` 外层 `catch (Exception ignored)` 掩盖 `isConfigChanged` 可能的异常，`SettingsPage.refresh()` 未更新上下文使用率刷新
+- **设置页面背景未平铺**：ScrollPane viewport 默认为白色，与 canvas 奶油色背景产生断层。修复：ScrollPane 增加 `-fx-background: COLOR_CANVAS` + `setFitToHeight(true)`
+- **更新弹窗被截断（只显示一半）**：`root.setMaxWidth(460)` 限制内容高度 + 内容变化后未重新计算弹窗尺寸。修复：移除 maxWidth 约束，5 个状态渲染方法（UpToDate/UpdateAvailable/Downloading/Ready/Error）末尾各增加 `updateDialog.sizeToScene()` 调用
 
 ## [2.3.7] - 2026-05-14
 

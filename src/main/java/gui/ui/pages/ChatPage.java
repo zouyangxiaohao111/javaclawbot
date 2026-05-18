@@ -64,9 +64,18 @@ public class ChatPage extends VBox {
     private javafx.scene.Node lastStreamingBubble;
 
     /** 渲染节点数上限：超出后移除最旧节点，防止 WebView 内存堆积导致 GUI 卡顿 */
-    private static final int MAX_VISIBLE_NODES = 200;
+    private static final int MAX_VISIBLE_NODES = 80;
+    /** 每次滚动加载更多时加载的消息数量 */
+    private static final int LOAD_MORE_COUNT = 50;
     private int nodesTrimmed = 0;
     private boolean welcomeVisible = true;
+
+    // 无限滚动加载历史消息相关字段
+    private java.util.List<java.util.Map<String, Object>> fullHistory; // 完整历史消息
+    private int displayStartIndex = 0; // 当前显示的起始索引
+    private boolean isLoadingMore = false; // 防止重复加载
+    private boolean hasMoreHistory = true; // 是否还有更多历史消息
+    private Label loadingIndicator; // 加载指示器
 
     private static final Parser REASONING_PARSER;
     private static final HtmlRenderer REASONING_RENDERER;
@@ -125,6 +134,11 @@ public class ChatPage extends VBox {
                 lastVvalue = v;
                 lastContentHeight = contentHeight;
                 return;
+            }
+
+            // 当滚动到顶部附近时触发加载更多历史消息
+            if (v < 0.1 && hasMoreHistory && !isLoadingMore && fullHistory != null) {
+                loadMoreHistory();
             }
 
             boolean atBottom = v >= 0.95;
@@ -734,12 +748,408 @@ public class ChatPage extends VBox {
         chatInput.setContextUsage(ratio);
     }
 
+    /**
+     * 加载更多历史消息（滚动到顶部时触发）
+     */
+    private void loadMoreHistory() {
+        if (isLoadingMore || !hasMoreHistory || fullHistory == null) {
+            return;
+        }
+
+        isLoadingMore = true;
+        showLoadingIndicator();
+
+        // 计算新的起始索引
+        int newStartIndex = Math.max(0, displayStartIndex - LOAD_MORE_COUNT);
+
+        // 在后台线程准备消息节点
+        Platform.runLater(() -> {
+            // 保存当前滚动位置和内容高度
+            double currentVvalue = scrollPane.getVvalue();
+            double currentContentHeight = messageContainer.getHeight();
+
+            // 准备新消息节点
+            java.util.List<javafx.scene.Node> newNodes = new java.util.ArrayList<>();
+            java.util.Map<String, ToolCallCard> cardById = new java.util.LinkedHashMap<>();
+            java.util.Map<String, String> filePathByCallId = new java.util.LinkedHashMap<>();
+
+            for (int i = newStartIndex; i < displayStartIndex; i++) {
+                if (i < 0 || i >= fullHistory.size()) {
+                    continue;
+                }
+                java.util.Map<String, Object> msg = fullHistory.get(i);
+                try {
+                    String role = String.valueOf(msg.getOrDefault("role", ""));
+                    if ("system".equals(role)) {
+                        continue;
+                    }
+
+                    javafx.scene.Node node = createMessageNode(msg, role, cardById, filePathByCallId);
+                    if (node != null) {
+                        newNodes.add(node);
+                    }
+                } catch (Exception e) {
+                    // 单条消息加载失败不阻断整个流程
+                }
+            }
+
+            // 插入到容器顶部（在加载指示器之后）
+            int insertIndex = loadingIndicator != null && messageContainer.getChildren().contains(loadingIndicator) ? 1 : 0;
+            messageContainer.getChildren().addAll(insertIndex, newNodes);
+
+            // 恢复滚动位置（保持用户查看的位置）
+            Platform.runLater(() -> {
+                double newContentHeight = messageContainer.getHeight();
+                double heightDiff = newContentHeight - currentContentHeight;
+
+                if (heightDiff > 0 && currentContentHeight > 0) {
+                    // 调整滚动位置以保持视觉位置不变
+                    double newVvalue = Math.min(1.0, currentVvalue + heightDiff / newContentHeight);
+                    scrollPane.setVvalue(newVvalue);
+                }
+
+                hideLoadingIndicator();
+                isLoadingMore = false;
+                displayStartIndex = newStartIndex;
+
+                // 检查是否还有更多历史消息
+                if (newStartIndex <= 0) {
+                    hasMoreHistory = false;
+                }
+            });
+        });
+    }
+
+    /**
+     * 创建单个消息节点（用于加载更多历史消息）
+     * 注意：工具结果消息（role=tool）会更新对应工具调用卡片的状态，但不创建新节点
+     */
+    private javafx.scene.Node createMessageNode(java.util.Map<String, Object> msg, String role,
+                                                  java.util.Map<String, ToolCallCard> cardById,
+                                                  java.util.Map<String, String> filePathByCallId) {
+        if ("user".equals(role)) {
+            String text = extractTextContent(msg.get("content"));
+            if (text != null && !text.isBlank()) {
+                MessageBubble bubble = new MessageBubble(MessageBubble.Role.USER, text);
+                return bubble;
+            }
+        } else if ("assistant".equals(role)) {
+            cardById.clear();
+            String content = extractTextContent(msg.get("content"));
+            String reasoning = msg.get("reasoning_content") instanceof String s && !s.isBlank() ? s : null;
+            @SuppressWarnings("unchecked")
+            java.util.List<java.util.Map<String, Object>> toolCalls =
+                (java.util.List<java.util.Map<String, Object>>) msg.get("tool_calls");
+            boolean hasToolCalls = toolCalls != null && !toolCalls.isEmpty();
+
+            if (reasoning != null && !hasToolCalls) {
+                if (content != null && !content.isBlank()) {
+                    // 创建推理+回复合并节点
+                    return createAssistantMessageWithReasoningNode(reasoning, content);
+                } else {
+                    return createReasoningBlockNode(reasoning);
+                }
+            } else if (hasToolCalls) {
+                // 创建工具调用节点组
+                java.util.List<javafx.scene.Node> nodes = new java.util.ArrayList<>();
+                if (reasoning != null) {
+                    nodes.add(createReasoningBlockNode(reasoning));
+                }
+                if (content != null && !content.isBlank()) {
+                    MessageBubble bubble = new MessageBubble(MessageBubble.Role.ASSISTANT, content);
+                    nodes.add(bubble);
+                }
+                filePathByCallId.clear();
+                for (var tc : toolCalls) {
+                    String tn = extractToolName(tc);
+                    String params = formatToolParams(tn, tc);
+                    ToolCallCard card = new ToolCallCard(tn, "running", params, false,
+                        java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
+                    card.setMaxWidth(700);
+                    String callId = (String) tc.get("id");
+                    cardById.put(callId, card);
+                    if ("edit_file".equals(tn) || "write_file".equals(tn)) {
+                        String fp = extractFilePathFromArgs(tc);
+                        if (fp != null) filePathByCallId.put(callId, fp);
+                    }
+                    HBox wrapper = new HBox(12);
+                    wrapper.setAlignment(javafx.geometry.Pos.CENTER_LEFT);
+                    wrapper.setPadding(new Insets(8, 0, 8, 0));
+                    Label avatar = new Label("\u2728");
+                    avatar.setStyle("-fx-background-color: rgba(0, 0, 0, 0.05); -fx-background-radius: 999px; -fx-pref-width: 32px; -fx-pref-height: 32px; -fx-alignment: center;");
+                    avatar.setMinSize(32, 32);
+                    wrapper.getChildren().addAll(avatar, card);
+                    nodes.add(wrapper);
+                }
+                // 返回容器节点
+                VBox container = new VBox(16);
+                container.getChildren().addAll(nodes);
+                return container;
+            } else if (content != null && !content.isBlank()) {
+                MessageBubble bubble = new MessageBubble(MessageBubble.Role.ASSISTANT, content);
+                return bubble;
+            }
+        } else if ("tool".equals(role)) {
+            // 工具结果消息：更新对应工具调用卡片的状态
+            String tcId = msg.get("tool_call_id") instanceof String s ? s : null;
+            String toolName = msg.get("name") instanceof String s ? s : null;
+            String result = extractTextContent(msg.get("content"));
+            if (tcId != null && result != null) {
+                ToolCallCard card = cardById.get(tcId);
+                if (card != null) {
+                    card.setStatus("completed");
+                    // edit_file/write_file: 显示结构化对比/回滚按钮
+                    if (("edit_file".equals(toolName) || "write_file".equals(toolName))
+                            && result != null && !result.isBlank()) {
+                        String filePath = extractFilePath(result);
+                        // 结果中没提取到时，回退到工具调用参数中的 file_path
+                        if (filePath == null || filePath.isBlank()) {
+                            filePath = filePathByCallId.get(tcId);
+                        }
+                        if (filePath != null && !filePath.isBlank()) {
+                            agent.tool.file.FileBackupManager fbm = fileDiffBadge.getBackupManager();
+                            int[] stats = parseDiff(result);
+                            card.setFileEditResult(filePath, stats[0], stats[1], fbm, null);
+                        } else {
+                            card.addResult(result);
+                        }
+                    } else if ("TodoWrite".equals(toolName)) {
+                        fileDiffBadge.updateTodoFromJson(result);
+                        card.addStructuredContent(
+                            gui.ui.components.TodoResultView.build(result));
+                    } else if ("AskUserQuestion".equals(toolName) && result.contains("\"questions\"")) {
+                        card.addStructuredContent(
+                            gui.ui.components.AskQuestionResultView.build(result));
+                    } else {
+                        card.addResult(result);
+                    }
+                }
+            }
+            // 工具结果消息不创建新节点，只更新卡片状态
+            return null;
+        }
+        return null;
+    }
+
+    /**
+     * 创建推理+回复合并节点
+     */
+    private javafx.scene.Node createAssistantMessageWithReasoningNode(String reasoning, String response) {
+        if ("(empty)".equals(response)) {
+            return createReasoningBlockNode(reasoning);
+        }
+
+        HBox row = new HBox(12);
+        row.setAlignment(Pos.TOP_LEFT);
+        row.setPadding(new Insets(8, 0, 8, 0));
+
+        Label avatar = new Label("\u2728");
+        avatar.setStyle("-fx-background-color: rgba(0, 0, 0, 0.05); -fx-background-radius: 999px;"
+            + " -fx-pref-width: 32px; -fx-pref-height: 32px; -fx-alignment: center;");
+        avatar.setMinSize(32, 32);
+
+        StackPane responseBubble = MessageBubble.createBubbleWebView(response);
+
+        VBox reasoningBlock = new VBox();
+        reasoningBlock.setStyle("-fx-background-color: rgba(0,0,0,0.03);"
+            + " -fx-background-radius: 12px; -fx-padding: 0;");
+        reasoningBlock.setMaxWidth(700);
+
+        HBox reasoningHeader = new HBox(8);
+        reasoningHeader.setAlignment(Pos.CENTER_LEFT);
+        reasoningHeader.setPadding(new Insets(8, 16, 0, 16));
+        Label toggleArrow = new Label("\u25B8");
+        toggleArrow.setStyle("-fx-font-size: 10px; -fx-text-fill: rgba(0,0,0,0.4);");
+        Label titleLabel = new Label("\uD83D\uDCAD \u5DF2\u6DF1\u5EA6\u601D\u8003");
+        titleLabel.setStyle("-fx-font-size: 12px; -fx-text-fill: rgba(0,0,0,0.45);");
+        Region headerSpacer = new Region();
+        HBox.setHgrow(headerSpacer, Priority.ALWAYS);
+        reasoningHeader.getChildren().addAll(toggleArrow, titleLabel, headerSpacer);
+        reasoningHeader.setCursor(javafx.scene.Cursor.HAND);
+        reasoningBlock.getChildren().add(reasoningHeader);
+
+        String reasoningHtmlBody = REASONING_RENDERER.render(REASONING_PARSER.parse(reasoning));
+        String reasoningHtml = REASONING_HTML_TEMPLATE.replace("%s", reasoningHtmlBody);
+        WebView reasoningWv = new WebView();
+        reasoningWv.setContextMenuEnabled(false);
+        reasoningWv.setStyle("-fx-background-color: rgba(0,0,0,0.03);");
+        reasoningWv.setPrefHeight(0);
+        reasoningWv.setMaxHeight(0);
+        reasoningWv.prefWidthProperty().bind(responseBubble.widthProperty());
+        reasoningWv.maxWidthProperty().bind(responseBubble.widthProperty());
+
+        final double[] measuredHeight = {0};
+        final boolean[] heightReady = {false};
+        reasoningWv.getEngine().documentProperty().addListener((obs, old, doc) -> {
+            if (doc != null) {
+                Platform.runLater(() -> measureWebViewHeightWithRetry(reasoningWv, measuredHeight, heightReady, 0));
+            }
+        });
+
+        reasoningWv.addEventFilter(javafx.scene.input.ScrollEvent.SCROLL, e -> {
+            e.consume();
+            javafx.event.Event.fireEvent(reasoningBlock, e.copyFor(reasoningBlock, reasoningBlock));
+        });
+
+        reasoningBlock.getChildren().add(reasoningWv);
+
+        reasoningHeader.setOnMouseClicked(e -> {
+            boolean expand = reasoningWv.getMaxHeight() == 0;
+            if (expand) {
+                if (!heightReady[0]) {
+                    forceMeasureHeight(reasoningWv, measuredHeight, heightReady);
+                }
+                double h = (heightReady[0] && measuredHeight[0] > 0) ? measuredHeight[0] : 200;
+                reasoningWv.setPrefHeight(h);
+                reasoningWv.setMaxHeight(h);
+                toggleArrow.setText("\u25BE");
+            } else {
+                reasoningWv.setPrefHeight(0);
+                reasoningWv.setMaxHeight(0);
+                toggleArrow.setText("\u25B8");
+            }
+        });
+
+        reasoningBlock.prefWidthProperty().bind(responseBubble.widthProperty());
+
+        VBox contentBox = new VBox(6);
+        contentBox.getChildren().addAll(reasoningBlock, responseBubble);
+
+        Region rightSpacer = new Region();
+        HBox.setHgrow(rightSpacer, Priority.ALWAYS);
+
+        row.getChildren().addAll(avatar, contentBox, rightSpacer);
+        Platform.runLater(() -> reasoningWv.getEngine().load(toDataUri(reasoningHtml)));
+        return row;
+    }
+
+    /**
+     * 创建推理块节点
+     */
+    private javafx.scene.Node createReasoningBlockNode(String reasoning) {
+        if (reasoning == null || reasoning.isBlank()) return null;
+
+        HBox row = new HBox(12);
+        row.setAlignment(Pos.TOP_LEFT);
+        row.setPadding(new Insets(8, 0, 8, 0));
+
+        Label avatar = new Label("✨");
+        avatar.setStyle("-fx-background-color: rgba(0, 0, 0, 0.05); -fx-background-radius: 999px;"
+            + " -fx-pref-width: 32px; -fx-pref-height: 32px; -fx-alignment: center;");
+        avatar.setMinSize(32, 32);
+
+        VBox reasoningBlock = new VBox();
+        reasoningBlock.setStyle("-fx-background-color: rgba(0,0,0,0.03);"
+            + " -fx-background-radius: 12px; -fx-padding: 0;");
+        reasoningBlock.setMaxWidth(700);
+
+        HBox reasoningHeader = new HBox(8);
+        reasoningHeader.setAlignment(Pos.CENTER_LEFT);
+        reasoningHeader.setPadding(new Insets(8, 16, 0, 16));
+        Label toggleArrow = new Label("▸");
+        toggleArrow.setStyle("-fx-font-size: 10px; -fx-text-fill: rgba(0,0,0,0.4);");
+        Label titleLabel = new Label("💭 已深度思考");
+        titleLabel.setStyle("-fx-font-size: 12px; -fx-text-fill: rgba(0,0,0,0.45);");
+        Region headerSpacer = new Region();
+        HBox.setHgrow(headerSpacer, Priority.ALWAYS);
+        reasoningHeader.getChildren().addAll(toggleArrow, titleLabel, headerSpacer);
+        reasoningHeader.setCursor(javafx.scene.Cursor.HAND);
+        reasoningBlock.getChildren().add(reasoningHeader);
+
+        String reasoningHtmlBody = REASONING_RENDERER.render(REASONING_PARSER.parse(reasoning));
+        String reasoningHtml = REASONING_HTML_TEMPLATE.replace("%s", reasoningHtmlBody);
+        WebView reasoningWv = new WebView();
+        reasoningWv.setContextMenuEnabled(false);
+        reasoningWv.setStyle("-fx-background-color: rgba(0,0,0,0.03);");
+        reasoningWv.setPrefHeight(0);
+        reasoningWv.setMaxHeight(0);
+        reasoningWv.setPrefWidth(600);
+        reasoningWv.setMaxWidth(600);
+
+        final double[] measuredHeight = {0};
+        final boolean[] heightReady = {false};
+        reasoningWv.getEngine().documentProperty().addListener((obs, old, doc) -> {
+            if (doc != null) {
+                Platform.runLater(() -> measureWebViewHeightWithRetry(reasoningWv, measuredHeight, heightReady, 0));
+            }
+        });
+
+        reasoningWv.addEventFilter(javafx.scene.input.ScrollEvent.SCROLL, e -> {
+            e.consume();
+            javafx.event.Event.fireEvent(reasoningBlock, e.copyFor(reasoningBlock, reasoningBlock));
+        });
+
+        reasoningBlock.getChildren().add(reasoningWv);
+
+        reasoningHeader.setOnMouseClicked(e -> {
+            boolean expand = reasoningWv.getMaxHeight() == 0;
+            if (expand) {
+                if (!heightReady[0]) {
+                    forceMeasureHeight(reasoningWv, measuredHeight, heightReady);
+                }
+                double h = (heightReady[0] && measuredHeight[0] > 0) ? measuredHeight[0] : 200;
+                reasoningWv.setPrefHeight(h);
+                reasoningWv.setMaxHeight(h);
+                toggleArrow.setText("\u25BE");
+            } else {
+                reasoningWv.setPrefHeight(0);
+                reasoningWv.setMaxHeight(0);
+                toggleArrow.setText("\u25B8");
+            }
+        });
+
+        Region rightSpacer = new Region();
+        HBox.setHgrow(rightSpacer, Priority.ALWAYS);
+        row.getChildren().addAll(avatar, reasoningBlock, rightSpacer);
+
+        Platform.runLater(() -> {
+            javafx.scene.Scene scene = reasoningBlock.getScene();
+            if (scene != null) {
+                double w = Math.min(600, scene.getWidth() - 256 - 32 - 44);
+                if (w > 0) {
+                    reasoningWv.setPrefWidth(w);
+                    reasoningWv.setMaxWidth(w);
+                }
+            }
+            reasoningWv.getEngine().load(toDataUri(reasoningHtml));
+        });
+
+        return row;
+    }
+
+    /**
+     * 显示加载指示器
+     */
+    private void showLoadingIndicator() {
+        if (loadingIndicator == null) {
+            loadingIndicator = new Label("加载历史消息中...");
+            loadingIndicator.setStyle("-fx-padding: 8px; -fx-text-fill: rgba(0,0,0,0.5); -fx-font-size: 12px;");
+            loadingIndicator.setAlignment(Pos.CENTER);
+            loadingIndicator.setMaxWidth(Double.MAX_VALUE);
+        }
+        if (!messageContainer.getChildren().contains(loadingIndicator)) {
+            // 在欢迎消息之后插入
+            int insertIndex = welcomeVisible ? 1 : 0;
+            messageContainer.getChildren().add(insertIndex, loadingIndicator);
+        }
+    }
+
+    /**
+     * 隐藏加载指示器
+     */
+    private void hideLoadingIndicator() {
+        if (loadingIndicator != null) {
+            messageContainer.getChildren().remove(loadingIndicator);
+        }
+    }
+
     public void clearMessages() {
         messageContainer.getChildren().clear();
         nodesTrimmed = 0;
         fileDiffBadge.clearFiles();
         thinkingPlaceholder = null;
         lastStreamingBubble = null;
+        loadingIndicator = null;
         if (thinkingAnimation != null) {
             thinkingAnimation.stop();
             thinkingAnimation = null;
@@ -753,6 +1163,11 @@ public class ChatPage extends VBox {
         clearMessages();
         if (history == null) return;
 
+        // 保存完整历史消息
+        this.fullHistory = new java.util.ArrayList<>(history);
+        this.hasMoreHistory = true;
+        this.isLoadingMore = false;
+
         java.util.Map<String, ToolCallCard> cardById = new java.util.LinkedHashMap<>();
         java.util.Map<String, String> filePathByCallId = new java.util.LinkedHashMap<>();
 
@@ -764,6 +1179,7 @@ public class ChatPage extends VBox {
         int nonSystemTotal = history.size() - systemCount;
         int startIndex = Math.max(0, history.size() - MAX_VISIBLE_NODES - systemCount);
         nodesTrimmed = Math.max(0, nonSystemTotal - MAX_VISIBLE_NODES);
+        this.displayStartIndex = startIndex;
 
         int msgIndex = 0;
         for (java.util.Map<String, Object> msg : history) {
