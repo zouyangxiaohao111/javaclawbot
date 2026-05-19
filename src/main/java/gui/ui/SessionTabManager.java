@@ -184,6 +184,9 @@ public class SessionTabManager {
                     chatPage.removeThinkingPlaceholder();
                     // 记录流式推理块是否已展示（在清除前检查，避免重复）
                     boolean hadStreamingReasoning = chatPage.hasStreamingReasoningBlocks();
+                    log.info("[DIAG] hadStreamingReasoning={}, streamingReasoningBlocks.size={}",
+                        hadStreamingReasoning,
+                        chatPage.getStreamingReasoningBlockCount());
                     chatPage.clearStreamingBubble();
                     String reasoning = backendBridge.getLastReasoningContent();
                     // 推理未通过流式展示 → 作为独立推理块添加（与历史恢复行为一致）

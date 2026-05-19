@@ -327,6 +327,10 @@ public class ChatPage extends VBox {
         return !streamingReasoningBlocks.isEmpty();
     }
 
+    public int getStreamingReasoningBlockCount() {
+        return streamingReasoningBlocks.size();
+    }
+
     /** 添加独立的推理/思考块（可折叠），用于工具调用前展示思考过程 */
     public void addReasoningBlock(String reasoning) {
         if (reasoning == null || reasoning.isBlank()) return;

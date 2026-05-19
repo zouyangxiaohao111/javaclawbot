@@ -35,6 +35,7 @@ public class ModelSelectorPopup {
     private final VBox root;
     private final VBox modelGridContainer;
     private final Label titleLabel;
+    private final Label subtitleLabel;
 
     private Config config;
     private String selectedProvider;
@@ -63,8 +64,8 @@ public class ModelSelectorPopup {
         titleLabel.setStyle(
             "-fx-font-size: 14px; -fx-font-weight: bold; -fx-text-fill: " + COLOR_INK + ";");
 
-        Label subtitle = new Label("选择提供商后，在下方选择具体模型");
-        subtitle.setStyle("-fx-font-size: 11px; -fx-text-fill: " + COLOR_MUTED + ";");
+        subtitleLabel = new Label();
+        subtitleLabel.setStyle("-fx-font-size: 11px; -fx-text-fill: " + COLOR_MUTED + ";");
 
         // 提供商 Pill Tabs + 模型卡片容器
         modelGridContainer = new VBox(8);
@@ -96,7 +97,7 @@ public class ModelSelectorPopup {
 
         buttonRow.getChildren().addAll(cancelBtn, confirmBtn);
 
-        root.getChildren().addAll(titleLabel, subtitle, modelGridContainer, buttonRow);
+        root.getChildren().addAll(titleLabel, subtitleLabel, modelGridContainer, buttonRow);
         popup.getContent().add(root);
     }
 
@@ -119,7 +120,8 @@ public class ModelSelectorPopup {
         this.selectedModel = curModel;
         this.onConfirm = onConfirm;
 
-        titleLabel.setText("\u26A1 切换模型 \u00B7 " + tabId);
+        titleLabel.setText("切换模型");
+        subtitleLabel.setText("当前模型：" + curProvider + " / " + curModel);
 
         rebuildProviderTabs();
 

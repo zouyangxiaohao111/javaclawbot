@@ -185,11 +185,21 @@ public class BackendBridge {
     }
 
     /**
-     * 获取标签的模型配置。返回 [providerName, model]，可能为 null。
+     * 获取标签的模型配置。返回 [providerName, model]。
+     * 优先使用标签级别配置，否则使用全局默认值。
      */
     public String[] getModelForTab(String tabId) {
         TabSessionContext ctx = getOrCreateContext(tabId);
-        return new String[]{ctx.providerName, ctx.model};
+        String provider = ctx.providerName;
+        String model = ctx.model;
+        // 如果标签级别没有配置，使用全局默认值
+        if (provider == null || provider.isBlank()) {
+            provider = config.getAgents().getDefaults().getProvider();
+        }
+        if (model == null || model.isBlank()) {
+            model = config.getAgents().getDefaults().getModel();
+        }
+        return new String[]{provider, model};
     }
 
     /**
