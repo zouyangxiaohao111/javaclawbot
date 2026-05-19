@@ -2,6 +2,11 @@
 
 All notable changes to NexusAI will be documented in this file.
 
+## [2.3.11] - 2026-05-19
+
+### Fixed
+- **标题无法写入的问题**：修复标题生成后无法正确写入的 bug
+
 ## [2.3.10] - 2026-05-18
 
 ### Added
