@@ -25,6 +25,7 @@ All notable changes to NexusAI will be documented in this file.
 - **`newSession()` 缺少 agentLoop 同步**：清空 ProjectRegistry 后未调用 `agentLoop.updateProjectRegistry()`，导致 AgentLoop 持有旧 registry 引用。修复：补充 `agentLoop.updateProjectRegistry(this.projectRegistry)` 调用
 - **切换页面后对话标签被覆盖**：`pageChangeListener` 中遗留的旧会话恢复逻辑在多标签系统下与 `tabManager` 冲突，切换回对话页时直接调用 `backendBridge.resumeSession()` + `getActiveChatPage().loadMessages()` 覆盖活跃标签内容。修复：当 `tabManager` 存在时跳过旧逻辑，标签状态通过 `setVisible/setManaged` 自动保持；同时修复旧 `addNewChatListener` 与 `tabManager.createNewTab()` 的重复触发问题
 - **推理+回复合并单元 WebView 宽度绑定导致历史恢复渲染空白**：`addAssistantMessageWithReasoning()` 和 `createAssistantMessageWithReasoningNode()` 中推理 WebView 宽度通过 `bind()` 绑定到 `responseBubble.widthProperty()`，但绑定时 responseBubble 未进入场景（width=0），导致推理 WebView 以 0 宽度加载内容。修复：移除宽度绑定，改用 `sceneProperty` 监听器在布局完成后读取 responseBubble 实际宽度再加载内容，同时设置安全的初始宽度兜底（600px/700px）
+- **伴随工具调用的文本内容被 clearStreamingBubble() 误删**：LLM 返回推理+文本+工具调用时，文本内容通过 `addAssistantMessage(content, true)` 写入流式气泡，随后工具提示到达时 `handleToolHint()` 创建工具卡片但不碰流式气泡，最终 `clearStreamingBubble()` 删除流式气泡时连同文本内容一起丢失。修复：`handleToolHint()` 开头调用 `chatPage.finalizeStreamingBubble()` 固化流式气泡（断开引用但不删除节点），使内容变为永久消息；同时添加 `[Progress]` 调试日志追踪进度回调类型
 - **推理标签在轮次完成后消失**：`clearStreamingBubble()` 移除了流式推理块节点。修复：只清除追踪列表不移除节点，推理在最终回复后保持可见
 - **活跃对话中 LLM 回复内容不显示**：`addAssistantMessageWithReasoning()` 的合并单元 WebView 渲染异常。修复：改用独立块方式（`addReasoningBlock()` + `addAssistantMessage()`），与历史恢复行为一致
 - **历史恢复时模型不跟随历史记录**：`resumeSession()` 未从 session metadata 恢复 `providerName`/`model`。修复：加载 session 后读取 metadata 恢复模型配置

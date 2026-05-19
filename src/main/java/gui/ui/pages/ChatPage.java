@@ -322,6 +322,17 @@ public class ChatPage extends VBox {
         streamingReasoningBlocks.clear();
     }
 
+    /**
+     * 固化流式气泡：断开 lastStreamingBubble 引用但不删除节点。
+     * 用途：工具提示到达时，将伴随工具调用的内容文本从"可替换流式气泡"转为"永久消息"，
+     * 防止后续 clearStreamingBubble() 误删该内容。
+     */
+    public void finalizeStreamingBubble() {
+        if (lastStreamingBubble != null) {
+            lastStreamingBubble = null;
+        }
+    }
+
     /** 是否存在已展示的流式推理块（用于最终回复时避免重复添加） */
     public boolean hasStreamingReasoningBlocks() {
         return !streamingReasoningBlocks.isEmpty();

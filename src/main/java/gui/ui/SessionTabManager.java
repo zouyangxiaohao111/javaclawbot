@@ -169,6 +169,11 @@ public class SessionTabManager {
             backendBridge.sendMessage(text, mediaPaths,
                 progress -> {
                     // 进度回调在 JavaFX 线程中执行
+                    log.info("[Progress] tabId={}, type={}, content={}", currentTabId,
+                        progress.isToolResult() ? "toolResult" :
+                        progress.isToolHint() ? "toolHint" :
+                        progress.isReasoning() ? "reasoning" : "content",
+                        progress.content() != null ? progress.content().substring(0, Math.min(40, progress.content().length())) : "null");
                     if (progress.isToolResult()) {
                         // 处理工具结果（TodoWrite、AskUserQuestion 等）
                         handleToolResult(chatPage, lastToolCard, fileEditParams, progress);
@@ -189,12 +194,13 @@ public class SessionTabManager {
                         response != null ? response.substring(0, Math.min(50, response.length())) : "null");
                     chatPage.getChatInput().setSending(false);
                     chatPage.removeThinkingPlaceholder();
-                    // 记录流式推理块是否已展示（在清除前检查，避免重复）
+                    // 先清除流式气泡和推理块追踪，再检查是否需要添加推理
+                    // 顺序关键：工具调用轮次的流式推理属于前一轮，不应影响当前轮的推理判断
+                    chatPage.clearStreamingBubble();
                     boolean hadStreamingReasoning = chatPage.hasStreamingReasoningBlocks();
                     log.info("[DIAG] hadStreamingReasoning={}, streamingReasoningBlocks.size={}",
                         hadStreamingReasoning,
                         chatPage.getStreamingReasoningBlockCount());
-                    chatPage.clearStreamingBubble();
                     String reasoning = backendBridge.getLastReasoningContent();
                     // 推理未通过流式展示 → 作为独立推理块添加（与历史恢复行为一致）
                     if (reasoning != null && !reasoning.isBlank() && !hadStreamingReasoning) {
@@ -430,9 +436,9 @@ public class SessionTabManager {
                     // 最终回复
                     chatPage.getChatInput().setSending(false);
                     chatPage.removeThinkingPlaceholder();
-                    // 记录流式推理块是否已展示（在清除前检查，避免重复）
-                    boolean hadStreamingReasoning = chatPage.hasStreamingReasoningBlocks();
+                    // 先清除流式气泡和推理块追踪，再检查是否需要添加推理
                     chatPage.clearStreamingBubble();
+                    boolean hadStreamingReasoning = chatPage.hasStreamingReasoningBlocks();
                     String reasoning = backendBridge.getLastReasoningContent();
                     // 推理未通过流式展示 → 作为独立推理块添加（与历史恢复行为一致）
                     if (reasoning != null && !reasoning.isBlank() && !hadStreamingReasoning) {
@@ -762,6 +768,10 @@ public class SessionTabManager {
     private void handleToolHint(ChatPage chatPage, ToolCallCard[] lastToolCard,
                                 Map<String, String> fileEditParams,
                                 BackendBridge.ProgressEvent progress) {
+        // 工具提示到达时，先固化当前流式气泡（将伴随工具调用的内容文本从"可替换"转为"永久"）
+        // 防止后续 clearStreamingBubble() 在最终回复时误删该内容
+        chatPage.finalizeStreamingBubble();
+
         String toolName = progress.toolName() != null
             ? progress.toolName()
             : extractToolName(progress.content());
