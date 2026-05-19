@@ -38,6 +38,89 @@ public final class TitleGenerator {
         return generateTitle(provider, session, fastModel, false);
     }
 
+    /**
+     * 直接使用用户文本生成标题（不依赖 session.getMessages()）。
+     * 用于首次消息时 session 中尚无消息的场景。
+     *
+     * @param provider  LLM provider
+     * @param userText  用户消息文本
+     * @param fastModel 标题生成专用快速模型
+     * @return 生成的标题，失败时返回 null
+     */
+    public static String generateTitleFromText(LLMProvider provider, String userText, String fastModel) {
+        if (provider == null || userText == null || userText.isBlank()) return null;
+        try {
+            String model = (fastModel != null && !fastModel.isBlank()) ? fastModel : provider.getDefaultModel();
+            if (model == null || model.isBlank()) {
+                log.info("无法生成标题: provider 没有默认模型");
+                return null;
+            }
+
+            String truncated = userText.trim().length() > 200 ? userText.trim().substring(0, 200) : userText.trim();
+
+            List<Map<String, Object>> llmMessages = new ArrayList<>();
+            Map<String, Object> systemMsg = new HashMap<>();
+            systemMsg.put("role", "system");
+            systemMsg.put("content", "你是一个标题生成助手。根据用户消息生成一个10字以内的中文标题，简洁概括主题。只输出标题，不要引号、标点或任何额外文字。");
+            llmMessages.add(systemMsg);
+
+            Map<String, Object> userMsg = new HashMap<>();
+            userMsg.put("role", "user");
+            userMsg.put("content", "历史对话内容：<history>" + truncated + "</history>");
+            llmMessages.add(userMsg);
+
+            Map<String, Object> promptMsg = new HashMap<>();
+            promptMsg.put("role", "user");
+            promptMsg.put("content", "请为以上消息生成一个10字以内的中文标题。直接生成");
+            llmMessages.add(promptMsg);
+
+            java.util.concurrent.CompletableFuture<providers.LLMResponse> future;
+            try {
+                future = provider.chatWithRetry(llmMessages, null, model, 5120, 0.3);
+            } catch (Exception ex) {
+                log.warn("标题生成(generateTitleFromText): chatWithRetry 调用失败: " + ex.getMessage(), ex);
+                return null;
+            }
+            if (future == null) return null;
+
+            providers.LLMResponse response;
+            try {
+                response = future.get(180, java.util.concurrent.TimeUnit.SECONDS);
+            } catch (Exception ex) {
+                log.warn("标题生成(generateTitleFromText): future.get 失败: " + ex.getMessage(), ex);
+                return null;
+            }
+
+            if (response == null || "error".equals(response.getFinishReason())) {
+                log.warn("标题生成(generateTitleFromText): LLM 响应异常");
+                return null;
+            }
+
+            String title = Helpers.stripThink(response.getContent());
+            if (title != null) {
+                title = title.trim()
+                        .replaceAll("^[\"'\u201C\u201D\u2018\u2019\u300C\u300D]+", "")
+                        .replaceAll("[\"'\u201C\u201D\u2018\u2019\u300C\u300D]+$", "")
+                        .replaceAll("^[\u300A\u300E\u300F]", "")
+                        .replaceAll("[\u300B\u300E\u300F]$", "");
+                if (title.length() > 20) {
+                    title = title.substring(0, 20);
+                }
+            }
+
+            if (title != null && !title.isBlank() && title.length() <= 20) {
+                log.info("标题已生成(generateTitleFromText): " + title);
+                return title;
+            }
+
+            log.info("标题生成(generateTitleFromText): AI 返回内容不可用");
+            return null;
+        } catch (Exception e) {
+            log.warn("标题生成失败(generateTitleFromText): " + e.getMessage(), e);
+            return null;
+        }
+    }
+
     public static void main(String[] args) {
         Config config = ConfigIO.loadConfig(null);
         String fastModel = config.getAgents().getDefaults().getFastModel();
@@ -131,7 +214,7 @@ public final class TitleGenerator {
                         llmMessages,
                         null,   // tools
                         model,
-                        50,     // max_tokens
+                        5120,     // max_tokens
                         0.3     // temperature
                 );
             } catch (Exception ex) {

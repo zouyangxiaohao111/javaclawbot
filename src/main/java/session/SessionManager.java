@@ -12,12 +12,14 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.stream.Collectors;
 
 /**
  * 会话管理器（增强稳健版）
@@ -286,6 +288,93 @@ public final class SessionManager {
         if (keyToIdMap.remove(sessionKey) != null) {
             saveKeyToIdMap();
             cache.remove(sessionKey);
+        }
+    }
+
+    /**
+     * 保存会话（原子写入 + 清洗非法字符 + 同 key 加锁）
+     */
+    public void saveTitle(Session session) {
+        String key = session.getKey();
+        String sessionId = session.getSessionId();
+
+        ReentrantLock lock = sessionLocks.computeIfAbsent(key, k -> new ReentrantLock());
+
+        try {
+            lock.lock();
+            Path target = getSessionPath(sessionId);
+            Helpers.ensureDir(target.getParent());
+
+            // 临时文件：与目标文件放同目录，保证 move 更稳
+            Path tmp = target.resolveSibling(target.getFileName().toString() + ".tmp");
+
+            // 先清洗，避免坏字符在写文件阶段炸掉
+            Map<String, Object> safeMetadata = castMap(deepSanitize(session.getMetadata()));
+
+            // 保护已有标题：如果当前 session.meta 无 title 但磁盘文件已有 title，保留磁盘版本
+            // 防止 AgentLoop 异步 save 覆盖掉 triggerTitleGeneration 刚写入的标题
+            if (!safeMetadata.containsKey("title") || safeMetadata.get("title") instanceof String s && s.isBlank()) {
+                try {
+                    if (Files.exists(target)) {
+                        try (BufferedReader diskReader = Files.newBufferedReader(target, StandardCharsets.UTF_8)) {
+                            String firstLine = diskReader.readLine();
+                            if (firstLine != null) {
+                                Map<String, Object> diskMeta = objectMapper.readValue(
+                                        firstLine, new TypeReference<Map<String, Object>>() {});
+                                Object diskMd = diskMeta.get("metadata");
+                                if (diskMd == null ) {
+                                    diskMd = new HashMap();
+                                }
+                                if (diskMd instanceof Map) {
+                                    Object diskTitle = ((Map<?, ?>) diskMd).get("title");
+                                    if (diskTitle instanceof String diskTitleStr && !diskTitleStr.isBlank()) {
+                                        safeMetadata = new LinkedHashMap<>(safeMetadata);
+                                        safeMetadata.put("title", diskTitleStr);
+                                        session.getMetadata().put("title", diskTitleStr);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch (Exception ignored) {
+                }
+            }
+
+            try (BufferedWriter w = Files.newBufferedWriter(
+                    tmp,
+                    StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE,
+                    StandardOpenOption.TRUNCATE_EXISTING,
+                    StandardOpenOption.WRITE
+            )) {
+                Map<String, Object> metaLine = new LinkedHashMap<>();
+                metaLine.put("_type", "metadata");
+                metaLine.put("key", sanitizeString(session.getKey()));
+                metaLine.put("session_id", sanitizeString(session.getSessionId()));
+                metaLine.put("created_at", session.getCreatedAt().toString());
+                metaLine.put("updated_at", session.getUpdatedAt().toString());
+                metaLine.put("metadata", safeMetadata);
+
+                w.write(objectMapper.writeValueAsString(metaLine));
+                w.write("\n");
+
+                w.flush();
+            }
+
+            // 原子替换：避免正式文件写一半损坏
+            atomicReplace(tmp, target);
+
+            // 更新映射
+            keyToIdMap.put(key, sessionId);
+            saveKeyToIdMap();
+
+            session.setMetadata(safeMetadata);
+            cache.put(key, session);
+
+        } catch (Exception e) {
+            log.error("保存会话失败：" + key + "，原因：" + e.getMessage(), e);
+        } finally {
+            lock.unlock();
         }
     }
 

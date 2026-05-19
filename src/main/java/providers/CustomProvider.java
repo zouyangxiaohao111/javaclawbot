@@ -49,6 +49,89 @@ public final class CustomProvider extends LLMProvider {
         this("no-key", "http://localhost:8000/v1", "default");
     }
 
+    /*@Override
+    public LLMResponse chatOnce(
+            List<Map<String, Object>> messages,
+            List<Map<String, Object>> tools,
+            String model,
+            int maxTokens,
+            double temperature,
+            String reasoningEffort,
+            Map<String, Object> think,
+            Map<String, Object> extraBody) {
+        String useModel = (model == null || model.isBlank()) ? defaultModel : model;
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("model", useModel);
+        body.put("messages", LLMProvider.sanitizeEmptyContent(messages));
+        body.put("max_tokens", Math.max(1, maxTokens));
+        body.put("temperature", temperature);
+
+        if (reasoningEffort != null && !reasoningEffort.isBlank()) {
+            body.put("reasoning_effort", reasoningEffort);
+        }
+
+        // 思考模式：think 非空时添加到请求体
+        if (think != null && !think.isEmpty()) {
+            body.putAll(think);
+        }
+
+        // 额外请求参数：直接合并到请求体
+        if (extraBody != null && !extraBody.isEmpty()) {
+            body.putAll(extraBody);
+        }
+
+        if (tools != null && !tools.isEmpty()) {
+            body.put("tools", tools);
+            body.put("tool_choice", "auto");
+        }
+
+        String url = normalizeBase(apiBase) + "/chat/completions";
+
+        final String json;
+        try {
+            json = objectMapper.writeValueAsString(body);
+        } catch (Exception e) {
+            return errorResponse(e);
+        }
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .timeout(Duration.ofSeconds(600))
+                .header("Content-Type", "application/json")
+                .header("Authorization", "Bearer " + apiKey)
+                .POST(HttpRequest.BodyPublishers.ofString(json, StandardCharsets.UTF_8))
+                .build();
+        try {
+            HttpResponse<String> resp = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            if (resp.statusCode() < 200 || resp.statusCode() >= 300) {
+                String msg = "Error: HTTP " + resp.statusCode() + " " + safe(resp.body());
+                LLMResponse r = new LLMResponse();
+                r.setContent(msg);
+                r.setFinishReason("error");
+                return r;
+            }
+
+            try {
+                return parse(resp.body());
+            } catch (Exception e) {
+                return errorResponse(e);
+            }
+        } catch (Throwable ex) {
+            Throwable root = (ex instanceof CompletionException && ex.getCause() != null)
+                    ? ex.getCause()
+                    : ex;
+
+            if (root instanceof CancellationException) {
+                throw new CompletionException(root);
+            }
+
+            return errorResponse(root);
+        }
+
+
+    }*/
+
     @Override
     public CompletableFuture<LLMResponse> chat(
             List<Map<String, Object>> messages,

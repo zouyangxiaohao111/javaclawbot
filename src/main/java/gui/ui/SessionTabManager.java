@@ -56,6 +56,16 @@ public class SessionTabManager {
         tabBar.setOnTabClosed(this::closeTab);
         tabBar.setOnNewTab(this::createNewTab);
 
+        // 设置 ProjectRegistry 变更回调，当 registry 变更时刷新当前活跃标签的徽标
+        backendBridge.setOnRegistryChanged(() -> {
+            if (activeTabId != null) {
+                ChatPage activePage = tabChatPages.get(activeTabId);
+                if (activePage != null) {
+                    activePage.refreshProjectBadge();
+                }
+            }
+        });
+
         // 设置标题生成回调，当标题生成成功时更新标签标题
         backendBridge.setOnTitleChanged(() -> {
             log.info("[标题回调] 触发，tabSessionMap大小={}, 内容={}", tabSessionMap.size(), tabSessionMap);

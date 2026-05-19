@@ -413,15 +413,7 @@ public class BackendBridge {
                         Consumer<String> cb = ctx.responseCallback.getAndSet(null);
                         ctx.waitingForResponse = false;
 
-                        // 标题生成：回复完成后触发，确保 session 已包含本轮完整对话
-                        // force=true 优先：深度对话后的标题再生成，此时不再触发普通生成
-                        int msgCount = ctx.userMessageCount.get();
-                        if (msgCount >= 3 && ctx.titleRegenerationPending.compareAndSet(false, true)) {
-                            ctx.titleGenerationPending.set(true);  // 阻止后续 force=false 触发
-                            triggerTitleGeneration(ctx, true);
-                        } else if (msgCount >= 1 && ctx.titleGenerationPending.compareAndSet(false, true)) {
-                            triggerTitleGeneration(ctx, false);
-                        }
+                        // 标题生成已在用户发送消息时触发，此处不再重复触发
 
                         Platform.runLater(() -> {
                             if (cb != null) {
@@ -520,8 +512,15 @@ public class BackendBridge {
             }
         }, executor);
 
-        // 标题生成计数器（实际触发在收到回复后，确保 session 已包含本轮对话）
-        ctx.userMessageCount.incrementAndGet();
+        // 标题生成计数器
+        int msgCount = ctx.userMessageCount.incrementAndGet();
+
+        // 首次用户消息时立即触发标题生成（不等待LLM回复）
+        if (msgCount == 1 && ctx.titleGenerationPending.compareAndSet(false, true)) {
+            triggerTitleGenerationByUser(ctx, text);
+        }else {
+            triggerTitleGeneration(ctx, false);
+        }
     }
 
     /**
@@ -698,6 +697,69 @@ public class BackendBridge {
         return session.getHistory();
     }
 
+
+    /**
+     * 异步生成/更新会话标题
+     * @param text 用户消息
+     */
+    private void triggerTitleGenerationByUser(TabSessionContext ctx, String text) {
+        CompletableFuture.runAsync(() -> {
+            try {
+                Session session = ctx.session;
+                if (session == null) {
+                    return;
+                }
+                String sessionId = session.getSessionId();
+
+                // ── 首次生成：直接使用用户传入的 text（此时 session 中尚无消息） ──
+                log.info("标题生成(首次LLM总结): sessionId={}, textLen={}", sessionId,
+                        text != null ? text.length() : 0);
+                String fastModel = config.getAgents().getDefaults().getFastModel();
+                String defaultModel = provider.getDefaultModel();
+                String effectiveModel = (fastModel != null && !fastModel.isBlank()) ? fastModel : defaultModel;
+
+                // 创建标题专用 provider
+                LLMProvider titleProvider;
+                try {
+                    String titleProviderName = config.getAgents().getDefaults().getProvider();
+                    titleProvider = providers.ProviderFactory.createProvider(config, titleProviderName, effectiveModel);
+                } catch (Exception pe) {
+                    log.warn("创建标题专用 provider 失败，回退到默认 provider: {}", pe.getMessage());
+                    titleProvider = provider;
+                }
+
+                // 直接用 text 构建 LLM 请求，不依赖 session.getMessages()
+                String title = TitleGenerator.generateTitleFromText(titleProvider, text, fastModel);
+                if (title != null && !title.isBlank()) {
+                    session.getMetadata().put("title", title);
+                    sessionManager.saveTitle(session);
+                    log.info("标题生成成功(首次LLM): sessionId={}, title={}", sessionId, title);
+                } else {
+                    // LLM 失败，使用回退方案：直接从 text 截取
+                    String fallback = (text != null && !text.isBlank() && text.trim().length() > 2)
+                            ? text.trim().substring(0, Math.min(10, text.trim().length()))
+                            : "新对话-" + java.time.LocalDate.now()
+                                    .format(java.time.format.DateTimeFormatter.ofPattern("yy-MM-dd"));
+                    session.getMetadata().put("title", fallback);
+                    sessionManager.saveTitle(session);
+                    log.info("标题生成(回退方案): sessionId={}, title={}", sessionId, fallback);
+                }
+            } catch (Exception e) {
+                log.warn("标题生成异常: " + e.getMessage());
+            } finally {
+                // 重置标志位，允许下次消息重新尝试标题生成/更新
+                resetTitleFlags(ctx);
+            }
+            // 通知 UI 刷新侧栏标题
+            log.info("[标题回调] 准备触发 onTitleChanged, isNull={}", onTitleChanged == null);
+            if (onTitleChanged != null) {
+                log.info("[标题回调] 触发 onTitleChanged 回调");
+                Platform.runLater(onTitleChanged);
+            }
+        }, executor);
+
+    }
+
     /**
      * 异步生成/更新会话标题
      * @param force 为 true 时即使已有标题也重新生成（对话深入后更新）
@@ -726,15 +788,38 @@ public class BackendBridge {
                 }
 
                 if (!force) {
-                    // ── 首次生成：直接截取首条用户消息，不调用 LLM，不阻塞 ──
-                    String fallback = extractFirstUserMessage(session);
-                    if (fallback == null || fallback.isBlank()) {
-                        fallback = "新对话-" + java.time.LocalDate.now()
-                            .format(java.time.format.DateTimeFormatter.ofPattern("yy-MM-dd"));
+                    // ── 首次生成：使用 LLM 总结用户消息 ──
+                    log.info("标题生成(首次LLM总结): sessionId={}, force={}", sessionId, force);
+                    String fastModel = config.getAgents().getDefaults().getFastModel();
+                    String defaultModel = provider.getDefaultModel();
+                    String effectiveModel = (fastModel != null && !fastModel.isBlank()) ? fastModel : defaultModel;
+
+                    // 创建标题专用 provider
+                    LLMProvider titleProvider;
+                    try {
+                        String titleProviderName = config.getAgents().getDefaults().getProvider();
+                        titleProvider = providers.ProviderFactory.createProvider(config, titleProviderName, effectiveModel);
+                    } catch (Exception pe) {
+                        log.warn("创建标题专用 provider 失败，回退到默认 provider: {}", pe.getMessage());
+                        titleProvider = provider;
                     }
-                    session.getMetadata().put("title", fallback);
-                    sessionManager.save(session);
-                    log.info("标题生成(首条消息截断): sessionId={}, title={}", sessionId, fallback);
+
+                    String title = TitleGenerator.generateTitle(titleProvider, session, fastModel, false);
+                    if (title != null && !title.isBlank()) {
+                        session.getMetadata().put("title", title);
+                        sessionManager.save(session);
+                        log.info("标题生成成功(首次LLM): sessionId={}, title={}", sessionId, title);
+                    } else {
+                        // LLM 失败，使用回退方案
+                        String fallback = extractFirstUserMessage(session);
+                        if (fallback == null || fallback.isBlank()) {
+                            fallback = "新对话-" + java.time.LocalDate.now()
+                                .format(java.time.format.DateTimeFormatter.ofPattern("yy-MM-dd"));
+                        }
+                        session.getMetadata().put("title", fallback);
+                        sessionManager.save(session);
+                        log.info("标题生成(回退方案): sessionId={}, title={}", sessionId, fallback);
+                    }
                 } else {
                     // ── 深度总结（第三次对话后）：用 LLM 生成更精确的标题 ──
                     String fastModel = config.getAgents().getDefaults().getFastModel();
@@ -798,7 +883,7 @@ public class BackendBridge {
         }
     }
 
-    /** 从会话历史中提取首条用户消息（截取 20 字）作为标题回退 */
+    /** 从会话历史中提取首条用户消息（截取 10 字）作为标题回退 */
     private static String extractFirstUserMessage(Session session) {
         if (session == null) return null;
         for (Map<String, Object> msg : session.getMessages()) {
@@ -817,7 +902,7 @@ public class BackendBridge {
                 }
                 if (text != null && !text.isBlank()) {
                     text = text.replaceAll("\\s+", " ").trim();
-                    if (text.length() > 20) text = text.substring(0, 20);
+                    if (text.length() > 10) text = text.substring(0, 10);
                     return text;
                 }
             }
