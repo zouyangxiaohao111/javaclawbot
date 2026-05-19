@@ -201,14 +201,25 @@ scripts/start-server.sh --project-dir /path/to/project
 scripts/start-server.sh --project-dir /path/to/project
 ```
 
-**Claude Code (Windows):**
+**Claude Code (Windows) — 通过 agent 工具后台执行：**
 ```bash
-# Windows auto-detects and uses foreground mode, which blocks the tool call.
-# Use run_in_background: true on the Bash tool call so the server survives
-# across conversation turns.
-scripts/start-server.sh --project-dir /path/to/project
+# Windows 上的 start-server.sh 自动使用 foreground 模式。
+# 通过 agent 的 Bash 工具后台执行时必须添加 --disable-owner-monitor，
+# 否则 server.cjs 的 owner PID 监控会在后台任务完成后杀死进程。
+scripts/start-server.sh --project-dir /path/to/project --disable-owner-monitor
 ```
 通过 Bash 工具调用时，设置 `run_in_background: true`。然后在下一轮读取 `$STATE_DIR/server-info` 获取 URL 和端口。
+
+**重要：** `--disable-owner-monitor` 告诉 server.cjs 不监控父进程存活状态，
+仅依赖 30 分钟空闲超时自动退出。这对于 agent 工具后台执行（如 Claude Code 的 Bash
+工具 `run_in_background`）是必需的，否则启动脚本设置的 OWNER_PID 在后台任务
+完成后被回收，导致 server.cjs 60 秒内自杀死进程。
+
+**PowerShell (Windows):**
+```powershell
+# 通过 start-server.ps1 启动，同样需要 --disable-owner-monitor
+.\scripts\start-server.ps1 --project-dir D:\path\to\project --disable-owner-monitor
+```
 
 **Codex:**
 ```bash

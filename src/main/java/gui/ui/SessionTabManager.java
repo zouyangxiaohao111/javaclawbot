@@ -3,6 +3,7 @@ package gui.ui;
 import gui.ui.components.SessionTabBar;
 import gui.ui.components.TabItem;
 import gui.ui.components.ToolCallCard;
+import gui.ui.components.ModelSelectorPopup;
 import gui.ui.pages.ChatPage;
 import javafx.application.Platform;
 import javafx.geometry.Pos;
@@ -34,6 +35,7 @@ public class SessionTabManager {
     private final Map<String, String> tabSessionMap = new ConcurrentHashMap<>(); // tabId → sessionId
     private String activeTabId = null;
     private int maxConcurrent = 4; // 默认值
+    private final ModelSelectorPopup modelSelectorPopup = new ModelSelectorPopup();
 
     public SessionTabManager(SessionTabBar tabBar, BackendBridge backendBridge, VBox chatArea) {
         this.tabBar = tabBar;
@@ -122,6 +124,9 @@ public class SessionTabManager {
         // 创建 ChatPage
         ChatPage chatPage = new ChatPage();
         chatPage.setBackendBridge(backendBridge);
+        // 初始化项目徽标和 Popover（修复多标签系统下徽标无文字、点击无反应）
+        chatPage.setProjectInfo(backendBridge.getProjectRegistry(),
+            backendBridge.getConfig().getWorkspacePath());
 
         // 注册消息发送回调
         final String currentTabId = tabId;
@@ -129,6 +134,9 @@ public class SessionTabManager {
         final Map<String, String> fileEditParams = new java.util.HashMap<>();
         // 用于跟踪最后一个工具卡片
         final ToolCallCard[] lastToolCard = {null};
+
+        // 设置停止回调
+        chatPage.getChatInput().setOnStop(() -> backendBridge.stopMessage());
 
         chatPage.getChatInput().addSendListener(text -> {
             log.info("[消息发送] tabId={}, text={}", currentTabId, text.length() > 50 ? text.substring(0, 50) + "..." : text);
@@ -143,6 +151,8 @@ public class SessionTabManager {
                 log.info("[Session映射] tabId={}, sessionId={}", currentTabId, sessionId);
             }
 
+            // 切换到发送中状态（显示停止按钮）
+            chatPage.getChatInput().setSending(true);
             // 添加思考占位符
             chatPage.addThinkingPlaceholder();
             chatPage.setStatusText("● 思考中...");
@@ -170,15 +180,18 @@ public class SessionTabManager {
                     // 最终回复
                     log.info("[最终回复] tabId={}, response={}", currentTabId,
                         response != null ? response.substring(0, Math.min(50, response.length())) : "null");
+                    chatPage.getChatInput().setSending(false);
                     chatPage.removeThinkingPlaceholder();
+                    // 记录流式推理块是否已展示（在清除前检查，避免重复）
+                    boolean hadStreamingReasoning = chatPage.hasStreamingReasoningBlocks();
                     chatPage.clearStreamingBubble();
-                    // 推理+回复合并为一个视觉单元
                     String reasoning = backendBridge.getLastReasoningContent();
-                    if (reasoning != null && !reasoning.isBlank()) {
-                        chatPage.addAssistantMessageWithReasoning(reasoning, response);
-                    } else {
-                        chatPage.addAssistantMessage(response, false);
+                    // 推理未通过流式展示 → 作为独立推理块添加（与历史恢复行为一致）
+                    if (reasoning != null && !reasoning.isBlank() && !hadStreamingReasoning) {
+                        chatPage.addReasoningBlock(reasoning);
                     }
+                    // 回复内容作为独立气泡添加
+                    chatPage.addAssistantMessage(response, false);
                     chatPage.setStatusText("● 模型就绪 · " + getCurrentModelName());
                     chatPage.setContextUsage(backendBridge.getContextUsageRatio());
                     // 更新标签状态
@@ -189,6 +202,7 @@ public class SessionTabManager {
                 error -> {
                     // 错误
                     log.error("[错误回复] tabId={}, error={}", currentTabId, error);
+                    chatPage.getChatInput().setSending(false);
                     chatPage.removeThinkingPlaceholder();
                     chatPage.clearStreamingBubble();
                     chatPage.addAssistantMessage("⚠ " + error, false);
@@ -217,6 +231,9 @@ public class SessionTabManager {
         // 设置初始状态文本（包含模型名称）
         chatPage.setStatusText("● 模型就绪 · " + getCurrentModelName());
 
+        // 接线模型选择器
+        wireModelSelector(chatPage, tabId);
+
         // 激活新标签
         switchToTab(tabId);
 
@@ -229,7 +246,7 @@ public class SessionTabManager {
     public void switchToTab(String tabId) {
         if (activeTabId != null && activeTabId.equals(tabId)) return;
 
-        log.info("[标签切换] 从 {} 切换到 {}", activeTabId, tabId);
+        log.debug("[标签切换] 从 {} 切换到 {}", activeTabId, tabId);
 
         // 隐藏当前标签内容
         if (activeTabId != null) {
@@ -246,9 +263,9 @@ public class SessionTabManager {
         if (newPage != null) {
             newPage.setVisible(true);
             newPage.setManaged(true);
-            log.info("[标签切换] ChatPage 已显示: tabId={}", tabId);
+            log.debug("[标签切换] ChatPage 已显示: tabId={}", tabId);
         } else {
-            log.warn("[标签切换] ChatPage 不存在: tabId={}", tabId);
+            log.debug("[标签切换] ChatPage 不存在: tabId={}", tabId);
         }
 
         // 更新标签栏状态
@@ -257,9 +274,16 @@ public class SessionTabManager {
         // 更新后端活跃标签
         backendBridge.setActiveTab(tabId);
 
+        // 刷新状态栏模型显示 + 项目徽标
+        ChatPage activePage = tabChatPages.get(tabId);
+        if (activePage != null) {
+            activePage.setStatusText("\u25CF 模型就绪 \u00B7 " + getCurrentModelName() + " \u25BE");
+            activePage.refreshProjectBadge();
+        }
+
         // 检查 session 映射
         String sessionId = tabSessionMap.get(tabId);
-        log.info("[标签切换] sessionId={}", sessionId);
+        log.debug("[标签切换] sessionId={}", sessionId);
     }
 
     /**
@@ -342,6 +366,9 @@ public class SessionTabManager {
         // 创建 ChatPage
         ChatPage chatPage = new ChatPage();
         chatPage.setBackendBridge(backendBridge);
+        // 初始化项目徽标和 Popover
+        chatPage.setProjectInfo(backendBridge.getProjectRegistry(),
+            backendBridge.getConfig().getWorkspacePath());
 
         // 注册消息发送回调 - 每个标签页独立的状态
         final String currentTabId = tabId;
@@ -350,10 +377,15 @@ public class SessionTabManager {
         // 用于跟踪最后一个工具卡片
         final ToolCallCard[] lastToolCard = {null};
 
+        // 设置停止回调
+        chatPage.getChatInput().setOnStop(() -> backendBridge.stopMessage());
+
         chatPage.getChatInput().addSendListener(text -> {
             // 确保当前标签是活跃的
             backendBridge.setActiveTab(currentTabId);
 
+            // 切换到发送中状态（显示停止按钮）
+            chatPage.getChatInput().setSending(true);
             // 添加思考占位符
             chatPage.addThinkingPlaceholder();
             chatPage.setStatusText("● 思考中...");
@@ -379,15 +411,18 @@ public class SessionTabManager {
                 },
                 response -> {
                     // 最终回复
+                    chatPage.getChatInput().setSending(false);
                     chatPage.removeThinkingPlaceholder();
+                    // 记录流式推理块是否已展示（在清除前检查，避免重复）
+                    boolean hadStreamingReasoning = chatPage.hasStreamingReasoningBlocks();
                     chatPage.clearStreamingBubble();
-                    // 推理+回复合并为一个视觉单元
                     String reasoning = backendBridge.getLastReasoningContent();
-                    if (reasoning != null && !reasoning.isBlank()) {
-                        chatPage.addAssistantMessageWithReasoning(reasoning, response);
-                    } else {
-                        chatPage.addAssistantMessage(response, false);
+                    // 推理未通过流式展示 → 作为独立推理块添加（与历史恢复行为一致）
+                    if (reasoning != null && !reasoning.isBlank() && !hadStreamingReasoning) {
+                        chatPage.addReasoningBlock(reasoning);
                     }
+                    // 回复内容作为独立气泡添加
+                    chatPage.addAssistantMessage(response, false);
                     chatPage.setStatusText("● 模型就绪 · " + getCurrentModelName());
                     chatPage.setContextUsage(backendBridge.getContextUsageRatio());
                     // 更新标签状态
@@ -397,6 +432,7 @@ public class SessionTabManager {
                 },
                 error -> {
                     // 错误
+                    chatPage.getChatInput().setSending(false);
                     chatPage.removeThinkingPlaceholder();
                     chatPage.clearStreamingBubble();
                     chatPage.addAssistantMessage("⚠ " + error, false);
@@ -427,6 +463,9 @@ public class SessionTabManager {
         chatPage.setManaged(false);
         VBox.setVgrow(chatPage, Priority.ALWAYS);
         chatArea.getChildren().add(chatPage);
+
+        // 接线模型选择器
+        wireModelSelector(chatPage, tabId);
 
         // 激活新标签
         switchToTab(tabId);
@@ -512,17 +551,23 @@ public class SessionTabManager {
 
     /**
      * 获取当前模型名称
+     * 优先使用标签级别模型，否则使用全局默认模型
      */
     private String getCurrentModelName() {
         try {
+            // 优先检查标签级别模型
+            if (activeTabId != null && backendBridge != null) {
+                String[] modelConfig = backendBridge.getModelForTab(activeTabId);
+                if (modelConfig[1] != null && !modelConfig[1].isBlank()) {
+                    return modelConfig[1];
+                }
+            }
+            // 回退到全局默认模型
             if (backendBridge != null && backendBridge.getConfig() != null) {
                 String model = backendBridge.getConfig().getAgents().getDefaults().getModel();
-                log.info("[模型名称] 获取到模型: {}", model);
                 if (model != null && !model.isBlank()) {
                     return model;
                 }
-            } else {
-                log.warn("[模型名称] backendBridge 或 config 为 null");
             }
         } catch (Exception e) {
             log.warn("获取模型名称失败: {}", e.getMessage());
@@ -574,6 +619,32 @@ public class SessionTabManager {
      */
     public void updateTabStatus(String tabId, TabItem.Status status) {
         tabBar.updateTabStatus(tabId, status);
+    }
+
+    /**
+     * 为 ChatPage 接线模型选择器点击回调
+     */
+    private void wireModelSelector(ChatPage chatPage, String tabId) {
+        chatPage.getChatInput().setOnModelClick(() -> {
+            if (modelSelectorPopup.isShowing()) {
+                modelSelectorPopup.hide();
+                return;
+            }
+            String[] modelConfig = backendBridge.getModelForTab(tabId);
+            String curProvider = modelConfig[0];
+            String curModel = modelConfig[1];
+            modelSelectorPopup.show(
+                chatPage.getChatInput().getLeftStatusLabel(),
+                backendBridge.getConfig(),
+                tabId,
+                curProvider,
+                curModel,
+                (provider, model) -> {
+                    backendBridge.setModelForTab(tabId, provider, model);
+                    chatPage.getChatInput().updateModelDisplayName(model);
+                }
+            );
+        });
     }
 
     /**

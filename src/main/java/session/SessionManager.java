@@ -36,8 +36,6 @@ import java.util.logging.Logger;
 @Slf4j
 public final class SessionManager {
 
-    private static final Logger LOG = Logger.getLogger(SessionManager.class.getName());
-
     @Getter
     private final Path workspace;
     private final Path sessionsDir;
@@ -154,7 +152,7 @@ public final class SessionManager {
             }
             atomicReplace(tmp, target);
         } catch (Exception e) {
-            LOG.log(Level.WARNING, "写入新会话元数据失败: " + session.getSessionId(), e);
+            log.warn( "写入新会话元数据失败: " + session.getSessionId(), e);
         }
     }
 
@@ -169,6 +167,19 @@ public final class SessionManager {
     public void resumeSession(String sessionKey, String sessionId) {
         if (sessionKey == null || sessionId == null) {
             throw new IllegalArgumentException("sessionKey and sessionId cannot be null");
+        }
+
+        // 清理指向同一 sessionId 的其他旧映射（防止多标签共享同一 Session 文件导致消息混入）
+        List<String> keysToRemove = new ArrayList<>();
+        for (Map.Entry<String, String> entry : keyToIdMap.entrySet()) {
+            if (sessionId.equals(entry.getValue()) && !sessionKey.equals(entry.getKey())) {
+                keysToRemove.add(entry.getKey());
+            }
+        }
+        for (String oldKey : keysToRemove) {
+            keyToIdMap.remove(oldKey);
+            cache.remove(oldKey);
+            log.info("[resumeSession] cleaned old mapping: {} -> {}", oldKey, sessionId);
         }
 
         // 更新映射
@@ -186,6 +197,63 @@ public final class SessionManager {
     }
 
     /**
+     * 更新 session 文件 metadata 行的 key 字段（resume 后同步）。
+     * 只改写第一行 metadata，不影响后续消息行。
+     */
+    public void updateSessionFileKey(String sessionId, String newKey) {
+        if (sessionId == null || newKey == null) return;
+        Path path = getSessionPath(sessionId);
+        if (!Files.exists(path)) return;
+
+        try {
+            // 读取第一行 metadata
+            String firstLine;
+            try (BufferedReader r = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
+                firstLine = r.readLine();
+            }
+            if (firstLine == null) return;
+
+            Map<String, Object> data = objectMapper.readValue(firstLine, new TypeReference<Map<String, Object>>() {});
+            if (!"metadata".equals(data.get("_type"))) return;
+
+            String oldKey = (String) data.get("key");
+            if (newKey.equals(oldKey)) return; // 已经是最新
+
+            // 更新 key 字段
+            data.put("key", newKey);
+            String updatedLine = objectMapper.writeValueAsString(data);
+
+            // 读取剩余行
+            List<String> remainingLines = new ArrayList<>();
+            try (BufferedReader r = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
+                r.readLine(); // 跳过第一行
+                String line;
+                while ((line = r.readLine()) != null) {
+                    remainingLines.add(line);
+                }
+            }
+
+            // 原子写入
+            Path tmp = path.resolveSibling(path.getFileName().toString() + ".tmp");
+            try (BufferedWriter w = Files.newBufferedWriter(tmp, StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)) {
+                w.write(updatedLine);
+                w.write("\n");
+                for (String line : remainingLines) {
+                    w.write(line);
+                    w.write("\n");
+                }
+                w.flush();
+            }
+            atomicReplace(tmp, path);
+
+            log.info("[updateSessionFileKey] sessionId={}, key: {} -> {}", sessionId, oldKey, newKey);
+        } catch (Exception e) {
+            log.warn("[updateSessionFileKey] failed: sessionId={}, error={}", sessionId, e.getMessage());
+        }
+    }
+
+    /**
      * 删除指定 sessionId 的会话文件。
      */
     public boolean deleteSession(String sessionId) {
@@ -199,7 +267,7 @@ public final class SessionManager {
                 deleted = true;
             }
         } catch (Exception e) {
-            LOG.log(Level.WARNING, "删除会话文件失败: " + sessionId, e);
+            log.error("删除会话文件失败: " + sessionId, e);
             return false;
         }
 
@@ -207,6 +275,18 @@ public final class SessionManager {
         keyToIdMap.values().remove(sessionId);
         saveKeyToIdMap();
         return deleted;
+    }
+
+    /**
+     * 移除指定 sessionKey 的映射（标签关闭时调用，避免 sessions.json 累积废弃条目）。
+     * 不删除会话文件，只清理 key→id 映射和缓存。
+     */
+    public void removeSessionKey(String sessionKey) {
+        if (sessionKey == null) return;
+        if (keyToIdMap.remove(sessionKey) != null) {
+            saveKeyToIdMap();
+            cache.remove(sessionKey);
+        }
     }
 
     /**
@@ -317,7 +397,7 @@ public final class SessionManager {
             cache.put(key, session);
 
         } catch (Exception e) {
-            LOG.log(Level.WARNING, "保存会话失败：" + key + "，原因：" + e.getMessage(), e);
+            log.error("保存会话失败：" + key + "，原因：" + e.getMessage(), e);
         } finally {
             lock.unlock();
         }
@@ -432,9 +512,9 @@ public final class SessionManager {
             try {
                 Helpers.ensureDir(newPath.getParent());
                 Files.move(legacyPath, newPath, StandardCopyOption.REPLACE_EXISTING);
-                LOG.log(Level.INFO, "已迁移旧会话文件：{0}", key);
+                log.info("已迁移旧会话文件：{0}", key);
             } catch (Exception e) {
-                LOG.log(Level.WARNING, "迁移会话失败：" + key, e);
+                log.error("迁移会话失败：" + key, e);
             }
             
             Session session = loadFromPath(key, newPath);
@@ -522,13 +602,13 @@ public final class SessionManager {
 
                 } catch (Exception ex) {
                     badLines++;
-                    LOG.log(Level.WARNING,
+                    log.warn(
                             "会话文件存在坏行，已跳过。key=" + key + ", line=" + lineNo + ", reason=" + ex.getMessage());
                 }
             }
 
             if (badLines > 0) {
-                LOG.log(Level.WARNING, "加载会话完成，但发现坏行：key={0}, badLines={1}", new Object[]{key, badLines});
+                log.warn("加载会话完成，但发现坏行：key={}, badLines={}", key, badLines);
             }
 
             // 如果没有 sessionId，生成一个新的
@@ -567,7 +647,7 @@ public final class SessionManager {
             return session;
 
         } catch (Exception e) {
-            LOG.log(Level.WARNING, "加载会话失败：" + key + "，原因：" + e.getMessage(), e);
+            log.error("加载会话失败：" + key + "，原因：" + e.getMessage(), e);
             backupCorruptedFile(path);
             return null;
         }
@@ -601,7 +681,7 @@ public final class SessionManager {
                 keyToIdMap.putAll(map);
             }
         } catch (Exception e) {
-            LOG.log(Level.WARNING, "加载会话映射失败", e);
+            log.error("加载会话映射失败", e);
         }
     }
 
@@ -621,7 +701,7 @@ public final class SessionManager {
                 StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)) {
             objectMapper.writeValue(w, new HashMap<>(keyToIdMap));
         } catch (Exception e) {
-            LOG.log(Level.WARNING, "写入会话映射临时文件失败", e);
+            log.error("写入会话映射临时文件失败", e);
             // 清理临时文件（如果存在）
             deleteIfExists(tmpFile);
             return;
@@ -637,10 +717,10 @@ public final class SessionManager {
                 if (Files.exists(tmpFile)) {
                     Files.move(tmpFile, mapFile, StandardCopyOption.REPLACE_EXISTING);
                 } else {
-                    LOG.log(Level.WARNING, "临时文件不存在，跳过移动: " + tmpFile);
+                    log.warn("临时文件不存在，跳过移动: " + tmpFile);
                 }
             } catch (Exception ex) {
-                LOG.log(Level.WARNING, "移动会话映射文件失败", ex);
+                log.error("移动会话映射文件失败", ex);
                 // 清理临时文件（安全删除）
                 deleteIfExists(tmpFile);
             }
@@ -654,7 +734,7 @@ public final class SessionManager {
         try {
             Files.deleteIfExists(path);
         } catch (Exception e) {
-            LOG.log(Level.WARNING, "清理临时文件失败: " + path, e);
+            log.error("清理临时文件失败: " + path, e);
         }
     }
 
@@ -688,9 +768,9 @@ public final class SessionManager {
             String name = path.getFileName().toString();
             Path backup = path.resolveSibling(name + ".corrupted." + System.currentTimeMillis() + ".bak");
             Files.copy(path, backup, StandardCopyOption.REPLACE_EXISTING);
-            LOG.log(Level.WARNING, "已备份损坏会话文件：{0}", backup);
+            log.info("已备份损坏会话文件：{0}", backup);
         } catch (Exception ex) {
-            LOG.log(Level.WARNING, "备份损坏会话文件失败：" + path, ex);
+            log.error("备份损坏会话文件失败：" + path, ex);
         }
     }
 
@@ -1045,7 +1125,7 @@ public final class SessionManager {
             return freed;
             
         } catch (Exception e) {
-            LOG.log(Level.WARNING, "磁盘预算检查失败", e);
+            log.info("磁盘预算检查失败", e);
             return 0;
         }
     }

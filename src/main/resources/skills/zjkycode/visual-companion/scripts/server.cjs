@@ -79,7 +79,11 @@ const URL_HOST = process.env.BRAINSTORM_URL_HOST || (HOST === '127.0.0.1' ? 'loc
 const SESSION_DIR = process.env.BRAINSTORM_DIR || '/tmp/brainstorm';
 const CONTENT_DIR = path.join(SESSION_DIR, 'content');
 const STATE_DIR = path.join(SESSION_DIR, 'state');
-let ownerPid = process.env.BRAINSTORM_OWNER_PID ? Number(process.env.BRAINSTORM_OWNER_PID) : null;
+// BRAINSTORM_DISABLE_OWNER_MONITOR=true 显式禁用 owner PID 监控。
+// 适用于 agent 工具后台执行等场景（如 Claude Code Bash 工具 run_in_background），
+// 其中启动脚本设置的 OWNER_PID 可能在后台任务完成后被回收，导致 server.cjs 自杀死进程。
+const disableOwnerMonitor = process.env.BRAINSTORM_DISABLE_OWNER_MONITOR === 'true';
+let ownerPid = disableOwnerMonitor ? null : (process.env.BRAINSTORM_OWNER_PID ? Number(process.env.BRAINSTORM_OWNER_PID) : null);
 
 const MIME_TYPES = {
   '.html': 'text/html', '.css': 'text/css', '.js': 'application/javascript',

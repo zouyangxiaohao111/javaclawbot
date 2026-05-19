@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Start the brainstorm server and output connection info
-# Usage: start-server.sh [--project-dir <path>] [--host <bind-host>] [--url-host <display-host>] [--foreground] [--background]
+# Usage: start-server.sh [--project-dir <path>] [--host <bind-host>] [--url-host <display-host>] [--foreground] [--background] [--disable-owner-monitor]
 #
 # Starts server on a random high port, outputs JSON with URL.
 # Each session gets its own directory to avoid conflicts.
@@ -11,8 +11,9 @@
 #   --host <bind-host>    Host/interface to bind (default: 127.0.0.1).
 #                         Use 0.0.0.0 in remote/containerized environments.
 #   --url-host <host>     Hostname shown in returned URL JSON.
-#   --foreground          Run server in the current terminal (no backgrounding).
-#   --background          Force background mode (overrides Codex auto-foreground).
+#   --foreground              Run server in the current terminal (no backgrounding).
+#   --background              Force background mode (overrides Codex auto-foreground).
+#   --disable-owner-monitor   Disable owner PID monitoring (for agent tool background execution).
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
@@ -22,6 +23,7 @@ FOREGROUND="false"
 FORCE_BACKGROUND="false"
 BIND_HOST="127.0.0.1"
 URL_HOST=""
+DISABLE_OWNER_MONITOR="false"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --project-dir)
@@ -42,6 +44,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --background|--daemon)
       FORCE_BACKGROUND="true"
+      shift
+      ;;
+    --disable-owner-monitor)
+      DISABLE_OWNER_MONITOR="true"
       shift
       ;;
     *)
@@ -102,21 +108,29 @@ cd "$SCRIPT_DIR"
 # Resolve the harness PID (grandparent of this script).
 # $PPID is the ephemeral shell the harness spawned to run us — it dies
 # when this script exits. The harness itself is $PPID's parent.
-OWNER_PID="$(ps -o ppid= -p "$PPID" 2>/dev/null | tr -d ' ')"
-if [[ -z "$OWNER_PID" || "$OWNER_PID" == "1" ]]; then
-  OWNER_PID="$PPID"
+# --disable-owner-monitor: 跳过 owner PID 解析，适用于 agent 工具后台执行等场景。
+OWNER_PID=""
+if [[ "$DISABLE_OWNER_MONITOR" != "true" ]]; then
+  OWNER_PID="$(ps -o ppid= -p "$PPID" 2>/dev/null | tr -d ' ')"
+  if [[ -z "$OWNER_PID" || "$OWNER_PID" == "1" ]]; then
+    OWNER_PID="$PPID"
+  fi
 fi
 
 # Foreground mode for environments that reap detached/background processes.
 if [[ "$FOREGROUND" == "true" ]]; then
   echo "$$" > "$PID_FILE"
-  env BRAINSTORM_DIR="$SESSION_DIR" BRAINSTORM_HOST="$BIND_HOST" BRAINSTORM_URL_HOST="$URL_HOST" BRAINSTORM_OWNER_PID="$OWNER_PID" node server.cjs
+  DISABLE_FLAG=""
+  [[ "$DISABLE_OWNER_MONITOR" == "true" ]] && DISABLE_FLAG="BRAINSTORM_DISABLE_OWNER_MONITOR=true"
+  env BRAINSTORM_DIR="$SESSION_DIR" BRAINSTORM_HOST="$BIND_HOST" BRAINSTORM_URL_HOST="$URL_HOST" BRAINSTORM_OWNER_PID="$OWNER_PID" $DISABLE_FLAG node server.cjs
   exit $?
 fi
 
 # Start server, capturing output to log file
 # Use nohup to survive shell exit; disown to remove from job table
-nohup env BRAINSTORM_DIR="$SESSION_DIR" BRAINSTORM_HOST="$BIND_HOST" BRAINSTORM_URL_HOST="$URL_HOST" BRAINSTORM_OWNER_PID="$OWNER_PID" node server.cjs > "$LOG_FILE" 2>&1 &
+DISABLE_FLAG=""
+[[ "$DISABLE_OWNER_MONITOR" == "true" ]] && DISABLE_FLAG="BRAINSTORM_DISABLE_OWNER_MONITOR=true"
+nohup env BRAINSTORM_DIR="$SESSION_DIR" BRAINSTORM_HOST="$BIND_HOST" BRAINSTORM_URL_HOST="$URL_HOST" BRAINSTORM_OWNER_PID="$OWNER_PID" $DISABLE_FLAG node server.cjs > "$LOG_FILE" 2>&1 &
 SERVER_PID=$!
 disown "$SERVER_PID" 2>/dev/null
 echo "$SERVER_PID" > "$PID_FILE"

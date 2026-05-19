@@ -18,11 +18,11 @@ public class AgentDefaults {
     private String workspace = "~/.javaclawbot/workspace";
     private String model = "qwen/qwen3.6-plus";
     private String provider = "openrouter";
-    public static final int MAX_TOKENS = 8192;
+    public static final int MAX_TOKENS = 12800;
     /**
      * 上下文窗口token数量
      */
-    public static final int CONTEXT_WINDOW = 32000;
+    public static final int CONTEXT_WINDOW = 200000;
     public static final double TEMPERATURE = 0.1;
     /**
      * 是否开发者

@@ -33,6 +33,7 @@ import bus.OutboundMessage;
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.util.StrUtil;
 import config.Config;
+import config.ConfigIO;
 import config.agent.AgentRuntimeSettings;
 import config.provider.model.ModelConfig;
 
@@ -55,6 +56,7 @@ import context.auto.PostCompactCleanup;
 import context.auto.ReadFileState;
 import context.auto.SessionMemoryCompactService;
 import corn.CronService;
+import lombok.extern.slf4j.Slf4j;
 import memory.MemoryStore;
 import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
@@ -88,9 +90,9 @@ import java.nio.file.Path;
 import static utils.Helpers.stripThink;
 import static utils.Helpers.toolHint;
 
+@Slf4j
 public class AgentLoop {
 
-    private static final Logger log = LoggerFactory.getLogger(AgentLoop.class);
     /**
      * 工具返回结果最大字符数
      */
@@ -911,7 +913,7 @@ public class AgentLoop {
             if (msg == null) continue;
 
             String content = msg.getContent() == null ? "" : msg.getContent().trim();
-            log.info("AgentLoop收到消息:{}", content);
+            log.info("【会话：{}】AgentLoop收到消息:{}", msg.getSessionKey(), content);
             // 新任务开始前清理 stop 标记
             clearStopRequested(msg.getSessionKey());
 
@@ -1681,7 +1683,24 @@ public class AgentLoop {
 
         ProgressCallback progress = getBusProgressCallback(msg, onProgress);
 
-        return runAgentLoop(msg, initialMessages, requestTools, true, progress).thenApply(rr -> {
+        // ── 消息级别模型切换：如果消息携带 customProvider，临时 swap ──
+        LLMProvider savedProvider = null;
+        String savedModel = null;
+        boolean useCustomModel = false;
+        LLMProvider customProvider = msg.getCustomProvider();
+        if (customProvider != null && msg.getModel() != null && !msg.getModel().isBlank()) {
+            savedProvider = this.provider;
+            savedModel = this.model;
+            this.provider = customProvider;
+            this.model = msg.getModel();
+            useCustomModel = true;
+            if (log.isInfoEnabled()) {
+                log.info("Using per-message model: provider={} model={}", msg.getProviderName(), msg.getModel());
+            }
+        }
+
+        try {
+            return runAgentLoop(msg, initialMessages, requestTools, true, progress).thenApply(rr -> {
             String finalContent = rr.finalContent != null
                     ? rr.finalContent
                     : "处理完成但没有响应内容。";
@@ -1693,7 +1712,7 @@ public class AgentLoop {
                 return null;
             }
 
-            // 提取推理内容
+            // 提取推理内容（从最后一条 assistant 消息开始向前查找，跳过空白值继续搜索）
             String reasoningContent = null;
             for (int i = rr.messages.size() - 1; i >= 0; i--) {
                 Map<String, Object> am = rr.messages.get(i);
@@ -1701,8 +1720,9 @@ public class AgentLoop {
                     Object rc = am.get("reasoning_content");
                     if (rc instanceof String s && !s.isBlank()) {
                         reasoningContent = s;
+                        break; // 仅在找到有效推理内容时跳出
                     }
-                    break;
+                    // 空白值跳过，继续向前查找（避免工具调用轮次的推理被忽略）
                 }
             }
             Map<String, Object> meta = msg.getMetadata() != null
@@ -1719,6 +1739,16 @@ public class AgentLoop {
                     meta
             );
         });
+        } finally {
+            // 恢复原始 provider/model
+            if (useCustomModel && savedProvider != null) {
+                this.provider = savedProvider;
+                this.model = savedModel;
+                if (log.isDebugEnabled()) {
+                    log.debug("Restored default model: {}", savedModel);
+                }
+            }
+        }
     }
 
     private CompletionStage<OutboundMessage> handleContextPress(InboundMessage msg, Session session) {
@@ -2111,7 +2141,7 @@ public class AgentLoop {
                                 ? String.format("%.1fK", contextWindow * softTrimThreshold / 1_000.0)
                                 : String.valueOf(contextWindow * softTrimThreshold);
                 // 打印上下文统计
-                log.info("上下文统计：已用 {} tokens，上下文使用率 {}% ({}{})，压缩阈值 {}% ({}),软裁剪阈值: {}% ({})",
+                log.info("【会话：{}】上下文统计：已用 {} tokens，上下文使用率 {}% ({}{})，压缩阈值 {}% ({}),软裁剪阈值: {}% ({})", sess.getKey(),
                         totalUsedStr,
                         String.format("%.1f", contextRatio * 100),
                         currentStr,
@@ -2145,15 +2175,27 @@ public class AgentLoop {
                 }
 
                 // 发起调用
-                CompletableFuture<providers.LLMResponse> llmFuture = provider.chatWithRetry(
+                // 如果custom为空使用默认
+                Config config = currentConfig();
+                String providerName = msg.getCustomProvider() == null ? config.getAgents().getDefaults().getProvider() : msg.getProviderName();
+                LLMProvider customProvider = msg.getCustomProvider() == null ? provider : msg.getCustomProvider();
+
+                // 获取动态参数
+                String model = msg.getModel() == null ? rs.model() : msg.getModel();
+                int maxTokens = config.obtainMaxTokens(providerName, model);
+                double temperature = config.obtainTemperature(providerName, model);
+                Map<String, Object> think = config.obtainThink(providerName, model);
+                Map<String, Object> extraBody = config.obtainExtraBody(providerName, model);
+
+                CompletableFuture<providers.LLMResponse> llmFuture = customProvider.chatWithRetry(
                         messages,
                         tools.getDefinitions(),
-                        rs.model(),
-                        rs.maxTokens(),
-                        rs.temperature(),
+                        model,
+                        maxTokens,
+                        temperature,
                         rs.reasoningEffort(),
-                        rs.think(),
-                        rs.extraBody(),
+                        think,
+                        extraBody,
                         () -> isStopRequested(msg.getSessionKey())
                 ).toCompletableFuture();
 
@@ -2183,7 +2225,7 @@ public class AgentLoop {
                         String errorMsg = root.getMessage() != null ? root.getMessage() : root.toString();
 
                         if (ContextOverflowDetector.isLikelyContextOverflowError(errorMsg)) {
-                            log.warn("检测到上下文溢出: {}", errorMsg);
+                            log.warn("【会话：{}】检测到上下文溢出: {}", sess.getKey(), errorMsg);
                             st.done.set(true);
                             out.complete(new RunResult(
                                     ContextOverflowDetector.formatOverflowError(),
@@ -2223,13 +2265,13 @@ public class AgentLoop {
 
                     // 记录思考内容
                     if(StrUtil.isNotBlank(resp.getReasoningContent())) {
-                        log.info("LLM 思考: \n{}", resp.getReasoningContent());
+                        log.info("【会话：{}】LLM 思考: \n{}", sess.getKey(), resp.getReasoningContent());
                     }
 
                     // 移除思考标签，获取干净的内容
                     String clean = stripThink(resp.getContent());
                     if(StrUtil.isNotBlank(clean)) {
-                        log.info("LLM 回复:\n{} \n\n", clean);
+                        log.info("【会话：{}】LLM 回复:\n{} \n\n", sess.getKey(), clean);
                     }
 
                     usageAcc.accumulate(resp);
@@ -2329,6 +2371,8 @@ public class AgentLoop {
                     Map<String, Object> assistant = new HashMap<>();
                     assistant.put("role", "assistant");
                     assistant.put("content", clean);
+                    assistant.put("model", msg.getModel());
+                    assistant.put("provider", msg.getProviderName());
                     assistant.put("reasoning_content", resp.getReasoningContent());
                     assistant.put("timestamp", LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
                     // 添加 usage 字段（对齐 Claude Code 每条消息记录 usage）

@@ -2,6 +2,7 @@ package gui.ui.components;
 
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
+import javafx.scene.Scene;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.TextField;
@@ -9,7 +10,9 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
-import javafx.stage.Popup;
+import javafx.scene.paint.Color;
+import javafx.stage.Stage;
+import javafx.stage.StageStyle;
 import providers.cli.ProjectRegistry;
 import providers.cli.ProjectRegistry.ProjectInfo;
 
@@ -19,12 +22,13 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * 项目管理弹出面板（非模态 Popup）。
+ * 项目管理弹出面板（非模态 Stage）。
  * 列出所有绑定项目，支持编辑路径、切换主项目、绑定/解绑。
+ * 使用 Stage 替代 Popup 以解决 Popup 不参与焦点模型导致 TextField 无法输入的问题。
  */
 public class ProjectPopover {
 
-    private final Popup popup;
+    private final Stage popupStage;
     private final VBox root;
     private final VBox projectListBox;
     private final Label titleLabel;
@@ -37,8 +41,11 @@ public class ProjectPopover {
     private Runnable onChanged;
 
     public ProjectPopover() {
-        popup = new Popup();
-        popup.setAutoHide(true);
+        popupStage = new Stage(StageStyle.UNDECORATED);
+        popupStage.setAlwaysOnTop(true);
+        popupStage.focusedProperty().addListener((obs, old, focused) -> {
+            if (!focused) popupStage.hide();
+        });
 
         root = new VBox(8);
         root.setStyle(
@@ -99,7 +106,10 @@ public class ProjectPopover {
         pathField.setOnAction(e -> doBind());
         nameField.setOnAction(e -> pathField.requestFocus());
 
-        popup.getContent().add(root);
+        Scene scene = new Scene(root, Color.TRANSPARENT);
+        scene.setFill(Color.TRANSPARENT);
+        scene.getStylesheets().add(getClass().getResource("/static/css/styles/main.css").toExternalForm());
+        popupStage.setScene(scene);
     }
 
     /**
@@ -116,17 +126,18 @@ public class ProjectPopover {
 
         double popoverHeight = root.prefHeight(-1);
         javafx.geometry.Bounds bounds = owner.localToScreen(owner.getBoundsInLocal());
-        popup.show(owner.getScene().getWindow(),
-            bounds.getMaxX() - root.getMaxWidth(),
-            bounds.getMinY() - popoverHeight - 8);
+        popupStage.setX(bounds.getMaxX() - root.getMaxWidth());
+        popupStage.setY(bounds.getMinY() - popoverHeight - 8);
+        popupStage.sizeToScene();
+        popupStage.show();
     }
 
     public void hide() {
-        popup.hide();
+        popupStage.hide();
     }
 
     public boolean isShowing() {
-        return popup.isShowing();
+        return popupStage.isShowing();
     }
 
     /**

@@ -35,6 +35,13 @@ public class InboundMessage {
     /** 可选：覆盖默认会话键 */
     private String sessionKeyOverride;
 
+    /** 标签级别提供商名称（多会话模型选择） */
+    private String providerName;
+    /** 标签级别模型名称（多会话模型选择） */
+    private String model;
+    /** 临时 provider（由 BackendBridge 创建，AgentLoop 使用） */
+    private transient Object customProvider;
+
     public InboundMessage() {
     }
 
@@ -130,6 +137,31 @@ public class InboundMessage {
 
     public void setSessionKeyOverride(String sessionKeyOverride) {
         this.sessionKeyOverride = sessionKeyOverride;
+    }
+
+    public String getProviderName() {
+        return providerName;
+    }
+
+    public void setProviderName(String providerName) {
+        this.providerName = providerName;
+    }
+
+    public String getModel() {
+        return model;
+    }
+
+    public void setModel(String model) {
+        this.model = model;
+    }
+
+    @SuppressWarnings("unchecked")
+    public <T> T getCustomProvider() {
+        return (T) customProvider;
+    }
+
+    public void setCustomProvider(Object customProvider) {
+        this.customProvider = customProvider;
     }
 
     @Override

@@ -5,6 +5,7 @@ All notable changes to NexusAI will be documented in this file.
 ## [2.3.10] - 2026-05-18
 
 ### Added
+- **状态栏显示当前模型**：历史会话恢复时同步显示该会话使用的模型名称
 - **多会话标签页独立状态管理**：每个标签页独立维护 TodoWrite、文件变更、工具卡片等状态
   - 每个标签页独立的 `lastToolCard` 和 `fileEditParams`
   - TodoWrite 卡片、AskUserQuestion 卡片、工具链路卡片正确显示
@@ -20,9 +21,12 @@ All notable changes to NexusAI will be documented in this file.
   - 消息回复后更新状态文本
 
 ### Fixed
-- **会话状态丢失**：修复切换标签时会话状态丢失的问题
-  - 使用 UUID 作为 tabId，确保标签 ID 稳定
-  - 切换标签时只改变可见性，不改变状态
+- **推理标签在轮次完成后消失**：`clearStreamingBubble()` 移除了流式推理块节点。修复：只清除追踪列表不移除节点，推理在最终回复后保持可见
+- **活跃对话中 LLM 回复内容不显示**：`addAssistantMessageWithReasoning()` 的合并单元 WebView 渲染异常。修复：改用独立块方式（`addReasoningBlock()` + `addAssistantMessage()`），与历史恢复行为一致
+- **历史恢复时模型不跟随历史记录**：`resumeSession()` 未从 session metadata 恢复 `providerName`/`model`。修复：加载 session 后读取 metadata 恢复模型配置
+- **`/` 命令自动补全不显示技能**：`ChatPage.setBackendBridge()` 未传递给 `chatInput`，`CompletionPopup` 的 `SkillsLoader` 为 null。修复：`setBackendBridge()` 中传递 `backendBridge` 给 `chatInput`
+- **Tab 补全技能路径重复**：`completeItem()` prefix 拼接逻辑在输入含尾部 `/` 时导致路径重复。修复：直接用 `item.text()` 替换整个输入
+- **模型未持久化到 JSONL**：`setModelForTab()` 在 session 创建前调用时未写入 session metadata。修复：`ensureSession()` 创建 session 后检查内存中已有模型配置并写入 metadata
 - **标签 ID 不稳定**：修复删除标签后重建导致 ID 变化的问题
 - **SessionManager 文件操作问题**：修复 `NoSuchFileException: sessions.json.tmp` 错误
   - 在移动临时文件之前检查文件是否存在

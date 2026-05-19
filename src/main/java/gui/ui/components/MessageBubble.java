@@ -177,6 +177,7 @@ public class MessageBubble extends HBox {
         });
 
         // 延迟加载内容：等 bubble 进入场景后再加载，确保宽度已确定
+        // 兼容：如果节点已在场景中（sceneProperty 已设置），直接加载
         bubble.sceneProperty().addListener(new javafx.beans.value.ChangeListener<>() {
             @Override
             public void changed(javafx.beans.value.ObservableValue<? extends javafx.scene.Scene> obs,
@@ -187,6 +188,10 @@ public class MessageBubble extends HBox {
                 }
             }
         });
+        // 备用：如果 bubble 已经在场景中（sceneProperty 在监听器添加前已设置），直接加载
+        if (bubble.getScene() != null) {
+            Platform.runLater(() -> webView.getEngine().load(toDataUri(html)));
+        }
 
         return bubble;
     }

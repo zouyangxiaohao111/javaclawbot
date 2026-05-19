@@ -434,9 +434,9 @@ public class CompletionPopup {
     private void completeItem(CompletionItem item) {
         String text = inputArea.getText();
         if (item.kind() == CompletionKind.COMMAND) {
-            // Replace the partial command prefix
-            String prefix = text.substring(0, text.lastIndexOf('/'));
-            inputArea.setText(prefix + item.text() + " ");
+            // 直接替换整个输入，避免 prefix 拼接导致路径重复
+            // （item.text 已包含前导 /，替换后自动补全完整路径）
+            inputArea.setText(item.text() + " ");
             inputArea.positionCaret(inputArea.getText().length());
         } else {
             // 填入绝对路径，免去 send 时的 Path.resolve 解析

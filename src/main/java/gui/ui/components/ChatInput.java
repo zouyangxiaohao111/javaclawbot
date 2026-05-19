@@ -63,6 +63,10 @@ public class ChatInput extends VBox {
     private volatile boolean sending = false;
     /** 停止回调 */
     private Runnable stopCallback;
+    /** 模型名点击回调 */
+    private Runnable onModelClickHandler;
+    /** 当前显示的模型名 */
+    private String currentModelDisplayName = "";
     /** 双击 Esc 跟踪 */
     private long lastEscTime = 0;
     private int escCount = 0;
@@ -225,8 +229,15 @@ public class ChatInput extends VBox {
         statusBar = new HBox();
         statusBar.setPadding(new Insets(0, 16, 0, 16));
 
-        leftStatusLabel = new Label("\u25CF 模型就绪 \u00B7 Claude Sonnet 4");
-        leftStatusLabel.setStyle("-fx-font-size: 11px; -fx-text-fill: #000000;");
+        leftStatusLabel = new Label("\u25CF 模型就绪 \u00B7 " + currentModelDisplayName + " \u25BE");
+        leftStatusLabel.setStyle("-fx-font-size: 11px; -fx-text-fill: #000000; -fx-cursor: hand;");
+        leftStatusLabel.setOnMouseEntered(e ->
+            leftStatusLabel.setStyle("-fx-font-size: 11px; -fx-text-fill: #cc785c; -fx-underline: true; -fx-cursor: hand;"));
+        leftStatusLabel.setOnMouseExited(e ->
+            leftStatusLabel.setStyle("-fx-font-size: 11px; -fx-text-fill: #000000; -fx-cursor: hand;"));
+        leftStatusLabel.setOnMouseClicked(e -> {
+            if (onModelClickHandler != null) onModelClickHandler.run();
+        });
 
         Region statusSpacer = new Region();
         HBox.setHgrow(statusSpacer, Priority.ALWAYS);
@@ -789,6 +800,23 @@ public class ChatInput extends VBox {
         this.stopCallback = callback;
     }
 
+    /** 设置模型名点击回调 */
+    public void setOnModelClick(Runnable handler) {
+        this.onModelClickHandler = handler;
+    }
+
+    /** 更新状态栏模型显示名称 */
+    public void updateModelDisplayName(String modelName) {
+        this.currentModelDisplayName = modelName != null ? modelName : "";
+        javafx.application.Platform.runLater(() ->
+            leftStatusLabel.setText("\u25CF 模型就绪 \u00B7 " + currentModelDisplayName + " \u25BE"));
+    }
+
+    /** 获取状态栏左侧标签（用于 ModelSelectorPopup 定位） */
+    public Label getLeftStatusLabel() {
+        return leftStatusLabel;
+    }
+
     /**
      * 设置 BackendBridge 实例，用于获取历史消息
      */
@@ -887,6 +915,8 @@ public class ChatInput extends VBox {
     }
 
     private void triggerStop() {
+        // 立即恢复按钮状态，不依赖后端回调（stopMessage 会清空 responseCallback）
+        setSending(false);
         if (stopCallback != null) {
             stopCallback.run();
         }

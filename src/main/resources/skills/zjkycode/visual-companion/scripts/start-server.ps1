@@ -48,6 +48,7 @@ $Foreground = $false
 $ForceBackground = $false
 $BindHost = "127.0.0.1"
 $UrlHost = ""
+$DisableOwnerMonitor = $false
 
 $argv = $args
 for ($i = 0; $i -lt $argv.Count; $i++) {
@@ -74,6 +75,7 @@ for ($i = 0; $i -lt $argv.Count; $i++) {
         '--no-daemon'  { $Foreground = $true }
         '--background' { $ForceBackground = $true }
         '--daemon'     { $ForceBackground = $true }
+        '--disable-owner-monitor' { $DisableOwnerMonitor = $true }
         default {
             Write-JsonAndExit @{ error = "Unknown argument: $($argv[$i])" }
         }
@@ -161,7 +163,12 @@ try {
         [Environment]::SetEnvironmentVariable('BRAINSTORM_DIR',       $SessionDir, 'Process')
         [Environment]::SetEnvironmentVariable('BRAINSTORM_HOST',      $BindHost,   'Process')
         [Environment]::SetEnvironmentVariable('BRAINSTORM_URL_HOST',  $UrlHost,    'Process')
-        [Environment]::SetEnvironmentVariable('BRAINSTORM_OWNER_PID', "$OwnerPid", 'Process')
+        if ($DisableOwnerMonitor) {
+            [Environment]::SetEnvironmentVariable('BRAINSTORM_DISABLE_OWNER_MONITOR', 'true', 'Process')
+            [Environment]::SetEnvironmentVariable('BRAINSTORM_OWNER_PID', $null, 'Process')
+        } else {
+            [Environment]::SetEnvironmentVariable('BRAINSTORM_OWNER_PID', "$OwnerPid", 'Process')
+        }
 
         try {
             & node "server.cjs"
@@ -179,13 +186,18 @@ try {
     # -----------------------------------------
     $LauncherFile = Join-Path $StateDir "run-server.cmd"
 
+    $ownerPidLine = if ($DisableOwnerMonitor) {
+        'set "BRAINSTORM_DISABLE_OWNER_MONITOR=true"'
+    } else {
+        'set "BRAINSTORM_OWNER_PID=' + $OwnerPid + '"'
+    }
     $launcherContent = @"
 @echo off
 setlocal
 set "BRAINSTORM_DIR=$SessionDir"
 set "BRAINSTORM_HOST=$BindHost"
 set "BRAINSTORM_URL_HOST=$UrlHost"
-set "BRAINSTORM_OWNER_PID=$OwnerPid"
+$ownerPidLine
 cd /d "$ScriptDir"
 node server.cjs >> "$LogFile" 2>&1
 "@

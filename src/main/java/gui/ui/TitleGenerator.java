@@ -90,7 +90,10 @@ public final class TitleGenerator {
                 String role = (String) msg.get("role");
                 if ("user".equals(role) || "assistant".equals(role)) {
                     String content = extractTextContent(msg.get("content"));
-                    if (content != null && !content.isBlank()) {
+                    // 过滤掉空内容、"(empty)"占位符、纯工具调用消息
+                    if (content != null && !content.isBlank()
+                            && !"(empty)".equals(content.trim())
+                            && content.trim().length() > 2) {
                         Map<String, String> m = new HashMap<>();
                         m.put("role", role);
                         m.put("content", content.length() > 200 ? content.substring(0, 200) : content);
@@ -208,7 +211,11 @@ public final class TitleGenerator {
 
     private static String extractTextContent(Object contentObj) {
         if (contentObj == null) return null;
-        if (contentObj instanceof String s) return s;
+        if (contentObj instanceof String s) {
+            // 跳过 "(empty)" 占位符（纯 tool_calls 的 assistant 消息）
+            if (s.isBlank() || "(empty)".equals(s.trim())) return null;
+            return s;
+        }
         if (contentObj instanceof List<?> list) {
             StringBuilder sb = new StringBuilder();
             for (Object item : list) {
@@ -222,8 +229,12 @@ public final class TitleGenerator {
                     }
                 }
             }
-            return sb.toString();
+            String result = sb.toString();
+            if (result.isBlank()) return null;
+            return result;
         }
-        return String.valueOf(contentObj);
+        String result = String.valueOf(contentObj);
+        if (result.isBlank() || "(empty)".equals(result.trim())) return null;
+        return result;
     }
 }

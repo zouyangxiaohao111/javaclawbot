@@ -17,6 +17,8 @@ import providers.ProviderRegistry;
 
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.List;
+import java.util.Map;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -112,6 +114,15 @@ public class Config {
     }
 
     /**
+     * 获取指定模型的 ProviderConfig
+     * @param providerName
+     * @return
+     */
+    public ProviderConfig obtainProvider(String providerName) {
+        return providers.getByName(providerName);
+    }
+
+    /**
      * 获取指定模型的温度参数
      * 参数优先级：ModelConfig > AgentDefaults
      * @param model
@@ -123,6 +134,19 @@ public class Config {
                 ? modelConfig.getTemperature()
                 : AgentDefaults.TEMPERATURE;
         return temperature;
+    }
+
+
+    public double obtainTemperature(String providerName, String model) {
+        ProviderConfig providerConfig = obtainProvider(providerName);
+        List<ModelConfig> modelConfigs = providerConfig.getModelConfigs();
+        for (ModelConfig modelConfig : modelConfigs) {
+            if (modelConfig.getModel().equalsIgnoreCase(model)) {
+                return modelConfig.getTemperature();
+            }
+        }
+
+        return AgentDefaults.TEMPERATURE;
     }
 
     /**
@@ -140,6 +164,24 @@ public class Config {
     }
 
     /**
+     * 获取指定模型的最大令牌数
+     * 参数优先级：ModelConfig > AgentDefaults
+     * @param model
+     * @return
+     */
+    public int obtainMaxTokens(String provider, String model) {
+        ProviderConfig providerConfig = obtainProvider(provider);
+        List<ModelConfig> modelConfigs = providerConfig.getModelConfigs();
+        for (ModelConfig modelConfig : modelConfigs) {
+            if (modelConfig.getModel().equalsIgnoreCase(model)) {
+                return modelConfig.getMaxTokens();
+            }
+        }
+
+        return AgentDefaults.MAX_TOKENS;
+    }
+
+    /**
      * 获取指定模型的上下文窗口大小
      * 参数优先级：ModelConfig > AgentDefaults
      * @param model
@@ -151,6 +193,47 @@ public class Config {
                 ? modelConfig.getContextWindow()
                 : AgentDefaults.CONTEXT_WINDOW;
         return contextWindow;
+    }
+
+    /**
+     * 获取指定模型的上下文窗口大小
+     * 参数优先级：ModelConfig > AgentDefaults
+     * @param model
+     * @return
+     */
+    public int obtainContextWindow(String provider, String model) {
+        ProviderConfig providerConfig = obtainProvider(provider);
+        List<ModelConfig> modelConfigs = providerConfig.getModelConfigs();
+        for (ModelConfig modelConfig : modelConfigs) {
+            if (modelConfig.getModel().equalsIgnoreCase(model)) {
+                return modelConfig.getContextWindow();
+            }
+        }
+
+        return AgentDefaults.CONTEXT_WINDOW;
+    }
+
+
+    public Map<String, Object> obtainThink(String providerName, String model) {
+        ProviderConfig providerConfig = obtainProvider(providerName);
+        List<ModelConfig> modelConfigs = providerConfig.getModelConfigs();
+        for (ModelConfig modelConfig : modelConfigs) {
+            if (modelConfig.getModel().equalsIgnoreCase(model)) {
+                return modelConfig.getThink();
+            }
+        }
+        return null;
+    }
+
+    public Map<String, Object> obtainExtraBody(String providerName, String model) {
+        ProviderConfig providerConfig = obtainProvider(providerName);
+        List<ModelConfig> modelConfigs = providerConfig.getModelConfigs();
+        for (ModelConfig modelConfig : modelConfigs) {
+            if (modelConfig.getModel().equalsIgnoreCase(model)) {
+                return modelConfig.getExtraBody();
+            }
+        }
+        return null;
     }
 
     public String getApiKey(String model) {

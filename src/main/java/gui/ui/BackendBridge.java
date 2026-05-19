@@ -101,12 +101,17 @@ public class BackendBridge {
         final String sessionKey; // "cli:{tabId}"
         volatile Session session;
         volatile ProjectRegistry projectRegistry;
+        volatile String providerName; // 标签级别提供商名称
+        volatile String model;        // 标签级别模型名称
         final AtomicReference<Consumer<ProgressEvent>> progressCallback = new AtomicReference<>();
         final AtomicReference<Consumer<String>> responseCallback = new AtomicReference<>();
         final AtomicInteger userMessageCount = new AtomicInteger(0);
         volatile boolean waitingForResponse = false;
         volatile boolean titleGenerated = false;
         volatile String lastReasoningContent;
+        /** 按标签隔离的标题生成标志（修复多标签标题错乱） */
+        final AtomicBoolean titleGenerationPending = new AtomicBoolean(false);
+        final AtomicBoolean titleRegenerationPending = new AtomicBoolean(false);
 
         TabSessionContext(String tabId) {
             this.tabId = tabId;
@@ -153,9 +158,50 @@ public class BackendBridge {
         this.activeTabId = tabId;
     }
 
-    /** 销毁标签上下文 */
+    /** 销毁标签上下文，并清理 SessionManager 中的 key→id 映射 */
     public void destroyTabContext(String tabId) {
-        tabContexts.remove(tabId);
+        TabSessionContext ctx = tabContexts.remove(tabId);
+        // 清理 SessionManager 中的映射，避免 sessions.json 累积废弃条目
+        if (ctx != null && sessionManager != null) {
+            sessionManager.removeSessionKey(ctx.sessionKey);
+        }
+    }
+
+    /**
+     * 设置标签的模型配置，并持久化到 Session metadata。
+     */
+    public void setModelForTab(String tabId, String providerName, String model) {
+        TabSessionContext ctx = getOrCreateContext(tabId);
+        ctx.providerName = providerName;
+        ctx.model = model;
+        if (ctx.session != null) {
+            ctx.session.getMetadata().put("providerName", providerName);
+            ctx.session.getMetadata().put("model", model);
+            sessionManager.save(ctx.session);
+        }
+        if (log.isDebugEnabled()) {
+            log.debug("setModelForTab tab={} provider={} model={}", tabId, providerName, model);
+        }
+    }
+
+    /**
+     * 获取标签的模型配置。返回 [providerName, model]，可能为 null。
+     */
+    public String[] getModelForTab(String tabId) {
+        TabSessionContext ctx = getOrCreateContext(tabId);
+        return new String[]{ctx.providerName, ctx.model};
+    }
+
+    /**
+     * 获取标签的模型显示名称（用于状态栏）。
+     * 优先使用标签级别模型，否则使用全局默认模型。
+     */
+    public String getModelDisplayNameForTab(String tabId) {
+        TabSessionContext ctx = getOrCreateContext(tabId);
+        if (ctx.model != null && !ctx.model.isBlank()) {
+            return ctx.model;
+        }
+        return config.getAgents().getDefaults().getModel();
     }
 
     /** 恢复指定标签的会话 */
@@ -165,6 +211,16 @@ public class BackendBridge {
         sessionManager.resumeSession(ctx.sessionKey, sessionId);
         sessionManager.evictFromCache(ctx.sessionKey);
         ctx.session = sessionManager.getOrCreate(ctx.sessionKey);
+        // 从 Session metadata 恢复模型配置
+        Object pn = ctx.session.getMetadata().get("providerName");
+        Object md = ctx.session.getMetadata().get("model");
+        if (pn instanceof String p && md instanceof String m) {
+            ctx.providerName = p;
+            ctx.model = m;
+            log.info("Restored model config for tab {}: provider={} model={}", tabId, p, m);
+        }
+        // 同步更新 session 文件 metadata 行的 key 字段
+        sessionManager.updateSessionFileKey(sessionId, ctx.sessionKey);
         ProjectRegistry sessionRegistry = createProjectRegistry(sessionId);
         ctx.projectRegistry = sessionRegistry;
         this.projectRegistry = sessionRegistry;
@@ -175,17 +231,15 @@ public class BackendBridge {
         int count = countUserMessages(ctx.session);
         ctx.userMessageCount.set(count);
         if (count >= 3) {
-            titleGenerationPending.set(true);
-            titleRegenerationPending.set(true);
+            ctx.titleGenerationPending.set(true);
+            ctx.titleRegenerationPending.set(true);
         } else {
-            titleGenerationPending.set(false);
-            titleRegenerationPending.set(false);
+            ctx.titleGenerationPending.set(false);
+            ctx.titleRegenerationPending.set(false);
         }
     }
 
-    // ── 标题生成计数器（保留全局，实际按 tab 隔离在 ctx 中）──
-    private final AtomicBoolean titleGenerationPending = new AtomicBoolean(false);
-    private final AtomicBoolean titleRegenerationPending = new AtomicBoolean(false);
+    // ── 标题生成计数器（已移入 TabSessionContext 按标签隔离）──
 
     /** 标题生成/更新后回调（MainStage 设置用于刷新侧栏） */
     private volatile Runnable onTitleChanged;
@@ -339,10 +393,10 @@ public class BackendBridge {
                         // 标题生成：回复完成后触发，确保 session 已包含本轮完整对话
                         // force=true 优先：深度对话后的标题再生成，此时不再触发普通生成
                         int msgCount = ctx.userMessageCount.get();
-                        if (msgCount >= 3 && titleRegenerationPending.compareAndSet(false, true)) {
-                            titleGenerationPending.set(true);  // 阻止后续 force=false 触发
+                        if (msgCount >= 3 && ctx.titleRegenerationPending.compareAndSet(false, true)) {
+                            ctx.titleGenerationPending.set(true);  // 阻止后续 force=false 触发
                             triggerTitleGeneration(ctx, true);
-                        } else if (msgCount >= 1 && titleGenerationPending.compareAndSet(false, true)) {
+                        } else if (msgCount >= 1 && ctx.titleGenerationPending.compareAndSet(false, true)) {
                             triggerTitleGeneration(ctx, false);
                         }
 
@@ -418,6 +472,21 @@ public class BackendBridge {
                 // 使用 tabId 作为 chatId，让 getSessionKey() 自动计算 "cli:{tabId}"
                 InboundMessage in = new InboundMessage(
                         CLI_CHANNEL, "user", ctx.tabId, text, mediaPaths, null);
+                // 携带标签级别模型配置
+                in.setProviderName(ctx.providerName);
+                in.setModel(ctx.model);
+                // 如果标签有自定义模型，创建临时 provider
+                if (ctx.providerName != null && !ctx.providerName.isBlank()
+                        && ctx.model != null && !ctx.model.isBlank()) {
+                    try {
+                        LLMProvider customProvider = providers.ProviderFactory.createProvider(
+                            config, ctx.providerName, ctx.model);
+                        in.setCustomProvider(customProvider);
+                    } catch (Exception pe) {
+                        log.warn("Failed to create custom provider for {}/{}: {}",
+                            ctx.providerName, ctx.model, pe.getMessage());
+                    }
+                }
                 bus.publishInbound(in).toCompletableFuture().join();
             } catch (Exception e) {
                 ctx.waitingForResponse = false;
@@ -491,6 +560,15 @@ public class BackendBridge {
 
         ctx.session = sessionManager.createNew(ctx.sessionKey);
 
+        // 从 Session metadata 恢复模型配置
+        Object pn = ctx.session.getMetadata().get("providerName");
+        Object md = ctx.session.getMetadata().get("model");
+        if (pn instanceof String p && md instanceof String m) {
+            ctx.providerName = p;
+            ctx.model = m;
+            log.info("Restored model config for tab {}: provider={} model={}", activeTabId, p, m);
+        }
+
         log.info("[Session创建] tabId={}, sessionId={}, sessionKey={}", activeTabId, ctx.session.getSessionId(), ctx.sessionKey);
 
         // 为新会话创建独立的 ProjectRegistry
@@ -522,9 +600,9 @@ public class BackendBridge {
             ctx.session = null;
             ctx.userMessageCount.set(0);
             ctx.projectRegistry = null;
+            ctx.titleGenerationPending.set(false);
+            ctx.titleRegenerationPending.set(false);
         }
-        titleGenerationPending.set(false);
-        titleRegenerationPending.set(false);
 
         // 清空 ProjectRegistry，避免徽标/Popover 残留旧会话的项目绑定
         this.projectRegistry = new ProjectRegistry(null);
@@ -561,11 +639,11 @@ public class BackendBridge {
         ctx.userMessageCount.set(count);
         if (count >= 3) {
             // 已有足够对话轮次，不再触发标题生成/更新
-            titleGenerationPending.set(true);
-            titleRegenerationPending.set(true);
+            ctx.titleGenerationPending.set(true);
+            ctx.titleRegenerationPending.set(true);
         } else {
-            titleGenerationPending.set(false);
-            titleRegenerationPending.set(false);
+            ctx.titleGenerationPending.set(false);
+            ctx.titleRegenerationPending.set(false);
         }
     }
 
@@ -611,7 +689,7 @@ public class BackendBridge {
                 }
                 String sessionId = session.getSessionId();
 
-                // force=false 时若已有标题则直接跳过（TitleGenerator 内部也会检查，但提前跳过可避免误导日志）
+                // force=false 时若已有标题则直接跳过
                 if (!force) {
                     Map<String, Object> meta = session.getMetadata();
                     if (meta != null && meta.containsKey("title")
@@ -621,31 +699,8 @@ public class BackendBridge {
                     }
                 }
 
-                String fastModel = config.getAgents().getDefaults().getFastModel();
-                String defaultModel = provider.getDefaultModel();
-                String effectiveModel = (fastModel != null && !fastModel.isBlank()) ? fastModel : defaultModel;
-                log.info("[标题诊断] 开始生成标题: sessionId=" + sessionId + " force=" + force
-                    + " provider=" + provider.getClass().getSimpleName()
-                    + " fastModel=" + fastModel
-                    + " defaultModel=" + defaultModel
-                    + " effectiveModel=" + effectiveModel
-                    + " sessionMsgs=" + session.getMessages().size());
-                String title = TitleGenerator.generateTitle(
-                    provider, session,
-                    fastModel,   // noThinking=true，标题生成不需要思考
-                    force
-                );
-                if (title != null && !title.isBlank()) {
-                    sessionManager.save(session);
-                    log.info("标题生成成功(AI): sessionId=" + sessionId + ", title=" + title);
-                } else if (force) {
-                    // force=true 也失败，最后回退到截断首条用户消息
-                    Map<String, Object> existingMeta = session.getMetadata();
-                    if (existingMeta != null && existingMeta.containsKey("title")
-                            && existingMeta.get("title") instanceof String s && !s.isBlank()) {
-                        log.info("标题更新跳过（AI 失败，保留已有标题）: sessionId=" + sessionId);
-                        return;
-                    }
+                if (!force) {
+                    // ── 首次生成：直接截取首条用户消息，不调用 LLM，不阻塞 ──
                     String fallback = extractFirstUserMessage(session);
                     if (fallback == null || fallback.isBlank()) {
                         fallback = "新对话-" + java.time.LocalDate.now()
@@ -653,23 +708,34 @@ public class BackendBridge {
                     }
                     session.getMetadata().put("title", fallback);
                     sessionManager.save(session);
-                    log.info("标题回退(截断首条消息): sessionId=" + sessionId + ", title=" + fallback);
+                    log.info("标题生成(首条消息截断): sessionId={}, title={}", sessionId, fallback);
                 } else {
-                    // force=false AI 生成失败，立即回退到截断首条用户消息（不再等待 force=true 重试）
-                    String fallback = extractFirstUserMessage(session);
-                    if (fallback == null || fallback.isBlank()) {
-                        fallback = "新对话-" + java.time.LocalDate.now()
-                            .format(java.time.format.DateTimeFormatter.ofPattern("yy-MM-dd"));
+                    // ── 深度总结（第三次对话后）：用 LLM 生成更精确的标题 ──
+                    String fastModel = config.getAgents().getDefaults().getFastModel();
+                    String defaultModel = provider.getDefaultModel();
+                    String effectiveModel = (fastModel != null && !fastModel.isBlank()) ? fastModel : defaultModel;
+                    log.info("[标题诊断] 开始LLM深度总结: sessionId={}, force={}, model={}, sessionMsgs={}",
+                        sessionId, force, effectiveModel, session.getMessages().size());
+
+                    String title = TitleGenerator.generateTitle(
+                        provider, session,
+                        fastModel,
+                        force
+                    );
+                    if (title != null && !title.isBlank()) {
+                        session.getMetadata().put("title", title);
+                        sessionManager.save(session);
+                        log.info("标题更新成功(LLM): sessionId={}, title={}", sessionId, title);
+                    } else {
+                        // LLM 失败，保留已有标题
+                        log.info("标题更新跳过（LLM 失败，保留已有标题）: sessionId={}", sessionId);
                     }
-                    session.getMetadata().put("title", fallback);
-                    sessionManager.save(session);
-                    log.info("标题回退(AI不可用，截断首条消息): sessionId=" + sessionId + ", title=" + fallback);
                 }
             } catch (Exception e) {
                 log.warn("标题生成异常: " + e.getMessage());
             } finally {
                 // 重置标志位，允许下次消息重新尝试标题生成/更新
-                resetTitleFlags(force);
+                resetTitleFlags(ctx);
             }
             // 通知 UI 刷新侧栏标题
             log.info("[标题回调] 准备触发 onTitleChanged, isNull={}", onTitleChanged == null);
@@ -681,15 +747,13 @@ public class BackendBridge {
     }
 
     /**
-     * 重置标题生成标志位。
-     * force=true 时重置 titleRegenerationPending；
-     * force=false 时重置 titleGenerationPending（允许下次消息重试）。
+     * 重置标题生成标志位（按标签隔离）。
+     * 始终重置两个标志位，避免 force=true 后 titleGenerationPending 永久卡死。
      */
-    private void resetTitleFlags(boolean force) {
-        if (force) {
-            titleRegenerationPending.set(false);
-        } else {
-            titleGenerationPending.set(false);
+    private void resetTitleFlags(TabSessionContext ctx) {
+        if (ctx != null) {
+            ctx.titleRegenerationPending.set(false);
+            ctx.titleGenerationPending.set(false);
         }
     }
 
@@ -902,9 +966,9 @@ public class BackendBridge {
         TabSessionContext ctx = getActiveContext();
         if (ctx != null) {
             ctx.userMessageCount.set(0);
+            ctx.titleGenerationPending.set(false);
+            ctx.titleRegenerationPending.set(false);
         }
-        titleGenerationPending.set(false);
-        titleRegenerationPending.set(false);
     }
 
     /**

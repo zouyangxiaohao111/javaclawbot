@@ -62,6 +62,8 @@ public class ChatPage extends VBox {
     private Timeline thinkingAnimation;
     /** 流式输出期间的进度消息气泡（每次更新替换而非追加，避免 WebView 累积卡死 GUI） */
     private javafx.scene.Node lastStreamingBubble;
+    /** 流式输出期间创建的独立推理块（最终回复到达时需要清理，避免与合并单元重复） */
+    private final java.util.List<javafx.scene.Node> streamingReasoningBlocks = new java.util.ArrayList<>();
 
     /** 渲染节点数上限：超出后移除最旧节点，防止 WebView 内存堆积导致 GUI 卡顿 */
     private static final int MAX_VISIBLE_NODES = 80;
@@ -309,9 +311,20 @@ public class ChatPage extends VBox {
         smartScrollToBottom();
     }
 
-    /** 清除流式气泡追踪（最终回复/推理块到达时调用） */
+    /** 清除流式输出期间的所有临时节点（流式气泡 + 独立推理块），为最终合并单元腾出空间 */
     public void clearStreamingBubble() {
-        lastStreamingBubble = null;
+        // 移除流式气泡节点（不仅清引用，还从容器中移除，避免残留空白/重复内容）
+        if (lastStreamingBubble != null) {
+            messageContainer.getChildren().remove(lastStreamingBubble);
+            lastStreamingBubble = null;
+        }
+        // 清除流式推理块追踪，但不从容器移除（推理内容应保持可见，与历史恢复行为一致）
+        streamingReasoningBlocks.clear();
+    }
+
+    /** 是否存在已展示的流式推理块（用于最终回复时避免重复添加） */
+    public boolean hasStreamingReasoningBlocks() {
+        return !streamingReasoningBlocks.isEmpty();
     }
 
     /** 添加独立的推理/思考块（可折叠），用于工具调用前展示思考过程 */
@@ -393,6 +406,8 @@ public class ChatPage extends VBox {
         HBox.setHgrow(rightSpacer, Priority.ALWAYS);
         row.getChildren().addAll(avatar, reasoningBlock, rightSpacer);
         messageContainer.getChildren().add(row);
+        // 跟踪流式推理块，以便最终回复到达时清理（避免与合并单元重复）
+        streamingReasoningBlocks.add(row);
         smartScrollToBottom();
 
         // 延迟加载内容：等场景布局完成后，WebView 已有正确宽度
@@ -1149,6 +1164,7 @@ public class ChatPage extends VBox {
         fileDiffBadge.clearFiles();
         thinkingPlaceholder = null;
         lastStreamingBubble = null;
+        streamingReasoningBlocks.clear();
         loadingIndicator = null;
         if (thinkingAnimation != null) {
             thinkingAnimation.stop();
@@ -1437,6 +1453,10 @@ public class ChatPage extends VBox {
     /** 设置后端桥接引用 */
     public void setBackendBridge(BackendBridge backendBridge) {
         this.backendBridge = backendBridge;
+        // 传递给 ChatInput，使 CompletionPopup 能获取 SkillsLoader 列出技能
+        if (chatInput != null) {
+            chatInput.setBackendBridge(backendBridge);
+        }
     }
 
     /** 设置项目注册信息并初始化 Popover */
