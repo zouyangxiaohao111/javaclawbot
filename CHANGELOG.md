@@ -21,6 +21,10 @@ All notable changes to NexusAI will be documented in this file.
   - 消息回复后更新状态文本
 
 ### Fixed
+- **切换标签页后状态栏绑定项目不更新**：`BackendBridge.setActiveTab()` 只更新了 `activeTabId`，但没有同步全局 `projectRegistry` 到新标签的上下文，导致 `ChatPage.refreshProjectBadge()` 读取的是旧标签的项目绑定。修复：`setActiveTab()` 中增加全局 `projectRegistry` 和 `agentLoop` 的同步更新；同时处理 `ctx.projectRegistry == null`（新对话状态）时清空全局 registry 避免显示其他标签的项目
+- **`newSession()` 缺少 agentLoop 同步**：清空 ProjectRegistry 后未调用 `agentLoop.updateProjectRegistry()`，导致 AgentLoop 持有旧 registry 引用。修复：补充 `agentLoop.updateProjectRegistry(this.projectRegistry)` 调用
+- **切换页面后对话标签被覆盖**：`pageChangeListener` 中遗留的旧会话恢复逻辑在多标签系统下与 `tabManager` 冲突，切换回对话页时直接调用 `backendBridge.resumeSession()` + `getActiveChatPage().loadMessages()` 覆盖活跃标签内容。修复：当 `tabManager` 存在时跳过旧逻辑，标签状态通过 `setVisible/setManaged` 自动保持；同时修复旧 `addNewChatListener` 与 `tabManager.createNewTab()` 的重复触发问题
+- **推理+回复合并单元 WebView 宽度绑定导致历史恢复渲染空白**：`addAssistantMessageWithReasoning()` 和 `createAssistantMessageWithReasoningNode()` 中推理 WebView 宽度通过 `bind()` 绑定到 `responseBubble.widthProperty()`，但绑定时 responseBubble 未进入场景（width=0），导致推理 WebView 以 0 宽度加载内容。修复：移除宽度绑定，改用 `sceneProperty` 监听器在布局完成后读取 responseBubble 实际宽度再加载内容，同时设置安全的初始宽度兜底（600px/700px）
 - **推理标签在轮次完成后消失**：`clearStreamingBubble()` 移除了流式推理块节点。修复：只清除追踪列表不移除节点，推理在最终回复后保持可见
 - **活跃对话中 LLM 回复内容不显示**：`addAssistantMessageWithReasoning()` 的合并单元 WebView 渲染异常。修复：改用独立块方式（`addReasoningBlock()` + `addAssistantMessage()`），与历史恢复行为一致
 - **历史恢复时模型不跟随历史记录**：`resumeSession()` 未从 session metadata 恢复 `providerName`/`model`。修复：加载 session 后读取 metadata 恢复模型配置

@@ -159,7 +159,14 @@ public class SessionTabManager {
             // 更新标签状态
             tabBar.updateTabStatus(currentTabId, TabItem.Status.RUNNING);
 
-            backendBridge.sendMessage(text,
+            // 获取附件路径（图片+其他文件）
+            java.util.List<String> mediaPaths = chatPage.getChatInput().getAllAttachmentPaths();
+            java.util.List<java.nio.file.Path> imagePaths = new java.util.ArrayList<>();
+            for (String p : chatPage.getChatInput().getAttachedImages()) {
+                imagePaths.add(java.nio.file.Path.of(p));
+            }
+
+            backendBridge.sendMessage(text, mediaPaths,
                 progress -> {
                     // 进度回调在 JavaFX 线程中执行
                     if (progress.isToolResult()) {
@@ -216,7 +223,7 @@ public class SessionTabManager {
                     lastToolCard[0] = null;
                 }
             );
-            chatPage.addUserMessage(text);
+            chatPage.addUserMessage(text, imagePaths);
         });
 
         tabChatPages.put(tabId, chatPage);
@@ -395,7 +402,14 @@ public class SessionTabManager {
             // 更新标签状态
             tabBar.updateTabStatus(currentTabId, TabItem.Status.RUNNING);
 
-            backendBridge.sendMessage(text,
+            // 获取附件路径（图片+其他文件）
+            java.util.List<String> mediaPaths = chatPage.getChatInput().getAllAttachmentPaths();
+            java.util.List<java.nio.file.Path> imagePaths = new java.util.ArrayList<>();
+            for (String p : chatPage.getChatInput().getAttachedImages()) {
+                imagePaths.add(java.nio.file.Path.of(p));
+            }
+
+            backendBridge.sendMessage(text, mediaPaths,
                 progress -> {
                     // 进度回调在 JavaFX 线程中执行
                     if (progress.isToolResult()) {
@@ -446,7 +460,7 @@ public class SessionTabManager {
                     lastToolCard[0] = null;
                 }
             );
-            chatPage.addUserMessage(text);
+            chatPage.addUserMessage(text, imagePaths);
         });
 
         tabChatPages.put(tabId, chatPage);

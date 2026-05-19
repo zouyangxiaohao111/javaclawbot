@@ -153,9 +153,22 @@ public class BackendBridge {
         getOrCreateContext(tabId);
     }
 
-    /** 设置当前激活标签 */
+    /** 设置当前激活标签，并同步全局 projectRegistry 到该标签的上下文 */
     public void setActiveTab(String tabId) {
         this.activeTabId = tabId;
+        // 同步全局 projectRegistry 到新标签的上下文，确保状态栏显示正确
+        TabSessionContext ctx = tabContexts.get(tabId);
+        if (ctx != null) {
+            if (ctx.projectRegistry != null) {
+                this.projectRegistry = ctx.projectRegistry;
+            } else {
+                // 标签处于"新对话"状态（无 session），清空全局 registry 避免显示其他标签的项目
+                this.projectRegistry = new ProjectRegistry(null);
+            }
+            if (agentLoop != null) {
+                agentLoop.updateProjectRegistry(this.projectRegistry);
+            }
+        }
     }
 
     /** 销毁标签上下文，并清理 SessionManager 中的 key→id 映射 */
@@ -616,6 +629,9 @@ public class BackendBridge {
 
         // 清空 ProjectRegistry，避免徽标/Popover 残留旧会话的项目绑定
         this.projectRegistry = new ProjectRegistry(null);
+        if (agentLoop != null) {
+            agentLoop.updateProjectRegistry(this.projectRegistry);
+        }
         notifyRegistryChanged();
     }
 
@@ -727,8 +743,23 @@ public class BackendBridge {
                     log.info("[标题诊断] 开始LLM深度总结: sessionId={}, force={}, model={}, sessionMsgs={}",
                         sessionId, force, effectiveModel, session.getMessages().size());
 
+                    // ── 为标题生成创建专用 CustomProvider，绕过 HotSwappableProvider 的 invokeAt 忽略 model 参数的问题 ──
+                    LLMProvider titleProvider;
+                    try {
+                        String titleProviderName = config.getProviderName(effectiveModel);
+                        if (titleProviderName == null) {
+                            titleProviderName = config.getAgents().getDefaults().getProvider();
+                        }
+                        titleProvider = providers.ProviderFactory.createProvider(config, titleProviderName, effectiveModel);
+                        log.info("[标题诊断] 创建标题专用 provider: provider={}, model={}",
+                            titleProviderName, effectiveModel);
+                    } catch (Exception pe) {
+                        log.warn("[标题诊断] 创建标题专用 provider 失败，回退到默认 provider: {}", pe.getMessage());
+                        titleProvider = provider;
+                    }
+
                     String title = TitleGenerator.generateTitle(
-                        provider, session,
+                        titleProvider, session,
                         fastModel,
                         force
                     );

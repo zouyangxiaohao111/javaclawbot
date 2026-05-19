@@ -547,7 +547,8 @@ public class ChatPage extends VBox {
         reasoningBlock.getChildren().add(reasoningHeader);
 
         // 推理内容 WebView：始终保持 managed，通过 maxHeight=0/正确值 折叠展开
-        // 关键：内容只在宽度绑定生效 + 场景布局完成后加载一次，确保 scrollHeight 测量准确
+        // 关键：不绑定宽度，而是在场景布局完成后读取回复块实际宽度再加载内容
+        // 避免绑定在 responseBubble 进场景前 width=0 导致 WebView 以 0 宽度渲染
         String reasoningHtmlBody = REASONING_RENDERER.render(REASONING_PARSER.parse(reasoning));
         String reasoningHtml = REASONING_HTML_TEMPLATE.replace("%s", reasoningHtmlBody);
         WebView reasoningWv = new WebView();
@@ -555,10 +556,9 @@ public class ChatPage extends VBox {
         reasoningWv.setStyle("-fx-background-color: rgba(0,0,0,0.03);");
         reasoningWv.setPrefHeight(0);
         reasoningWv.setMaxHeight(0);
-
-        // 宽度绑定：与回复块同宽（必须在 loadContent 之前设置）
-        reasoningWv.prefWidthProperty().bind(responseBubble.widthProperty());
-        reasoningWv.maxWidthProperty().bind(responseBubble.widthProperty());
+        // 设置安全的初始宽度兜底，避免布局前渲染为 0
+        reasoningWv.setPrefWidth(600);
+        reasoningWv.setMaxWidth(700);
 
         // 存储测量的内容高度
         final double[] measuredHeight = {0};
@@ -595,12 +595,13 @@ public class ChatPage extends VBox {
             }
         });
 
-        // 推理块宽度与回复块同宽
-        reasoningBlock.prefWidthProperty().bind(responseBubble.widthProperty());
+        // 推理块宽度：使用固定最大宽度，等布局完成后按回复块实际宽度微调
+        reasoningBlock.setMaxWidth(700);
 
         // 组装
         VBox contentBox = new VBox(6);
         contentBox.getChildren().addAll(reasoningBlock, responseBubble);
+        contentBox.setMaxWidth(700);
 
         Region rightSpacer = new Region();
         HBox.setHgrow(rightSpacer, Priority.ALWAYS);
@@ -609,8 +610,27 @@ public class ChatPage extends VBox {
         messageContainer.getChildren().add(row);
         smartScrollToBottom();
 
-        // 延迟加载推理内容：等场景布局完成后，WebView 已有正确宽度
-        Platform.runLater(() -> reasoningWv.getEngine().load(toDataUri(reasoningHtml)));
+        // 延迟加载推理内容：等场景布局完成后，根据回复块实际宽度调整推理 WebView 宽度
+        // 避免绑定 widthProperty 在 layout 之前的 0 宽度渲染问题
+        row.sceneProperty().addListener(new javafx.beans.value.ChangeListener<>() {
+            @Override
+            public void changed(javafx.beans.value.ObservableValue<? extends javafx.scene.Scene> obs,
+                                javafx.scene.Scene oldScene, javafx.scene.Scene newScene) {
+                if (newScene != null) {
+                    row.sceneProperty().removeListener(this);
+                    Platform.runLater(() -> {
+                        // 布局已完成，responseBubble 有了实际宽度
+                        double w = responseBubble.getWidth();
+                        if (w > 0) {
+                            reasoningWv.setPrefWidth(w);
+                            reasoningWv.setMaxWidth(w);
+                            reasoningBlock.setPrefWidth(w);
+                        }
+                        reasoningWv.getEngine().load(toDataUri(reasoningHtml));
+                    });
+                }
+            }
+        });
     }
 
 
@@ -994,8 +1014,9 @@ public class ChatPage extends VBox {
         reasoningWv.setStyle("-fx-background-color: rgba(0,0,0,0.03);");
         reasoningWv.setPrefHeight(0);
         reasoningWv.setMaxHeight(0);
-        reasoningWv.prefWidthProperty().bind(responseBubble.widthProperty());
-        reasoningWv.maxWidthProperty().bind(responseBubble.widthProperty());
+        // 设置安全的初始宽度兜底，避免布局前绑定 widthProperty 导致的 0 宽度渲染
+        reasoningWv.setPrefWidth(600);
+        reasoningWv.setMaxWidth(700);
 
         final double[] measuredHeight = {0};
         final boolean[] heightReady = {false};
@@ -1029,16 +1050,36 @@ public class ChatPage extends VBox {
             }
         });
 
-        reasoningBlock.prefWidthProperty().bind(responseBubble.widthProperty());
+        // 不使用宽度绑定：设置固定 maxWidth，等进入场景后按实际布局微调
+        reasoningBlock.setMaxWidth(700);
 
         VBox contentBox = new VBox(6);
         contentBox.getChildren().addAll(reasoningBlock, responseBubble);
+        contentBox.setMaxWidth(700);
 
         Region rightSpacer = new Region();
         HBox.setHgrow(rightSpacer, Priority.ALWAYS);
 
         row.getChildren().addAll(avatar, contentBox, rightSpacer);
-        Platform.runLater(() -> reasoningWv.getEngine().load(toDataUri(reasoningHtml)));
+        // 延迟加载：等进入场景布局完成后，按回复块实际宽度加载推理内容
+        row.sceneProperty().addListener(new javafx.beans.value.ChangeListener<>() {
+            @Override
+            public void changed(javafx.beans.value.ObservableValue<? extends javafx.scene.Scene> obs,
+                                javafx.scene.Scene oldScene, javafx.scene.Scene newScene) {
+                if (newScene != null) {
+                    row.sceneProperty().removeListener(this);
+                    Platform.runLater(() -> {
+                        double w = responseBubble.getWidth();
+                        if (w > 0) {
+                            reasoningWv.setPrefWidth(w);
+                            reasoningWv.setMaxWidth(w);
+                            reasoningBlock.setPrefWidth(w);
+                        }
+                        reasoningWv.getEngine().load(toDataUri(reasoningHtml));
+                    });
+                }
+            }
+        });
         return row;
     }
 

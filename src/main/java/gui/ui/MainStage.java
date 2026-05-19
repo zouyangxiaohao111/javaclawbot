@@ -352,7 +352,20 @@ public class MainStage {
                     List<Map<String, Object>> sessions = backendBridge.getSessionManager().listSessions();
                     Platform.runLater(() -> {
                         sidebar.refreshHistory(sessions);
-                        // 如果"新对话"按钮触发了此事件，跳过恢复，交给 newChatListener 处理
+                        // 多标签系统（v2.3.9+）：tabManager 接管所有会话管理
+                        // 切换回对话页时只需刷新侧栏历史，不应覆盖活跃标签的内容
+                        // ChatPage 通过 setVisible/setManaged 自动保持标签状态
+                        if (tabManager != null) {
+                            if (suppressPageResume) {
+                                suppressPageResume = false;
+                            }
+                            // 如果当前无活跃标签（极端情况），创建默认标签
+                            if (tabManager.getActiveTabId() == null) {
+                                tabManager.createDefaultTab();
+                            }
+                            return;
+                        }
+                        // === 以下为旧版兼容逻辑（tabManager 未初始化时） ===
                         if (suppressPageResume) {
                             suppressPageResume = false;
                             return;
@@ -364,31 +377,8 @@ public class MainStage {
                                 String sid = (String) recent.get("session_id");
                                 if (sid != null && !sid.isBlank()) {
                                     backendBridge.resumeSession(sid);
-                                    // 更新标签标题为会话的 title
-                                    if (tabManager != null) {
-                                        String sessionTitle = "会话 " + sid.substring(0, Math.min(8, sid.length()));
-                                        Object md = recent.get("metadata");
-                                        if (md instanceof Map<?, ?> metaMap) {
-                                            Object t = metaMap.get("title");
-                                            if (t instanceof String ts && !ts.isBlank()) {
-                                                sessionTitle = ts;
-                                            }
-                                        }
-                                        tabManager.updateTabTitle(tabManager.getActiveTabId(), sessionTitle);
-                                    }
-                                    // setBackupManager 必须在 loadMessages 之前设置，
-                                    // 否则历史工具卡片的 [查看对比]/[回滚] 按钮无法找到备份文件
-                                    agent.tool.file.FileBackupManager fbm2 = backendBridge.getFileBackupManager();
-                                    if (fbm2 != null) {
-                                        getActiveChatPage().getFileDiffBadge().setBackupManager(fbm2);
-                                        // loadFromBackupManager 在 loadMessages 之后调用
-                                    }
                                     List<Map<String, Object>> history = backendBridge.getSessionHistory(sid);
                                     getActiveChatPage().loadMessages(history);
-                                    // 在 loadMessages 清空后再重新加载备份数据
-                                    if (fbm2 != null) {
-                                        getActiveChatPage().getFileDiffBadge().loadFromBackupManager();
-                                    }
                                     getActiveChatPage().setContextUsage(backendBridge.getContextUsageRatio());
                                     getActiveChatPage().refreshProjectBadge();
                                     return;
@@ -408,6 +398,10 @@ public class MainStage {
             }
         });
         sidebar.addNewChatListener(() -> {
+            // 多标签系统（v2.3.9+）：tabManager 接管"新对话"逻辑
+            // initializeBackend() 中已注册正确的 newChatListener → tabManager.createNewTab()
+            // 旧版兼容逻辑仅在 tabManager 未初始化时执行
+            if (tabManager != null) return;
             if (backendBridge != null) {
                 suppressPageResume = true;
                 backendBridge.resetTitleCounter();
