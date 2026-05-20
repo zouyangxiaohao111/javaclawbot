@@ -2,10 +2,11 @@
 
 All notable changes to NexusAI will be documented in this file.
 
-## [2.3.12] - 2026-05-20
+## [2.3.11] - 2026-05-19
 
 ### Fixed
-- **上下文压缩后附件 role 错误导致 API 拒绝请求**：`sanitizeEmptyContent()` 中 null content 检查先于 `"attachment"` role 转换执行，导致 CompactService 创建的附件（task_status/plan_file_reference/skill_listing，使用 `"attachment"` 字段而非 `"content"` 字段）携带无效的 `role: "attachment"` 发送给 LLM API。修复后将 attachment 转换移至 null 检查之前，并为无 `"content"` 字段的附件序列化 `"attachment"` 字段内容。
+- **标题无法写入的问题**：修复标题生成后无法正确写入的 bug
+- **上下文压缩后附件 role 错误导致 API 拒绝请求**：`sanitizeEmptyContent()` 中 null content 检查先于 `"attachment"` role 转换执行，导致 CompactService 创建的附件（task_status/plan_file_reference/skill_listing，使用 `"attachment"` 字段而非 `"content"` 字段）携带无效的 `role: "attachment"` 发送给 LLM API。修复：(1) 将 attachment 转换移至 null 检查之前，避免空 content 提前拦截；(2) 统一合并策略：无论 `content` 字段是什么类型（Map/List/String/null），只要 `attachment` 字段存在，就将其序列化为文本追加到 `content` 中（List 类型追加 `{type:"text", text:"..."}` 元素，其他类型追加文本），确保附件元数据不丢失。
 
 ### Changed
 - **web_search 迁移到 AnySearch 引擎（默认）**：策略模式支持 Brave/AnySearch 双引擎切换
@@ -16,10 +17,6 @@ All notable changes to NexusAI will be documented in this file.
   - 支持 400/401/402/403/429/500/503 全错误码解析
 - **web_search 默认结果数从5条改为10条**：配置文件 `config.json` 中 `tools.web.search.max_results` 默认值从5调整为10，可通过配置文件或AI参数灵活指定
 
-## [2.3.11] - 2026-05-19
-
-### Fixed
-- **标题无法写入的问题**：修复标题生成后无法正确写入的 bug
 
 ## [2.3.10] - 2026-05-18
 
