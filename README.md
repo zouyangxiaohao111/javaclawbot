@@ -1,30 +1,33 @@
-# javaclawbot
+# NexusAI
 
 <p align="center">
-  <strong>个人 AI 助手 - 多渠道、多模型、可扩展的智能代理框架</strong>
+  <strong>AI Agent 管理平台 - 多渠道、多模型、可扩展的智能代理框架</strong>
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/Java-17+-blue" alt="Java 17+">
   <img src="https://img.shields.io/badge/License-Apache%202.0-green" alt="License">
-  <img src="https://img.shields.io/badge/Status-Active-brightgreen" alt="Status">
+  <img src="https://img.shields.io/badge/Version-2.3.11-brightgreen" alt="Version">
+  <img src="https://img.shields.io/badge/GUI-JavaFX-orange" alt="GUI">
 </p>
 
 ---
 
 ## 项目简介
 
-javaclawbot 是一个基于 Java 构建的openclaw的复刻,保留了其核心功能，并整合了claude code 相关工具。提供多渠道接入、多模型支持、工具调用、会话管理、记忆存储等核心功能。设计理念参考了现代 AI Agent 架构，支持通过工具调用实现复杂任务的自动化执行。
+NexusAI（原 javaclawbot）是一款基于 Java 构建的 **AI Agent 管理平台**，提供图形化界面（GUI）来配置和管理 AI 助手。系统采用左侧导航 + 右侧内容区的经典布局，支持多渠道接入、多模型配置、技能管理、MCP 工具扩展、数据库查询、定时任务等核心功能。
 
 ### 核心特性
 
-- **多渠道支持**：Telegram、WhatsApp、Discord、飞书、钉钉、QQ、Email、Slack、Matrix 等
-- **多模型支持**：Anthropic Claude、OpenAI、OpenRouter、DeepSeek、Groq、智谱 GLM、阿里云通义、Google Gemini、Moonshot、MiniMax、硅基流动、火山引擎等
-- **工具系统**：文件读写、命令执行、网络搜索、网页抓取、消息发送、子代理、定时任务
-- **会话管理**：持久化会话、上下文窗口、记忆压缩与归档
-- **项目上下文**：开发者模式下自动加载项目的 CODE-AGENT.md/CLAUDE.md，通过 `/bind --main` 设置主代理项目
+- **图形化界面**：基于 JavaFX 的桌面应用，直观的配置和对话界面
+- **多渠道支持**：Telegram、飞书、钉钉、Discord、Email、Slack、Matrix 等
+- **多模型支持**：DeepSeek、智谱 GLM、阿里云通义、MiniMax、火山引擎等
+- **技能系统**：插件式技能扩展，支持从 ClawHub/Skills.sh 市场安装
+- **MCP 工具扩展**：通过 Model Context Protocol 连接外部工具和数据源
+- **数据库集成**：支持 MySQL、PostgreSQL、Oracle 等主流数据库，内置四层安全围栏
+- **定时任务**：Cron 表达式或固定间隔自动触发 AI 任务
+- **多会话管理**：标签页式多会话并行，独立上下文，切换自如
 - **CLI Agent 集成**：支持 Claude Code 和 OpenCode CLI，多项目并行管理
-- **CLI 交互**：命令行交互模式，支持历史记录
 
 ---
 
@@ -34,8 +37,15 @@ javaclawbot 是一个基于 Java 构建的openclaw的复刻,保留了其核心�
 
 - Java 17 或更高版本
 - Maven 3.6+
+- Node.js（可选，用于 MCP 服务器）
 
 ### 安装
+
+**方式一：一键安装包（推荐）**
+
+Windows 用户下载 `NexusAI-Setup-2.3.0.exe`，自动检测并配置环境依赖。
+
+**方式二：手动构建**
 
 ```bash
 # 克隆项目
@@ -44,59 +54,106 @@ cd javaclawbot
 
 # 构建项目
 mvn clean package -DskipTests
+
+# 启动 GUI
+java -jar target/NexusAI.jar
 ```
 
-### 初始化配置
+### 首次启动
 
-```bash
-# 初始化配置文件和工作空间
-java -cp target/classes:target/dependency/* cli.Commands onboard
-```
+首次启动会自动：
+1. 创建配置目录 `~/.javaclawbot/`
+2. 生成默认 `config.json` 配置文件
+3. 初始化工作空间和内置技能
 
-初始化后会在 `~/.javaclawbot/` 目录下创建：
-- `config.json` - 配置文件
-- `workspace/` - 工作空间
+---
 
-### 配置 API Key
+## 功能模块
 
-编辑 `~/.javaclawbot/config.json`，添加你的 API Key：
+### 对话页面
 
-```json
-{
-  "providers": {
-    "anthropic": {
-      "api_key": "your-anthropic-api-key"
-    },
-    "openai": {
-      "api_key": "your-openai-api-key"
-    }
-  },
-  "agents": {
-    "defaults": {
-      "model": "anthropic/claude-opus-4-5"
-    }
-  }
-}
-```
+与 AI 交互的主界面。支持 Markdown 渲染、代码高亮、文件上传、@ 提及等功能。
+
+- **输出窗口**：显示 AI 回复，支持 Markdown 渲染和代码高亮
+- **输入框**：支持 `ALT+↑/↓` 导航历史消息
+- **状态栏**：显示当前模型名称和上下文使用率（绿色充足/黄色注意/红色即将超限）
+- **多标签页**：支持多会话并行，每个标签独立上下文
+
+### 模型配置
+
+配置 AI 大模型的 API 凭证和参数。
+
+| 配置项 | 说明 |
+|--------|------|
+| Provider | 选择 AI 服务商（DeepSeek、阿里云等） |
+| API Key | 服务商提供的 API 密钥 |
+| API Base URL | API 端点地址，默认为官方地址 |
+| Max Tokens | 单次最大输出长度，默认 65536 |
+| Temperature | 随机性参数，0~1，推荐 0.3 |
+| 上下文窗口 | 模型能同时处理的最大 Token 数，默认 512000 |
+
+### Agent 配置
+
+设置 Agent 的行为参数。
+
+| 配置项 | 说明 |
+|--------|------|
+| 主模型 | Agent 使用的核心 AI 模型 |
+| 快速模型 | 用于标题生成等轻量级任务，节省成本 |
+| 最大迭代次数 | Agent 循环思考的最大次数，推荐 500 |
+| 自动压缩上下文 | 对话过长时自动总结历史，强烈建议开启 |
+
+### 技能管理
+
+技能是 AI Agent 的能力插件。通过技能市场或手动安装扩展 Agent 能力。
+
+**技能市场**：
+- [ClawHub](https://clawhub.ai) - 21,000+ 技能，中文友好
+- [Skills.sh](https://skills.sh) - 110,000+ 技能，全球最大
+
+### MCP 管理
+
+通过 Model Context Protocol 连接外部工具，如联网搜索、图像理解、代码分析等。
+
+### 数据库配置
+
+让 AI 能够查询和操作数据库，内置四层安全围栏：
+1. **SQL 注入防护** - 参数化查询杜绝拼接注入
+2. **操作分类检测** - 自动识别只读/破坏性操作
+3. **用户确认拦截** - 破坏性 SQL 必须人工确认
+4. **事务保护** - 自动提交/回滚，支持手动事务控制
+
+**支持的数据库**：MySQL、PostgreSQL、MariaDB、Oracle、SQL Server、H2、SQLite
+
+### 渠道配置
+
+连接外部通讯平台，使 AI 能通过飞书、Telegram、Discord 等渠道与用户交互。
+
+### 定时任务
+
+按计划自动触发 AI 执行任务，支持 Cron 表达式、固定间隔、特定时间三种模式。
 
 ---
 
 ## 使用方式
 
-### CLI 交互模式
+### GUI 模式（推荐）
+
+```bash
+# 启动图形界面
+java -jar target/NexusAI.jar
+```
+
+### CLI 模式
 
 ```bash
 # 启动交互模式
 java -cp target/classes:target/dependency/* cli.Commands agent
 
 # 单次对话
-java -cp target/classes:target/dependency/* cli.Commands agent -m "你好，请介绍一下你自己"
-```
+java -cp target/classes:target/dependency/* cli.Commands agent -m "你好"
 
-### 启动网关服务
-
-```bash
-# 启动完整网关（包括所有渠道）
+# 启动网关服务
 java -cp target/classes:target/dependency/* cli.Commands gateway
 ```
 
@@ -118,24 +175,24 @@ java -cp target/classes:target/dependency/* cli.Commands gateway
 ## 项目架构
 
 ```
-javaclawbot/
+NexusAI/
 ├── src/main/java/
 │   ├── agent/              # 核心代理引擎
 │   │   ├── AgentLoop.java      # 主循环引擎
-│   │   ├── tool/               # 工具集
+│   │   └── tool/               # 工具集
+│   ├── gui/                # GUI 界面
+│   │   └── ui/
+│   │       ├── Launcher.java       # 启动入口
+│   │       ├── MainStage.java      # 主窗口
+│   │       ├── pages/              # 页面组件
+│   │       └── components/         # UI 组件
 │   ├── bus/                # 消息总线
 │   ├── channels/           # 渠道实现
 │   ├── cli/                # 命令行接口
 │   ├── config/             # 配置管理
 │   ├── context/            # 上下文构建
-│   │   ├── ContextBuilder.java # 上下文构建器
-│   │   ├── BootstrapLoader.java# 引导文件加载
-│   │   └── MemoryStore.java    # 记忆存储
-│   ├── corn/               # 定时任务
 │   ├── memory/             # 记忆系统
 │   ├── providers/          # LLM 提供者
-│   │   └── cli/            # CLI Agent (Claude Code / OpenCode)
-│   ├── session/            # 会话管理
 │   └── utils/              # 工具类
 └── src/main/resources/     # 资源文件
 ```
@@ -144,462 +201,36 @@ javaclawbot/
 
 ## 配置说明
 
-### 完整配置示例
+配置文件位于 `~/.javaclawbot/config.json`，GUI 启动后可在设置页面可视化编辑。
+
+### 主要配置项
 
 ```json
 {
   "agents": {
     "defaults": {
-      "workspace": "~/.javaclawbot/workspace",
-      "model": "anthropic/claude-opus-4-5",
-      "provider": "auto",
-      "max_tokens": 8192,
-      "temperature": 0.1,
-      "max_tool_iterations": 40,
-      "memory_window": 100,
-      "development": false,
-      "project_path": null
+      "model": "deepseek/deepseek-v4-pro",
+      "max_tokens": 65536,
+      "temperature": 0.3,
+      "max_tool_iterations": 500,
+      "development": true
     }
   },
   "providers": {
-    "anthropic": {
-      "api_key": "",
-      "api_base": "https://api.anthropic.com"
-    },
-    "openai": {
-      "api_key": "",
-      "api_base": "https://api.openai.com/v1"
-    },
     "deepseek": {
-      "api_key": "",
+      "api_key": "your-api-key",
       "api_base": "https://api.deepseek.com"
-    },
-    "custom": {
-      "api_key": "",
-      "api_base": ""
     }
   },
-  "channels": {
-    "telegram": {
-      "enabled": false,
-      "token": "",
-      "allow_from": []
-    },
-    "feishu": {
-      "enabled": false,
-      "app_id": "",
-      "app_secret": "",
-      "allow_from": []
-    },
-    "dingtalk": {
-      "enabled": false,
-      "client_id": "",
-      "client_secret": ""
-    }
-  },
-  "tools": {
-    "web": {
-      "search": {
-        "api_key": "",
-        "max_results": 5
-      }
-    },
-    "exec": {
-      "timeout": 60,
-      "path_append": ""
-    },
-    "restrict_to_workspace": false
-  },
-  "gateway": {
-    "host": "0.0.0.0",
-    "port": 18790,
-    "heartbeat": {
-      "enabled": true,
-      "interval_s": 1800
-    }
-  }
-}
-```
-
-### 模型选择
-
-通过在模型名前添加前缀来指定提供者：
-
-```
-anthropic/claude-opus-4-5    # 使用 Anthropic
-openai/gpt-4o                # 使用 OpenAI
-deepseek/deepseek-chat       # 使用 DeepSeek
-custom/your-model-name       # 使用自定义端点
-```
-
----
-
-## 工具系统
-
-javaclawbot 内置以下工具：
-
-| 工具 | 说明 |
-|------|------|
-| `read_file` | 读取文件内容 |
-| `write_file` | 写入文件 |
-| `edit_file` | 编辑文件（搜索替换） |
-| `list_dir` | 列出目录内容 |
-| `exec` | 执行系统命令 |
-| `web_search` | 网络搜索（Brave API） |
-| `web_fetch` | 抓取网页内容 |
-| `message` | 发送消息到渠道 |
-| `spawn` | 创建子代理任务 |
-| `cron` | 管理定时任务 |
-
-### MCP 服务器
-
-支持配置 MCP (Model Context Protocol) 服务器扩展工具能力：
-
-```json
-{
-  "tools": {
-    "mcp_servers": {
-      "my-server": {
-        "command": "node",
-        "args": ["server.js"],
-        "env": {},
-        "tool_timeout": 30
-      }
-    }
-  }
-}
-```
-
----
-
-## 渠道配置
-
-### Telegram
-
-```json
-{
-  "channels": {
-    "telegram": {
-      "enabled": true,
-      "token": "YOUR_BOT_TOKEN",
-      "allow_from": ["user_id_1", "user_id_2"],
-      "proxy": "http://127.0.0.1:7890",
-      "reply_to_message": true
-    }
-  }
-}
-```
-
-### 飞书
-
-```json
-{
   "channels": {
     "feishu": {
       "enabled": true,
       "app_id": "YOUR_APP_ID",
-      "app_secret": "YOUR_APP_SECRET",
-      "encrypt_key": "",
-      "verification_token": "",
-      "react_emoji": "THUMBSUP",
-      "allow_from": []
+      "app_secret": "YOUR_APP_SECRET"
     }
   }
 }
 ```
-
-### 钉钉
-
-```json
-{
-  "channels": {
-    "dingtalk": {
-      "enabled": true,
-      "client_id": "YOUR_CLIENT_ID",
-      "client_secret": "YOUR_CLIENT_SECRET",
-      "allow_from": []
-    }
-  }
-}
-```
-
-### Email
-
-```json
-{
-  "channels": {
-    "email": {
-      "enabled": true,
-      "imap_host": "imap.gmail.com",
-      "imap_port": 993,
-      "imap_username": "your@email.com",
-      "imap_password": "app-password",
-      "smtp_host": "smtp.gmail.com",
-      "smtp_port": 587,
-      "smtp_username": "your@email.com",
-      "smtp_password": "app-password",
-      "from_address": "your@email.com",
-      "poll_interval_seconds": 30
-    }
-  }
-}
-```
-
----
-
-## 定时任务
-
-### 添加定时任务
-
-```bash
-# 每隔 3600 秒执行一次
-java -cp ... cli.Commands cron add -n "每日提醒" -m "请提醒我喝水" -e 3600
-
-# 使用 cron 表达式
-java -cp ... cli.Commands cron add -n "早间问候" -m "早上好！" -c "0 9 * * *"
-
-# 指定时区
-java -cp ... cli.Commands cron add -n "定时任务" -m "执行任务" -c "0 9 * * *" --tz "Asia/Shanghai"
-
-# 指定时间执行一次
-java -cp ... cli.Commands cron add -n "一次性任务" -m "提醒我开会" --at "2026-03-10T09:00:00Z"
-```
-
-### 管理任务
-
-```bash
-# 列出所有任务
-java -cp ... cli.Commands cron list
-
-# 列出包括已禁用的任务
-java -cp ... cli.Commands cron list -a
-
-# 禁用任务
-java -cp ... cli.Commands cron enable JOB_ID --disable
-
-# 启用任务
-java -cp ... cli.Commands cron enable JOB_ID
-
-# 删除任务
-java -cp ... cli.Commands cron remove JOB_ID
-
-# 手动运行任务
-java -cp ... cli.Commands cron run JOB_ID
-```
-
----
-
-## 会话命令
-
-在对话中可使用以下命令：
-
-| 命令 | 说明 |
-|------|------|
-| `/new` | 开始新对话（归档当前记忆） |
-| `/stop` | 停止当前任务 |
-| `/help` | 显示帮助信息 |
-
-### 项目绑定命令
-
-| 命令 | 说明 |
-|------|------|
-| `/bind <名称>=<路径> [--main]` | 绑定项目，`--main` 设为主代理项目 |
-| `/bind --main <路径>` | 直接设置主代理项目（名称自动为 main） |
-| `/unbind <名称>` | 解绑项目 |
-| `/projects` | 列出所有绑定的项目 |
-
----
-
-## CLI Agent 集成
-
-javaclawbot 支持集成 Claude Code CLI 和 OpenCode CLI，允许通过飞书等渠道直接调用本地 CLI 工具。
-
-### 支持的 CLI Agent
-
-| Agent | 命令前缀 | 说明 |
-|-------|---------|------|
-| Claude Code | `/cc`, `/claude`, `/claudecode` | Anthropic 官方 CLI |
-| OpenCode | `/oc`, `/opencode` | 开源代码助手 |
-
-### 项目绑定命令
-
-| 命令 | 说明 |
-|------|------|
-| `/bind <名称>=<路径>` | 绑定项目 |
-| `/bind <名称>=<路径> --main` | 绑定项目并设为主代理项目 |
-| `/bind --main <路径>` | 直接设置主代理项目（名称自动为 main） |
-| `/unbind <名称>` | 解绑项目 |
-| `/projects` | 列出所有绑定的项目（标注主代理项目 ⭐） |
-
-### CLI Agent 管理命令
-
-| 命令 | 说明 |
-|------|------|
-| `/cc <项目> <提示词>` | 使用 Claude Code |
-| `/oc <项目> <提示词>` | 使用 OpenCode |
-| `/status [项目]` | 查看 Agent 状态 |
-| `/stop <项目> [类型]` | 停止项目的 Agent（可指定 claude/opencode） |
-| `/cli-stopall` | 停止所有 CLI Agent |
-
-### 使用示例
-
-```bash
-# 绑定普通项目
-/bind p1=/home/user/myproject
-/bind webapp=/var/www/html
-
-# 绑定并设为主代理项目（开发者模式会读取其 CODE-AGENT.md）
-/bind main=/home/user/myproject --main
-
-# 直接设置主代理项目
-/bind --main /home/user/myproject
-
-# 列出所有项目（主代理项目会标注 ⭐）
-/projects
-
-# 使用 Claude Code
-/cc p1 帮我分析代码结构
-/cc p1 修复这个 bug
-
-# 使用 OpenCode
-/oc p1 写一个单元测试
-
-# 查看状态
-/status p1
-
-# 停止特定项目的 Agent
-/stop p1
-
-# 停止特定项目特定类型的 Agent
-/stop p1 claude
-
-# 停止所有 CLI Agent
-/cli-stopall
-```
-
-### 权限自动处理
-
-CLI Agent 会自动处理工具权限请求：
-- **自动允许**: 读取工具 (Read, Glob, Grep)、编辑工具 (Edit, Write)、网络工具 (WebSearch, WebFetch)、安全的 Bash 命令
-- **自动拒绝**: 危险命令 (rm -rf, mkfs, dd, format 等)
-- **询问用户**: 其他操作需要用户确认
-
-用户可通过回复 `y` 或 `n` 来确认或拒绝权限请求。
-
-### 输出格式
-
-CLI Agent 的输出会带有项目前缀和 Agent 类型标识：
-```
-[CC/p1] ▶ Read src/main.java
-[CC/p1]   ✓ 成功读取文件
-[CC/p1] ✅ 完成 (tokens: 1500/800)
-
-[OpenCode/p2] ▶ Bash npm test
-[OpenCode/p2] ✅ 完成 (tokens: 2000/500)
-```
-
-### 主代理上下文同步
-
-CLI Agent 的输出会自动记录到主代理的对话历史中，主代理可以了解 CLI Agent 的活动并回答相关问题（如 "刚才 CLI 做了什么？"）。
-
-### Session 隔离机制
-
-CLI Agent 的对话历史存储在独立的 Session 文件中，不污染主代理的上下文窗口：
-
-- **存放路径**: `{workspace}/sessions/cliagent/`
-- **文件命名**: `{channel}_{chatId}_{project}_{agentType}_{sessionId}.jsonl`
-- **示例**: `telegram_123456_p1_claude_74a63f97.jsonl`
-
-主代理的 Session 只记录简短引用标记：
-```
-[CLI Session: claude/p1]
-```
-
-如需了解 CLI Agent 的详细执行过程，主代理可以使用 `read_file` 工具读取对应的会话文件。
-
-### 自动完成通知
-
-CLI Agent 执行完毕后会自动发送通知消息给主代理，实现自主感知：
-
-**通知消息示例**:
-```
-🔔 CLI Agent 执行完成
-
-- **项目**: p1
-- **类型**: claude
-- **状态**: ✅ 成功
-- **耗时**: 12.5秒
-- **Token**: 1500/3200
-- **会话文件**: `telegram_123456_p1_claude_74a63f97.jsonl`
-
-如需了解详细执行过程，请读取上述会话文件。
-```
-
-**通知元数据**:
-```json
-{
-  "cli_agent_complete": true,
-  "project": "p1",
-  "agent_type": "claude",
-  "session_id": "74a63f97-xxx",
-  "session_file": "telegram_123456_p1_claude_74a63f97.jsonl",
-  "success": true,
-  "duration_ms": 12500,
-  "input_tokens": 1500,
-  "output_tokens": 3200
-}
-```
-
-**主代理可执行的操作**:
-1. **直接响应**：通知用户执行结果
-2. **读取详情**：使用 `read_file` 读取会话文件了解完整执行过程
-3. **继续执行**：根据结果决定下一步操作
-4. **错误处理**：如果失败，可以重试或通知用户
-
-**优势**:
-- 无需轮询，主代理自动感知 CLI Agent 完成状态
-- 无需人工介入，自主决定下一步操作
-- 上下文隔离，主代理 Session 不被 CLI 对话历史污染
-
----
-
-## 项目上下文（开发者模式）
-
-开发者模式下，javaclawbot 会自动加载主代理项目的指令文件（`CODE-AGENT.md` 或 `CLAUDE.md`），将其前 200 行加入上下文，帮助 AI 更好理解项目结构。
-
-### 启用开发者模式
-
-在配置文件中设置：
-
-```json
-{
-  "agents": {
-    "defaults": {
-      "development": true
-    }
-  }
-}
-```
-
-### 设置主代理项目
-
-使用 `/bind --main` 设置主代理项目：
-
-```bash
-# 方式一：绑定并设为主代理
-/bind main=/home/user/my-project --main
-
-# 方式二：直接设置
-/bind --main /home/user/my-project
-```
-
-主代理项目的路径会存储在 `cli-projects.json` 中，与 CLI Agent 共享项目配置。
-
-### 项目指令文件
-
-- 优先读取 `CODE-AGENT.md`
-- 其次读取 `CLAUDE.md`
-- 仅读取前 200 行，完整内容可通过 `read_file` 工具获取
 
 ---
 
@@ -607,10 +238,10 @@ CLI Agent 执行完毕后会自动发送通知消息给主代理，实现自主�
 
 ### 项目依赖
 
+- **JavaFX** - GUI 框架
 - **picocli** - 命令行框架
-- **JLine** - 终端交互
 - **Jackson** - JSON 序列化
-- **Hutool** - Java 工具库
+- **HikariCP** - 数据库连接池
 - **cron-utils** - Cron 表达式处理
 - **TelegramBots** - Telegram Bot API
 - **Lark SDK** - 飞书开放平台 SDK
@@ -624,29 +255,18 @@ mvn compile
 # 打包
 mvn package
 
-# 运行测试
-mvn config.json
+# 运行
+java -jar target/NexusAI.jar
 ```
-
-### 扩展渠道
-
-1. 创建继承 `BaseChannel` 的类
-2. 实现必要方法：`start()`, `stop()`, `send()`
-3. 在 `ChannelManager` 中注册
-
-### 扩展工具
-
-1. 实现 `Tool` 接口
-2. 在 `ToolRegistry` 中注册
 
 ---
 
 ## 安全建议
 
 1. **API Key 保护**：不要将 API Key 提交到版本控制系统
-2. **工作空间限制**：设置 `restrict_to_workspace: true` 限制文件操作范围
-3. **命令执行**：谨慎使用 `exec` 工具，避免执行危险命令
-4. **渠道白名单**：使用 `allow_from` 限制消息来源
+2. **数据库安全**：生产环境建议使用只读账号连接数据库
+3. **渠道白名单**：使用 `allow_from` 限制消息来源
+4. **技能来源**：仅从可信来源安装技能，安装前查看 SKILL.md
 
 ---
 
@@ -671,7 +291,7 @@ mvn config.json
 ## 致谢
 
 感谢所有开源项目的贡献者，本项目参考并使用了以下技术：
-- https://github.com/HKUDS/nanobot
+- OpenClaw / nanobot
 - OpenAI API 规范
 - Anthropic Claude API
 - 各大消息平台开放 API
