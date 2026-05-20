@@ -12,4 +12,9 @@ public class WebSearchConfig {
     private int maxResults = 5;
     private String proxy = "";
 
+    /**
+     * 搜索引擎选择："anysearch" (默认) | "brave"
+     */
+    private String engine = "anysearch";
+
 }

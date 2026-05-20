@@ -1,93 +1,56 @@
 package agent.tool.web;
 
 import agent.tool.Tool;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import config.tool.AnySearchConfig;
+import config.tool.WebSearchConfig;
+import lombok.extern.slf4j.Slf4j;
 
-import java.net.InetSocketAddress;
-import java.net.ProxySelector;
-import java.net.URI;
-import java.net.URLEncoder;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
-import java.time.Duration;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 
-import lombok.extern.slf4j.Slf4j;
-
 /**
- * Java port of javaclawbot/agent/tools/web.py -> WebSearchTool
+ * Web 搜索工具（Facade）。
  *
- * 对齐 Python:
- * - proxy 支持
- * - Brave Search API
+ * 根据配置中的 engine 字段选择搜索引擎：
+ * - "anysearch" (默认) → AnySearchEngine，支持 domains/content_types/zone/language/freshness 等过滤
+ * - "brave" → BraveSearchEngine（保留原有逻辑）
  */
 @Slf4j
 public class WebSearchTool extends Tool {
 
-    private static final ObjectMapper MAPPER = new ObjectMapper();
-
-    private static final String API_ENDPOINT = "https://api.search.brave.com/res/v1/web/search";
     private static final int DEFAULT_MAX_RESULTS = 5;
 
-    private final HttpClient http;
-    private final String initApiKey;
+    private final SearchEngine engine;
     private final int maxResults;
-    private final String proxy;
+    private final String engineType;
 
-    public WebSearchTool(String apiKey, Integer maxResults) {
-        this(apiKey, maxResults, null);
-    }
+    /**
+     * @param searchConfig   通用搜索配置（含 engine 选择、proxy 等）
+     * @param anysearchConfig AnySearch 专属配置
+     */
+    public WebSearchTool(WebSearchConfig searchConfig, AnySearchConfig anysearchConfig) {
+        this.maxResults = (searchConfig != null && searchConfig.getMaxResults() > 0)
+                ? searchConfig.getMaxResults() : DEFAULT_MAX_RESULTS;
 
-    public WebSearchTool(String apiKey, Integer maxResults, String proxy) {
-        this.initApiKey = apiKey;
-        this.maxResults = (maxResults == null || maxResults <= 0) ? DEFAULT_MAX_RESULTS : Math.min(maxResults, 10);
-        this.proxy = proxy;
+        String engineName = (searchConfig != null && searchConfig.getEngine() != null)
+                ? searchConfig.getEngine().trim().toLowerCase() : "anysearch";
 
-        HttpClient.Builder builder = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(10))
-                .followRedirects(HttpClient.Redirect.NEVER);
+        String proxy = (searchConfig != null) ? searchConfig.getProxy() : null;
 
-        if (proxy != null && !proxy.isBlank()) {
-            builder.proxy(createProxySelector(proxy));
+        if ("brave".equals(engineName)) {
+            this.engineType = "brave";
+            this.engine = new BraveSearchEngine(searchConfig, proxy);
+            log.info("WebSearch 引擎: Brave Search");
+        } else {
+            this.engineType = "anysearch";
+            this.engine = new AnySearchEngine(anysearchConfig, proxy);
+            log.info("WebSearch 引擎: AnySearch (zone={}, freshness={})",
+                    anysearchConfig != null ? anysearchConfig.getZone() : "intl",
+                    anysearchConfig != null ? anysearchConfig.getFreshness() : "");
         }
-
-        this.http = builder.build();
-    }
-
-    private static ProxySelector createProxySelector(String proxyUrl) {
-        try {
-            URI uri = URI.create(proxyUrl);
-            String host = uri.getHost();
-            int port = uri.getPort();
-            if (host == null || port <= 0) {
-                // 尝试解析 host:port 格式
-                String[] parts = proxyUrl.split(":");
-                if (parts.length == 2) {
-                    host = parts[0];
-                    port = Integer.parseInt(parts[1]);
-                } else {
-                    throw new IllegalArgumentException("Invalid proxy URL: " + proxyUrl);
-                }
-            }
-            InetSocketAddress addr = new InetSocketAddress(host, port);
-            return ProxySelector.of(addr);
-        } catch (Exception e) {
-            throw new IllegalArgumentException("Failed to parse proxy URL: " + proxyUrl, e);
-        }
-    }
-
-    private String resolveApiKey() {
-        if (initApiKey != null && !initApiKey.isBlank()) return initApiKey;
-        String env = System.getenv("BRAVE_API_KEY");
-        return env == null ? "" : env.trim();
     }
 
     @Override
@@ -97,6 +60,11 @@ public class WebSearchTool extends Tool {
 
     @Override
     public String description() {
+        if ("anysearch".equals(engineType)) {
+            return "Search the web via AnySearch. Returns titles, URLs, and snippets. " +
+                   "Supports optional filters: domains, contentTypes, zone (cn/intl), " +
+                   "language (zh-CN/en), freshness (day/week/month/year).";
+        }
         return "Search the web. Returns titles, URLs, and snippets.";
     }
 
@@ -112,6 +80,36 @@ public class WebSearchTool extends Tool {
         props.put("query", Map.of("type", "string", "description", "Search query"));
         props.put("count", countSchema);
 
+        // AnySearch 额外参数（Brave 引擎会忽略这些）
+        if ("anysearch".equals(engineType)) {
+            props.put("domains", Map.of(
+                    "type", "array",
+                    "items", Map.of("type", "string"),
+                    "description",
+                    "Domain filter: general, code, tech, academic, finance, news, etc."
+            ));
+            props.put("contentTypes", Map.of(
+                    "type", "array",
+                    "items", Map.of("type", "string"),
+                    "description",
+                    "Content type filter: web, news, code, doc, academic, data, image, video, audio"
+            ));
+            props.put("zone", Map.of(
+                    "type", "string",
+                    "enum", List.of("cn", "intl"),
+                    "description", "Region: cn (China) or intl (International)"
+            ));
+            props.put("language", Map.of(
+                    "type", "string",
+                    "description", "Language preference: zh-CN, en, etc."
+            ));
+            props.put("freshness", Map.of(
+                    "type", "string",
+                    "enum", List.of("day", "week", "month", "year"),
+                    "description", "Recency filter: day, week, month, year"
+            ));
+        }
+
         return Map.of(
                 "type", "object",
                 "properties", props,
@@ -121,98 +119,20 @@ public class WebSearchTool extends Tool {
 
     @Override
     public CompletionStage<String> execute(Map<String, Object> args) {
-        String apiKey = resolveApiKey();
-        if (apiKey.isBlank()) {
-            log.warn("执行工具: web_search 失败, Brave Search API Key 未配置");
-            return CompletableFuture.completedFuture(
-                    "Error: Brave Search API key not configured. " +
-                    "Set it in ~/.javaclawbot/config.json under tools.web.search.apiKey " +
-                    "(or export BRAVE_API_KEY), then restart the gateway."
-            );
-        }
-
         String query = String.valueOf(args.getOrDefault("query", "")).trim();
         if (query.isEmpty()) {
-            log.warn("执行工具: web_search 失败, 查询参数为空");
+            log.warn("web_search 失败: 查询参数为空");
             return CompletableFuture.completedFuture("Error: query is required");
         }
 
-        Integer count = null;
+        int count = this.maxResults;
         Object c = args.get("count");
-        if (c instanceof Number n) count = n.intValue();
-        int n = Math.min(Math.max(count != null ? count : this.maxResults, 1), 10);
+        if (c instanceof Number n) {
+            count = Math.min(Math.max(n.intValue(), 1), 10);
+        }
 
-        log.debug("web_search query={}, count={}", query, n);
+        log.debug("web_search engine={}, query={}, count={}", engineType, query, count);
 
-        String url = API_ENDPOINT
-                + "?q=" + URLEncoder.encode(query, StandardCharsets.UTF_8)
-                + "&count=" + n;
-
-        HttpRequest req = HttpRequest.newBuilder(URI.create(url))
-                .timeout(Duration.ofSeconds(10))
-                .header("Accept", "application/json")
-                .header("X-Subscription-Token", apiKey)
-                .GET()
-                .build();
-
-        log.debug("向Brave Search API发起请求: url={}", url);
-
-        return http.sendAsync(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
-                .thenApply(resp -> {
-                    if (resp.statusCode() / 100 != 2) {
-                        log.warn("Brave Search API返回错误状态码: {}, 响应: {}", resp.statusCode(), safeTrim(resp.body(), 2000));
-                        return "Error: Brave Search API HTTP " + resp.statusCode() + "\n" + safeTrim(resp.body(), 2000);
-                    }
-                    try {
-                        JsonNode root = MAPPER.readTree(resp.body());
-                        JsonNode results = root.path("web").path("results");
-                        if (!results.isArray() || results.size() == 0) {
-                            log.debug("搜索无结果: query={}", query);
-                            return "No results for: " + query;
-                        }
-
-                        List<String> lines = new ArrayList<>();
-                        lines.add("Results for: " + query);
-                        lines.add("");
-
-                        int i = 0;
-                        for (JsonNode item : results) {
-                            if (i >= n) break;
-                            i++;
-                            String title = item.path("title").asText("");
-                            String u = item.path("url").asText("");
-                            String desc = item.path("description").asText("");
-
-                            lines.add(i + ". " + title);
-                            lines.add("   " + u);
-                            if (!desc.isBlank()) lines.add("   " + desc);
-                        }
-                        log.debug("工具执行成功: web_search, 结果数量={}", Math.min(results.size(), n));
-                        return String.join("\n", lines);
-                    } catch (Exception e) {
-                        log.error("工具执行失败: web_search, 解析响应失败, 错误: {}", e.getMessage(), e);
-                        return "Error: " + e.getMessage();
-                    }
-                })
-                .exceptionally(ex -> {
-                    log.error("工具执行异常: web_search, 错误: {}", ex.getMessage(), ex);
-                    String msg = rootMessage(ex);
-                    if (msg != null && (msg.contains("proxy") || msg.contains("Proxy"))) {
-                        return "Proxy error: " + msg;
-                    }
-                    return "Error: " + msg;
-                });
-    }
-
-    private static String safeTrim(String s, int max) {
-        if (s == null) return "";
-        if (s.length() <= max) return s;
-        return s.substring(0, max) + "\n... (truncated)";
-    }
-
-    private static String rootMessage(Throwable t) {
-        Throwable cur = t;
-        while (cur.getCause() != null) cur = cur.getCause();
-        return cur.getMessage() != null ? cur.getMessage() : cur.toString();
+        return engine.search(query, count, args);
     }
 }

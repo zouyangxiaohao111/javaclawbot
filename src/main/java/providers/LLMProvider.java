@@ -94,24 +94,64 @@ public abstract class LLMProvider {
                 }
             }
 
-            // Handle messages missing the "content" field entirely
-            if (content == null) {
+            // Convert "attachment" role to "user" — most LLM APIs don't accept "attachment" role.
+            // This check must come BEFORE the null-content check because some attachment
+            // messages use "attachment" field instead of "content" (e.g. CompactService's
+            // task_status / plan_file_reference / skill_listing attachments).
+            //
+            // Merge logic: always serialize the "attachment" field (if present) as text
+            // and combine it with the existing "content" field, regardless of content type.
+            if ("attachment".equals(msg.get("role"))) {
                 Map<String, Object> clean = new HashMap<>(msg);
-                clean.put("content", "(empty)");
+                clean.put("role", "user");
+
+                // Serialize "attachment" field into text (if present)
+                String attachmentText = null;
+                Object att = msg.get("attachment");
+                if (att != null) {
+                    String type = msg.get("type") instanceof String t ? t : "unknown";
+                    attachmentText = "[System Attachment: " + type + "] " + att.toString();
+                }
+
+                if (content instanceof Map) {
+                    // Map content (e.g. file_reference) → convert to text, append attachment
+                    String type = msg.get("type") instanceof String t ? t : "unknown";
+                    String contentText = "[System Attachment: " + type + "] " + content.toString();
+                    if (attachmentText != null) {
+                        clean.put("content", contentText + "\n" + attachmentText);
+                    } else {
+                        clean.put("content", contentText);
+                    }
+                } else if (content instanceof List) {
+                    // List content (e.g. content block array) → append attachment as text block
+                    List<Object> merged = new ArrayList<>((List<?>) content);
+                    if (attachmentText != null) {
+                        merged.add(Map.of("type", "text", "text", attachmentText));
+                    }
+                    clean.put("content", merged);
+                } else if (content instanceof String) {
+                    // String content → append attachment if any
+                    if (attachmentText != null) {
+                        clean.put("content", content + "\n" + attachmentText);
+                    }
+                    // else keep as-is
+                } else {
+                    // No content or null content → use attachment text, or "(empty)"
+                    if (attachmentText != null) {
+                        clean.put("content", attachmentText);
+                    } else {
+                        clean.put("content", "(empty)");
+                    }
+                }
+
                 result.add(clean);
                 continue;
             }
 
-            // Convert "attachment" role to "user" — most LLM APIs don't accept "attachment" role.
-            // Serialize attachment metadata as text content so the model can still see it.
-            if ("attachment".equals(msg.get("role"))) {
+            // Handle messages missing the "content" field entirely
+            if (content == null) {
                 Map<String, Object> clean = new HashMap<>(msg);
-                clean.put("role", "user");
-                // If content is a Map (e.g. file_reference), convert to text
-                if (content instanceof Map) {
-                    String type = msg.get("type") instanceof String t ? t : "unknown";
-                    clean.put("content", "[System Attachment: " + type + "] " + content.toString());
-                }
+                clean.put("content", "(empty)");
                 result.add(clean);
                 continue;
             }

@@ -7,6 +7,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class WebToolsConfig {
     private WebSearchConfig search = new WebSearchConfig();
+    private AnySearchConfig anysearch = new AnySearchConfig();
     private WebFetchConfig fetch = new WebFetchConfig();
 
     public WebSearchConfig getSearch() {
@@ -15,6 +16,14 @@ public class WebToolsConfig {
 
     public void setSearch(WebSearchConfig search) {
         this.search = (search != null) ? search : new WebSearchConfig();
+    }
+
+    public AnySearchConfig getAnysearch() {
+        return anysearch;
+    }
+
+    public void setAnysearch(AnySearchConfig anysearch) {
+        this.anysearch = (anysearch != null) ? anysearch : new AnySearchConfig();
     }
 
     public WebFetchConfig getFetch() {

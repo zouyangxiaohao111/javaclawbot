@@ -2,6 +2,20 @@
 
 All notable changes to NexusAI will be documented in this file.
 
+## [2.3.12] - 2026-05-20
+
+### Fixed
+- **上下文压缩后附件 role 错误导致 API 拒绝请求**：`sanitizeEmptyContent()` 中 null content 检查先于 `"attachment"` role 转换执行，导致 CompactService 创建的附件（task_status/plan_file_reference/skill_listing，使用 `"attachment"` 字段而非 `"content"` 字段）携带无效的 `role: "attachment"` 发送给 LLM API。修复后将 attachment 转换移至 null 检查之前，并为无 `"content"` 字段的附件序列化 `"attachment"` 字段内容。
+
+### Changed
+- **web_search 迁移到 AnySearch 引擎（默认）**：策略模式支持 Brave/AnySearch 双引擎切换
+  - 新增 `SearchEngine` 策略接口，`AnySearchEngine`（默认）、`BraveSearchEngine`（保留）双实现
+  - `WebSearchTool` 重构为 facade，根据 `search.engine` 配置委托引擎
+  - 新增 `anysearch` 配置节点，支持全参数：domains/content_types/zone/language/freshness/from/to/tags/providers
+  - API Key 回退链：配置值 → 环境变量 `ANYSEARCH_API_KEY` → 内置默认 key
+  - 支持 400/401/402/403/429/500/503 全错误码解析
+- **web_search 默认结果数从5条改为10条**：配置文件 `config.json` 中 `tools.web.search.max_results` 默认值从5调整为10，可通过配置文件或AI参数灵活指定
+
 ## [2.3.11] - 2026-05-19
 
 ### Fixed

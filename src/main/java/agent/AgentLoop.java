@@ -40,6 +40,7 @@ import config.provider.model.ModelConfig;
 import config.channel.ChannelsConfig;
 import config.mcp.MCPServerConfig;
 import config.tool.ToolsConfig;
+import config.tool.AnySearchConfig;
 import config.tool.WebFetchConfig;
 import config.tool.WebSearchConfig;
 import context.ContextBuilder;
@@ -649,8 +650,9 @@ public class AgentLoop {
 
         // 注册web工具
         WebSearchConfig search = currentTools().getWeb().getSearch();
+        AnySearchConfig anysearch = currentTools().getWeb().getAnysearch();
         WebFetchConfig fetch = currentTools().getWeb().getFetch();
-        sharedTools.register(new WebSearchTool(search.getApiKey(), search.getMaxResults(), search.getProxy()));
+        sharedTools.register(new WebSearchTool(search, anysearch));
         sharedTools.register(new WebFetchTool(fetch.getMaxChars(), fetch.getProxy()));
 
         sharedTools.register(new SkillTool(commandManager, skillsLoader));
