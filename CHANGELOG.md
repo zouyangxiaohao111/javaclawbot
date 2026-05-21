@@ -2,6 +2,17 @@
 
 All notable changes to NexusAI will be documented in this file.
 
+## [2.3.13] - 2026-05-21
+
+### Added
+- **GUI 启动时异步技能同步检查**：应用启动时自动对比内置技能（resources/skills/）与工作空间技能（workspace/skills/），发现差异时弹窗让用户选择覆盖
+  - 使用 SHA-256 哈希精确对比文件内容
+  - 异步非阻塞执行，不影响 GUI 启动速度
+  - 列表选择弹窗支持全选/全不选/逐个勾选
+  - 覆盖方向：内置资源 → 工作空间
+  - 支持嵌套技能包逐个子技能对比（如 zjkycode/brainstorming）
+  - 新增 `SkillDifference` 数据模型、`SkillSyncService` 同步服务、`SkillSyncDialog` 弹窗组件
+
 ## [2.3.12] - 2026-05-21
 
 ### Fixed
