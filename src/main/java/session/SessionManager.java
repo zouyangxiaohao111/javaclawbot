@@ -311,35 +311,51 @@ public final class SessionManager {
             // 先清洗，避免坏字符在写文件阶段炸掉
             Map<String, Object> safeMetadata = castMap(deepSanitize(session.getMetadata()));
 
-            // 保护已有标题：如果当前 session.meta 无 title 但磁盘文件已有 title，保留磁盘版本
-            // 防止 AgentLoop 异步 save 覆盖掉 triggerTitleGeneration 刚写入的标题
-            if (!safeMetadata.containsKey("title") || safeMetadata.get("title") instanceof String s && s.isBlank()) {
-                try {
-                    if (Files.exists(target)) {
-                        try (BufferedReader diskReader = Files.newBufferedReader(target, StandardCharsets.UTF_8)) {
-                            String firstLine = diskReader.readLine();
-                            if (firstLine != null) {
-                                Map<String, Object> diskMeta = objectMapper.readValue(
-                                        firstLine, new TypeReference<Map<String, Object>>() {});
-                                Object diskMd = diskMeta.get("metadata");
-                                if (diskMd == null ) {
-                                    diskMd = new HashMap();
-                                }
-                                if (diskMd instanceof Map) {
-                                    Object diskTitle = ((Map<?, ?>) diskMd).get("title");
-                                    if (diskTitle instanceof String diskTitleStr && !diskTitleStr.isBlank()) {
-                                        safeMetadata = new LinkedHashMap<>(safeMetadata);
-                                        safeMetadata.put("title", diskTitleStr);
-                                        session.getMetadata().put("title", diskTitleStr);
-                                    }
+            // ★ 修复：先读取磁盘上已有的消息行，避免 saveTitle 截断 AgentLoop 已保存的消息
+            List<String> existingMessageLines = new ArrayList<>();
+            String diskExistingTitle = null;
+
+            if (Files.exists(target)) {
+                try (BufferedReader diskReader = Files.newBufferedReader(target, StandardCharsets.UTF_8)) {
+                    String firstLine = diskReader.readLine();
+                    if (firstLine != null && !firstLine.trim().isEmpty()) {
+                        // 从旧 metadata 中提取已有的标题（保护已有标题不被覆盖）
+                        try {
+                            Map<String, Object> diskMeta = objectMapper.readValue(
+                                    firstLine, new TypeReference<Map<String, Object>>() {});
+                            Object diskMd = diskMeta.get("metadata");
+                            if (diskMd instanceof Map) {
+                                Object diskTitle = ((Map<?, ?>) diskMd).get("title");
+                                if (diskTitle instanceof String diskTitleStr && !diskTitleStr.isBlank()) {
+                                    diskExistingTitle = diskTitleStr;
                                 }
                             }
+                        } catch (Exception ignored) {
                         }
                     }
-                } catch (Exception ignored) {
+                    // 读取剩余的消息行（保留不被截断）
+                    String line;
+                    while ((line = diskReader.readLine()) != null) {
+                        if (!line.trim().isEmpty()) {
+                            existingMessageLines.add(line);
+                        }
+                    }
+                } catch (Exception e) {
+                    log.warn("saveTitle 读取已有消息行失败，继续仅写 metadata: {}", e.getMessage());
                 }
             }
 
+            // 保护已有标题：如果当前 session.meta 无 title 但磁盘文件已有 title，保留磁盘版本
+            // 防止 AgentLoop 异步 save 覆盖掉 triggerTitleGeneration 刚写入的标题
+            if (diskExistingTitle != null) {
+                if (!safeMetadata.containsKey("title") || safeMetadata.get("title") instanceof String s && s.isBlank()) {
+                    safeMetadata = new LinkedHashMap<>(safeMetadata);
+                    safeMetadata.put("title", diskExistingTitle);
+                    session.getMetadata().put("title", diskExistingTitle);
+                }
+            }
+
+            // 写入：metadata 行 + 保留的消息行（不丢失 AgentLoop 已保存的消息）
             try (BufferedWriter w = Files.newBufferedWriter(
                     tmp,
                     StandardCharsets.UTF_8,
@@ -357,6 +373,12 @@ public final class SessionManager {
 
                 w.write(objectMapper.writeValueAsString(metaLine));
                 w.write("\n");
+
+                // ★ 追加保留的消息行，防止 AgentLoop 已保存的消息被截断丢失
+                for (String msgLine : existingMessageLines) {
+                    w.write(msgLine);
+                    w.write("\n");
+                }
 
                 w.flush();
             }

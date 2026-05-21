@@ -162,8 +162,10 @@ public class BackendBridge {
             if (ctx.projectRegistry != null) {
                 this.projectRegistry = ctx.projectRegistry;
             } else {
-                // 标签处于"新对话"状态（无 session），清空全局 registry 避免显示其他标签的项目
-                this.projectRegistry = new ProjectRegistry(null);
+                // 标签处于"新对话"状态（无 session），创建并保存到上下文，避免每次切换都创建新实例
+                ProjectRegistry emptyRegistry = new ProjectRegistry(null);
+                ctx.projectRegistry = emptyRegistry;
+                this.projectRegistry = emptyRegistry;
             }
             if (agentLoop != null) {
                 agentLoop.updateProjectRegistry(this.projectRegistry);
@@ -595,6 +597,14 @@ public class BackendBridge {
 
         // 为新会话创建独立的 ProjectRegistry
         ProjectRegistry newRegistry = createProjectRegistry(ctx.session.getSessionId());
+        // 迁移之前在"新对话"状态下绑定的项目（如果有）
+        if (ctx.projectRegistry != null && ctx.projectRegistry.size() > 0) {
+            for (var entry : ctx.projectRegistry.listAll().entrySet()) {
+                var info = entry.getValue();
+                newRegistry.bind(entry.getKey(), info.getPath(), info.isMain());
+            }
+            log.info("[Session创建] 迁移了 {} 个项目绑定到新session", ctx.projectRegistry.size());
+        }
         ctx.projectRegistry = newRegistry;
         this.projectRegistry = newRegistry; // 更新全局引用供 AgentLoop 使用
         if (agentLoop != null) {
