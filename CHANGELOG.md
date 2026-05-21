@@ -2,6 +2,13 @@
 
 All notable changes to NexusAI will be documented in this file.
 
+## [2.3.12] - 2026-05-21
+
+### Fixed
+- **项目绑定切换不生效**：`project` 工具切换主项目后状态栏和 `/projects` 命令仍显示旧项目。根因：`CliAgentCommandHandler.getProjectRegistry()` 在 per-session registry 不存在时通过 `computeIfAbsent` 创建了新的孤立实例，与 BackendBridge 注册的 registry 不是同一个。修复：CLI 通道增加 fallback 到 `"cli:direct"` 注册表。
+- **web_search 启动异常**：修复新增的 web_search 功能导致的启动报错问题
+- **标题错乱**：修复多标签场景下标题生成后显示混乱的问题
+
 ## [2.3.11] - 2026-05-19
 
 ### Fixed
