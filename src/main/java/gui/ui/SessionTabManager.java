@@ -179,7 +179,7 @@ public class SessionTabManager {
             backendBridge.sendMessage(text, mediaPaths,
                 progress -> {
                     // 进度回调在 JavaFX 线程中执行
-                    log.info("[Progress] tabId={}, type={}, content={}", currentTabId,
+                    log.debug("[Progress] tabId={}, type={}, content={}", currentTabId,
                         progress.isToolResult() ? "toolResult" :
                         progress.isToolHint() ? "toolHint" :
                         progress.isReasoning() ? "reasoning" : "content",

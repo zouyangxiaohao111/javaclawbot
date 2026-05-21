@@ -405,9 +405,9 @@ public final class SessionManager {
      */
     public void save(Session session) {
         // 空会话（0条消息）不保存，避免每次点击"新对话"产生无用文件
-        if (session.getMessages().isEmpty()) {
+        /*if (session.getMessages().isEmpty()) {
             return;
-        }
+        }*/
 
         String key = session.getKey();
         String sessionId = session.getSessionId();

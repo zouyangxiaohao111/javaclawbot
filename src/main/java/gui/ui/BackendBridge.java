@@ -168,7 +168,7 @@ public class BackendBridge {
                 this.projectRegistry = emptyRegistry;
             }
             if (agentLoop != null) {
-                agentLoop.updateProjectRegistry(this.projectRegistry);
+                agentLoop.updateProjectRegistry(ctx.sessionKey, this.projectRegistry);
             }
         }
     }
@@ -250,7 +250,7 @@ public class BackendBridge {
         ctx.projectRegistry = sessionRegistry;
         this.projectRegistry = sessionRegistry;
         if (agentLoop != null) {
-            agentLoop.updateProjectRegistry(sessionRegistry);
+            agentLoop.updateProjectRegistry(ctx.sessionKey, sessionRegistry);
         }
         notifyRegistryChanged();
         int count = countUserMessages(ctx.session);
@@ -366,12 +366,12 @@ public class BackendBridge {
                     String tabId = getTabIdFromChatId(outChatId);
                     TabSessionContext ctx = tabId != null ? tabContexts.get(tabId) : null;
                     if (ctx == null) {
-                        log.warn("[Outbound] 收到未知标签的 outbound 消息，忽略: chatId={}, tabId={}, 当前标签={}",
+                        log.debug("[Outbound] 收到未知标签的 outbound 消息，忽略: chatId={}, tabId={}, 当前标签={}",
                             outChatId, tabId, tabContexts.keySet());
                         continue;
                     }
 
-                    log.info("[Outbound] 收到消息: tabId={}, channel={}, chatId={}, content={}",
+                    log.debug("[Outbound] 收到消息: tabId={}, channel={}, chatId={}, content={}",
                         tabId, out.getChannel(), outChatId,
                         out.getContent() != null ? out.getContent().substring(0, Math.min(50, out.getContent().length())) : "null");
 
@@ -608,7 +608,7 @@ public class BackendBridge {
         ctx.projectRegistry = newRegistry;
         this.projectRegistry = newRegistry; // 更新全局引用供 AgentLoop 使用
         if (agentLoop != null) {
-            agentLoop.updateProjectRegistry(newRegistry);
+            agentLoop.updateProjectRegistry(ctx.sessionKey, newRegistry);
         }
         notifyRegistryChanged();
     }
@@ -639,7 +639,7 @@ public class BackendBridge {
         // 清空 ProjectRegistry，避免徽标/Popover 残留旧会话的项目绑定
         this.projectRegistry = new ProjectRegistry(null);
         if (agentLoop != null) {
-            agentLoop.updateProjectRegistry(this.projectRegistry);
+            agentLoop.updateProjectRegistry(ctx != null ? ctx.sessionKey : "cli:default", this.projectRegistry);
         }
         notifyRegistryChanged();
     }
@@ -665,7 +665,7 @@ public class BackendBridge {
         ctx.projectRegistry = sessionRegistry;
         this.projectRegistry = sessionRegistry;
         if (agentLoop != null) {
-            agentLoop.updateProjectRegistry(sessionRegistry);
+            agentLoop.updateProjectRegistry(ctx.sessionKey, sessionRegistry);
         }
         notifyRegistryChanged();
 

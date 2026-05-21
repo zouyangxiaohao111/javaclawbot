@@ -420,11 +420,13 @@ public class AgentLoop {
     }
 
     /**
-     * 更新当前会话的 ProjectRegistry（新建会话时调用）
+     * 更新指定 sessionKey 的 ProjectRegistry。
+     * 多标签模式下 sessionKey 格式为 "cli:{tabId}"，确保 ProjectTool 等通过
+     * currentSessionKey 查找时能匹配到正确的 registry 实例。
      */
-    public void updateProjectRegistry(providers.cli.ProjectRegistry registry) {
-        if (registry != null) {
-            this.cliAgentHandler.registerSessionRegistry("cli:direct", registry);
+    public void updateProjectRegistry(String sessionKey, providers.cli.ProjectRegistry registry) {
+        if (registry != null && sessionKey != null && !sessionKey.isBlank()) {
+            this.cliAgentHandler.registerSessionRegistry(sessionKey, registry);
         }
     }
 
@@ -1535,7 +1537,7 @@ public class AgentLoop {
             PostCompactCleanup.notifyCompaction("auto", null);
             PostCompactCleanup.markPostCompaction();
 
-            log.info("executeContextCompress: compressed {} messages into summary, boundary added, attachments={}, ptlRetryCount={}",
+            log.info("上下文压缩成功: 压缩 {} 条消息 到总结, boundary added, 相关文件数量={}, ptlRetryCount={}",
                     messages.size(), attachments.size(), result.getPtlRetryCount());
 
             return true;

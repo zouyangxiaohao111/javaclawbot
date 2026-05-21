@@ -5,6 +5,7 @@ All notable changes to NexusAI will be documented in this file.
 ## [2.3.11] - 2026-05-19
 
 ### Fixed
+- **项目切换不生效**：AI agent 通过 `project` 工具切换主项目后状态栏和 `/projects` 命令仍显示旧项目。根因：`CliAgentCommandHandler.getProjectRegistry()` 在 per-session registry 不存在时通过 `computeIfAbsent` 创建了新的孤立实例，与 BackendBridge 通过 `registerSessionRegistry("cli:direct", ...)` 注册的 registry 是两个独立实例，导致工具写入和 UI 读取不在同一个 registry。修复：在 `getProjectRegistry()` 中对 CLI 通道的 session key 增加 fallback 到 `"cli:direct"` 注册表，确保 ProjectTool、`/projects`/`/bind` 等命令与 UI 状态栏共享同一 registry 实例。
 - **标题无法写入的问题**：修复标题生成后无法正确写入的 bug
 - **上下文压缩后附件 role 错误导致 API 拒绝请求**：`sanitizeEmptyContent()` 中 null content 检查先于 `"attachment"` role 转换执行，导致 CompactService 创建的附件（task_status/plan_file_reference/skill_listing，使用 `"attachment"` 字段而非 `"content"` 字段）携带无效的 `role: "attachment"` 发送给 LLM API。修复：(1) 将 attachment 转换移至 null 检查之前，避免空 content 提前拦截；(2) 统一合并策略：无论 `content` 字段是什么类型（Map/List/String/null），只要 `attachment` 字段存在，就将其序列化为文本追加到 `content` 中（List 类型追加 `{type:"text", text:"..."}` 元素，其他类型追加文本），确保附件元数据不丢失。
 
