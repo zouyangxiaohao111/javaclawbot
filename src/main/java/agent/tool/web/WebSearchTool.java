@@ -47,9 +47,7 @@ public class WebSearchTool extends Tool {
         } else {
             this.engineType = "anysearch";
             this.engine = new AnySearchEngine(anysearchConfig, proxy);
-            log.info("WebSearch 引擎: AnySearch (zone={}, freshness={})",
-                    anysearchConfig != null ? anysearchConfig.getZone() : "intl",
-                    anysearchConfig != null ? anysearchConfig.getFreshness() : "");
+            log.info("WebSearch 引擎: AnySearch");
         }
     }
 

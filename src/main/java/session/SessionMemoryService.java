@@ -155,8 +155,8 @@ public class SessionMemoryService {
 
             // 工具限制：只允许 Edit 和 Read 工具
             Function<String, Boolean> canUseTool = (toolName) -> {
-                return "edit".equalsIgnoreCase(toolName)
-                        || "Read".equalsIgnoreCase(toolName)
+                return "edit_file".equalsIgnoreCase(toolName)
+                        || "read_file".equalsIgnoreCase(toolName)
                         || "read".equalsIgnoreCase(toolName);
             };
 
