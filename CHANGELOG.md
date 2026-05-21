@@ -13,6 +13,12 @@ All notable changes to NexusAI will be documented in this file.
   - 支持嵌套技能包逐个子技能对比（如 zjkycode/brainstorming）
   - 新增 `SkillDifference` 数据模型、`SkillSyncService` 同步服务、`SkillSyncDialog` 弹窗组件
 
+### Fixed
+- **多标签上下文进度条错乱**：修复多标签场景下上下文使用率进度条显示错误数据的问题
+  - 根因：`getContextUsageRatio()` 使用全局 `activeTabId` 获取上下文，当标签切换后回调触发时会获取错误标签的数据
+  - 新增 `getContextUsageRatioForTab(tabId)` 方法，通过 tabId 精确获取对应标签的上下文
+  - 更新 `SessionTabManager` 和 `MainStage` 中所有相关调用使用新的 tabId 精确方法
+
 ## [2.3.12] - 2026-05-21
 
 ### Fixed
