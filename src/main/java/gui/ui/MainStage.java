@@ -21,6 +21,10 @@ import javafx.scene.image.Image;
 import javafx.stage.Stage;
 import javafx.stage.StageStyle;
 
+import skills.SkillSyncService;
+import skills.SkillDifference;
+import gui.ui.dialogs.SkillSyncDialog;
+
 import java.io.InputStream;
 import java.util.HashMap;
 import java.util.List;
@@ -646,6 +650,16 @@ public class MainStage {
         new Thread(() -> {
             try {
                 backendBridge.initialize();
+
+                // [新增] 异步检查技能同步
+                CompletableFuture.runAsync(() -> {
+                    try {
+                        checkAndSyncSkills();
+                    } catch (Exception e) {
+                        System.err.println("技能同步检查失败: " + e.getMessage());
+                    }
+                });
+
                 Platform.runLater(() -> {
                     // 创建标签管理器
                     javafx.scene.layout.VBox chatArea = (javafx.scene.layout.VBox) pages.get("chat");
@@ -702,6 +716,52 @@ public class MainStage {
                 e.printStackTrace();
             }
         }, "javaclawbot-fx-init").start();
+    }
+
+    /**
+     * 检查并同步技能
+     * 异步执行，不阻塞 GUI 启动
+     */
+    private void checkAndSyncSkills() {
+        try {
+            // 获取工作空间路径（从配置或默认）
+            java.nio.file.Path workspace = java.nio.file.Paths.get(
+                System.getProperty("user.home"), ".javaclawbot", "workspace"
+            );
+
+            SkillSyncService syncService = new SkillSyncService(workspace);
+            List<SkillDifference> differences = syncService.findDifferences();
+
+            if (!differences.isEmpty()) {
+                // 在 JavaFX 线程显示弹窗
+                Platform.runLater(() -> {
+                    List<String> selectedSkills = SkillSyncDialog.showAndWait(differences);
+
+                    if (!selectedSkills.isEmpty()) {
+                        // 异步执行复制
+                        CompletableFuture.runAsync(() -> {
+                            for (String skillName : selectedSkills) {
+                                try {
+                                    syncService.copySkillToWorkspace(skillName);
+                                    System.out.println("已同步技能: " + skillName);
+                                } catch (Exception e) {
+                                    System.err.println("同步技能 " + skillName + " 失败: " + e.getMessage());
+                                }
+                            }
+                            Platform.runLater(() -> {
+                                // 刷新技能页面（如果已初始化）
+                                javafx.scene.Node skillsPage = pages.get("skills");
+                                if (skillsPage instanceof gui.ui.pages.SkillsPage) {
+                                    ((gui.ui.pages.SkillsPage) skillsPage).refresh();
+                                }
+                            });
+                        });
+                    }
+                });
+            }
+        } catch (Exception e) {
+            System.err.println("技能同步检查异常: " + e.getMessage());
+        }
     }
 
     /** 判断 updated_at 是否为今天 */

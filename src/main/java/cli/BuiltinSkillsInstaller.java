@@ -137,6 +137,25 @@ public final class BuiltinSkillsInstaller {
         return summary;
     }
 
+    /**
+     * 安装单个技能到目标目录（覆盖模式）
+     * 供 SkillSyncService 调用
+     */
+    public static InstallSummary installSkill(String skillName, String classpathDir, Path targetSkillsDir) {
+        InstallSummary summary = new InstallSummary();
+        Path targetDir = targetSkillsDir.resolve(skillName);
+
+        try {
+            deleteDirectoryIfExists(targetDir);
+            copyClasspathDirectory(classpathDir, targetDir);
+            summary.getOverwritten().add(skillName);
+        } catch (Exception e) {
+            summary.getFailed().add(skillName + " (" + e.getMessage() + ")");
+        }
+
+        return summary;
+    }
+
     public static void printSummary(InstallSummary summary) {
         System.out.println();
         System.out.println("Built-in skills installation result:");
