@@ -92,7 +92,7 @@ public class SkillSyncDialog extends Stage {
 
         HBox item = new HBox(12, checkBox, spacer, typeLabel);
         item.setAlignment(Pos.CENTER_LEFT);
-        item.setPadding(new Insets(8, 12));
+        item.setPadding(new Insets(8, 12, 8, 12));
         item.setStyle("-fx-background-color: white; -fx-background-radius: 8; "
             + "-fx-effect: dropshadow(gaussian, rgba(0,0,0,0.05), 4, 0, 0, 2);");
 

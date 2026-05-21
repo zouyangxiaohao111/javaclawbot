@@ -18,6 +18,7 @@ All notable changes to NexusAI will be documented in this file.
   - 根因：`getContextUsageRatio()` 使用全局 `activeTabId` 获取上下文，当标签切换后回调触发时会获取错误标签的数据
   - 新增 `getContextUsageRatioForTab(tabId)` 方法，通过 tabId 精确获取对应标签的上下文
   - 更新 `SessionTabManager` 和 `MainStage` 中所有相关调用使用新的 tabId 精确方法
+- **移除旧版兼容逻辑**：完全移除 `MainStage` 中 `sidebar.addNewChatListener`、`sidebar.addResumeListener` 和 `sidebar.addDeleteListener` 的旧版监听器，以及 `addPageChangeListener` 中的旧版会话恢复逻辑。多标签系统已完全接管会话管理，不再需要旧版兼容代码。
 
 ## [2.3.12] - 2026-05-21
 

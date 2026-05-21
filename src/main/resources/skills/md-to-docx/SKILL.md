@@ -4,6 +4,7 @@ description: 使用 Pandoc + reference-doc 模板 + Lua 过滤器，将用户提
 compatibility:
   tools: [shell, filesystem]
   dependencies: [pandoc]
+enable: false
 ---
 
 # Markdown → DOCX（Pandoc 模板转换）技能

@@ -746,10 +746,12 @@ public class ChatInput extends VBox {
      * @param ratio 0.0 ~ 1.0，上下文使用比例
      */
     public void setContextUsage(double ratio) {
+        log.debug("[ContextUsage] setContextUsage called with ratio={}", ratio);
         if (Double.isNaN(ratio) || Double.isInfinite(ratio)) ratio = 0.0;
         double clamped = Math.max(0.0, Math.min(1.0, ratio));
         int percent = (int) Math.round(clamped * 100);
         int barWidth = (int) Math.round(clamped * 44);
+        log.debug("[ContextUsage] clamped={}, percent={}, barWidth={}", clamped, percent, barWidth);
 
         // 颜色：≤60% 绿 / ≤85% 黄 / >85% 红
         String color;

@@ -359,120 +359,22 @@ public class MainStage {
                         // 多标签系统（v2.3.9+）：tabManager 接管所有会话管理
                         // 切换回对话页时只需刷新侧栏历史，不应覆盖活跃标签的内容
                         // ChatPage 通过 setVisible/setManaged 自动保持标签状态
-                        if (tabManager != null) {
-                            if (suppressPageResume) {
-                                suppressPageResume = false;
-                            }
-                            // 如果当前无活跃标签（极端情况），创建默认标签
-                            if (tabManager.getActiveTabId() == null) {
-                                tabManager.createDefaultTab();
-                            }
+                        if (tabManager == null) {
+                            // tabManager 未初始化，忽略操作
                             return;
                         }
-                        // === 以下为旧版兼容逻辑（tabManager 未初始化时） ===
                         if (suppressPageResume) {
                             suppressPageResume = false;
-                            return;
                         }
-                        // 点击 Chat 菜单：最近会话是今天则恢复，否则进入欢迎页
-                        if (!sessions.isEmpty()) {
-                            Map<String, Object> recent = sessions.get(0);
-                            if (isToday(recent.get("updated_at"))) {
-                                String sid = (String) recent.get("session_id");
-                                if (sid != null && !sid.isBlank()) {
-                                    backendBridge.resumeSession(sid);
-                                    List<Map<String, Object>> history = backendBridge.getSessionHistory(sid);
-                                    getActiveChatPage().loadMessages(history);
-                                    // 修复多标签上下文错乱：使用 tabId 精确获取对应标签的上下文
-                                    String currentTabId = tabManager.getActiveTabId();
-                                    if (currentTabId != null) {
-                                        getActiveChatPage().setContextUsage(backendBridge.getContextUsageRatioForTab(currentTabId));
-                                    }
-                                    getActiveChatPage().refreshProjectBadge();
-                                    return;
-                                }
-                            }
-                        }
-                        // 非今天或无历史会话 → 欢迎页流程
-                        backendBridge.resetTitleCounter();
-                        backendBridge.newSession();
-                        getActiveChatPage().clearMessages();
-                        // 修复多标签上下文错乱：使用 tabId 精确获取对应标签的上下文
-                        String newTabId = tabManager.getActiveTabId();
-                        if (newTabId != null) {
-                            getActiveChatPage().setContextUsage(backendBridge.getContextUsageRatioForTab(newTabId));
-                        }
-                        getActiveChatPage().refreshProjectBadge();
-                        sidebar.refreshHistory(backendBridge.getSessionManager().listSessions());
-                        resetFileBadgeForNewSession();
-                    });
-                });
-            }
-        });
-        sidebar.addNewChatListener(() -> {
-            // 多标签系统（v2.3.9+）：tabManager 接管"新对话"逻辑
-            // initializeBackend() 中已注册正确的 newChatListener → tabManager.createNewTab()
-            // 旧版兼容逻辑仅在 tabManager 未初始化时执行
-            if (tabManager != null) return;
-            if (backendBridge != null) {
-                suppressPageResume = true;
-                backendBridge.resetTitleCounter();
-                // 仅清空会话引用和 GUI，不创建新会话（懒创建）
-                backendBridge.newSession();
-                Platform.runLater(() -> {
-                    getActiveChatPage().clearMessages();
-                    // 修复多标签上下文错乱：使用 tabId 精确获取对应标签的上下文
-                    String clearTabId = tabManager != null ? tabManager.getActiveTabId() : null;
-                    if (clearTabId != null) {
-                        getActiveChatPage().setContextUsage(backendBridge.getContextUsageRatioForTab(clearTabId));
-                    }
-                    getActiveChatPage().refreshProjectBadge();
-                    sidebar.refreshHistory(backendBridge.getSessionManager().listSessions());
-                    resetFileBadgeForNewSession();
-                });
-            }
-        });
-        sidebar.addResumeListener(sessionId -> {
-            if (backendBridge != null) {
-                CompletableFuture.runAsync(() -> {
-                    backendBridge.resumeSession(sessionId);
-                    // setBackupManager 必须在 loadMessages 之前设置，
-                    // 否则历史工具卡片的 [查看对比]/[回滚] 按钮无法找到备份文件
-                    agent.tool.file.FileBackupManager fbm = backendBridge.getFileBackupManager();
-                    Platform.runLater(() -> {
-                        if (fbm != null) {
-                            getActiveChatPage().getFileDiffBadge().setBackupManager(fbm);
-                            // loadFromBackupManager 要在 loadMessages 之后调用，
-                            // 因为 loadMessages 内部的 clearMessages → clearFiles 会清掉刚加载的数据
+                        // 如果当前无活跃标签（极端情况），创建默认标签
+                        if (tabManager.getActiveTabId() == null) {
+                            tabManager.createDefaultTab();
                         }
                     });
-                    List<Map<String, Object>> history = backendBridge.getSessionHistory(sessionId);
-                    Platform.runLater(() -> {
-                        getActiveChatPage().loadMessages(history);
-                        // 在 loadMessages 清空后再重新加载备份数据到 fileDiffBadge
-                        if (fbm != null) {
-                            getActiveChatPage().getFileDiffBadge().loadFromBackupManager();
-                        }
-                        // 修复多标签上下文错乱：使用 tabId 精确获取对应标签的上下文
-                        String resumeTabId = tabManager != null ? tabManager.getActiveTabId() : null;
-                        if (resumeTabId != null) {
-                            getActiveChatPage().setContextUsage(backendBridge.getContextUsageRatioForTab(resumeTabId));
-                        }
-                        getActiveChatPage().refreshProjectBadge();
-                        showPage("chat");
-                    });
                 });
             }
         });
-        sidebar.addDeleteListener(sessionId -> {
-            if (backendBridge != null) {
-                CompletableFuture.runAsync(() -> {
-                    backendBridge.deleteSession(sessionId);
-                    Platform.runLater(() ->
-                        sidebar.refreshHistory(backendBridge.getSessionManager().listSessions()));
-                });
-            }
-        });
+
         root.setLeft(sidebar);
     }
 

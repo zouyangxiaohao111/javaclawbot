@@ -149,6 +149,9 @@ public class SessionTabManager {
         chatPage.getChatInput().setOnStop(() -> backendBridge.stopMessage());
 
         chatPage.getChatInput().addSendListener(text -> {
+            // 用于控制进度条更新频率的计数器
+            final int[] progressCount = {0};
+
             log.info("[消息发送] tabId={}, text={}", currentTabId, text.length() > 50 ? text.substring(0, 50) + "..." : text);
             // 确保当前标签是活跃的
             backendBridge.setActiveTab(currentTabId);
@@ -196,6 +199,10 @@ public class SessionTabManager {
                     } else {
                         // 流式进度文本：替换上一个气泡，避免 WebView 累积卡死 GUI
                         chatPage.addAssistantMessage(progress.content(), true);
+                    }
+                    // 实时更新上下文使用率（每 3 个进度事件更新一次，避免频繁刷新）
+                    if (progressCount[0]++ % 3 == 0) {
+                        chatPage.setContextUsage(backendBridge.getContextUsageRatioForTab(currentTabId));
                     }
                 },
                 response -> {
@@ -408,6 +415,9 @@ public class SessionTabManager {
         chatPage.getChatInput().setOnStop(() -> backendBridge.stopMessage());
 
         chatPage.getChatInput().addSendListener(text -> {
+            // 用于控制进度条更新频率的计数器
+            final int[] progressCount = {0};
+
             // 确保当前标签是活跃的
             backendBridge.setActiveTab(currentTabId);
 
@@ -441,6 +451,10 @@ public class SessionTabManager {
                     } else {
                         // 流式进度文本：替换上一个气泡，避免 WebView 累积卡死 GUI
                         chatPage.addAssistantMessage(progress.content(), true);
+                    }
+                    // 实时更新上下文使用率（每 3 个进度事件更新一次，避免频繁刷新）
+                    if (progressCount[0]++ % 3 == 0) {
+                        chatPage.setContextUsage(backendBridge.getContextUsageRatioForTab(currentTabId));
                     }
                 },
                 response -> {
@@ -492,6 +506,8 @@ public class SessionTabManager {
         // 加载历史消息
         var history = backendBridge.getSessionHistory(sessionId);
         chatPage.loadMessages(history);
+        // 恢复历史会话后更新上下文使用率
+        chatPage.setContextUsage(backendBridge.getContextUsageRatioForTab(tabId));
 
         // 将 ChatPage 添加到 chatArea
         chatPage.setVisible(false);
@@ -552,6 +568,8 @@ public class SessionTabManager {
         // 加载历史消息
         var history = backendBridge.getSessionHistory(sessionId);
         chatPage.loadMessages(history);
+        // 恢复历史会话后更新上下文使用率
+        chatPage.setContextUsage(backendBridge.getContextUsageRatioForTab(activeTabId));
 
         log.info("在当前标签加载会话: tabId={}, sessionId={}, title={}", activeTabId, sessionId, title);
     }
