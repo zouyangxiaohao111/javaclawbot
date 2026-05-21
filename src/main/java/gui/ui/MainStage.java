@@ -383,7 +383,11 @@ public class MainStage {
                                     backendBridge.resumeSession(sid);
                                     List<Map<String, Object>> history = backendBridge.getSessionHistory(sid);
                                     getActiveChatPage().loadMessages(history);
-                                    getActiveChatPage().setContextUsage(backendBridge.getContextUsageRatio());
+                                    // 修复多标签上下文错乱：使用 tabId 精确获取对应标签的上下文
+                                    String currentTabId = tabManager.getActiveTabId();
+                                    if (currentTabId != null) {
+                                        getActiveChatPage().setContextUsage(backendBridge.getContextUsageRatioForTab(currentTabId));
+                                    }
                                     getActiveChatPage().refreshProjectBadge();
                                     return;
                                 }
@@ -393,7 +397,11 @@ public class MainStage {
                         backendBridge.resetTitleCounter();
                         backendBridge.newSession();
                         getActiveChatPage().clearMessages();
-                        getActiveChatPage().setContextUsage(backendBridge.getContextUsageRatio());
+                        // 修复多标签上下文错乱：使用 tabId 精确获取对应标签的上下文
+                        String newTabId = tabManager.getActiveTabId();
+                        if (newTabId != null) {
+                            getActiveChatPage().setContextUsage(backendBridge.getContextUsageRatioForTab(newTabId));
+                        }
                         getActiveChatPage().refreshProjectBadge();
                         sidebar.refreshHistory(backendBridge.getSessionManager().listSessions());
                         resetFileBadgeForNewSession();
@@ -413,7 +421,11 @@ public class MainStage {
                 backendBridge.newSession();
                 Platform.runLater(() -> {
                     getActiveChatPage().clearMessages();
-                    getActiveChatPage().setContextUsage(backendBridge.getContextUsageRatio());
+                    // 修复多标签上下文错乱：使用 tabId 精确获取对应标签的上下文
+                    String clearTabId = tabManager != null ? tabManager.getActiveTabId() : null;
+                    if (clearTabId != null) {
+                        getActiveChatPage().setContextUsage(backendBridge.getContextUsageRatioForTab(clearTabId));
+                    }
                     getActiveChatPage().refreshProjectBadge();
                     sidebar.refreshHistory(backendBridge.getSessionManager().listSessions());
                     resetFileBadgeForNewSession();
@@ -441,7 +453,11 @@ public class MainStage {
                         if (fbm != null) {
                             getActiveChatPage().getFileDiffBadge().loadFromBackupManager();
                         }
-                        getActiveChatPage().setContextUsage(backendBridge.getContextUsageRatio());
+                        // 修复多标签上下文错乱：使用 tabId 精确获取对应标签的上下文
+                        String resumeTabId = tabManager != null ? tabManager.getActiveTabId() : null;
+                        if (resumeTabId != null) {
+                            getActiveChatPage().setContextUsage(backendBridge.getContextUsageRatioForTab(resumeTabId));
+                        }
                         getActiveChatPage().refreshProjectBadge();
                         showPage("chat");
                     });
@@ -639,7 +655,11 @@ public class MainStage {
                 backendBridge.refreshProvider();
                 getActiveChatPage().setStatusText("\u25CF 模型就绪 \u00B7 " + model);
                 if (backendBridge != null) {
-                    getActiveChatPage().setContextUsage(backendBridge.getContextUsageRatio());
+                    // 修复多标签上下文错乱：使用 tabId 精确获取对应标签的上下文
+                    String settingsTabId = tabManager != null ? tabManager.getActiveTabId() : null;
+                    if (settingsTabId != null) {
+                        getActiveChatPage().setContextUsage(backendBridge.getContextUsageRatioForTab(settingsTabId));
+                    }
                 }
             });
         }

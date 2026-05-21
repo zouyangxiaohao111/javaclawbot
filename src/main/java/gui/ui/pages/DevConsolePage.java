@@ -34,6 +34,7 @@ public class DevConsolePage extends VBox {
     private Label statusLabel;
 
     private ComboBox<String> levelFilter;
+    private ComboBox<String> lineCountFilter;
     private TextField searchField;
     private ToggleButton autoScrollBtn;
 
@@ -90,6 +91,24 @@ public class DevConsolePage extends VBox {
             }
         });
 
+        // 行数选择
+        Label lineCountLabel = new Label("显示行数:");
+        lineCountLabel.setStyle("-fx-font-size: 13px; -fx-text-fill: rgba(0,0,0,0.5);");
+        lineCountFilter = new ComboBox<>();
+        lineCountFilter.getItems().addAll("100", "200", "500", "1000");
+        lineCountFilter.setValue("200");
+        lineCountFilter.setPrefWidth(80);
+        lineCountFilter.setStyle("-fx-background-color: white; -fx-background-radius: 6px; -fx-border-color: transparent; -fx-font-size: 12px;");
+        lineCountFilter.setOnAction(e -> {
+            String value = lineCountFilter.getValue();
+            if (value != null) {
+                int lines = Integer.parseInt(value);
+                logWatcher.setSelectedInitialLines(lines);
+                // 重新加载日志
+                reloadLogs();
+            }
+        });
+
         // 搜索框
         searchField = new TextField();
         searchField.setPromptText("搜索日志...");
@@ -122,7 +141,7 @@ public class DevConsolePage extends VBox {
         clearBtn.setStyle("-fx-background-color: white; -fx-background-radius: 6px; -fx-border-color: transparent; -fx-font-size: 12px; -fx-padding: 6px 12px;");
         clearBtn.setOnAction(e -> clearLogs());
 
-        bar.getChildren().addAll(filterLabel, levelFilter, searchField, autoScrollBtn, exportBtn, clearBtn);
+        bar.getChildren().addAll(filterLabel, levelFilter, lineCountLabel, lineCountFilter, searchField, autoScrollBtn, exportBtn, clearBtn);
         return bar;
     }
 
@@ -323,6 +342,26 @@ public class DevConsolePage extends VBox {
                 lineCountLabel.setText("共 0 行");
             });
         }
+    }
+
+    /**
+     * 重新加载日志：停止当前 LogWatcher，清空缓冲区，重新启动。
+     * 用于行数选择变化时重新加载指定行数的日志。
+     */
+    private void reloadLogs() {
+        // 停止当前 LogWatcher
+        logWatcher.stop();
+        // 清空缓冲区
+        logBuffer.clear();
+        // 清空 WebView 显示
+        if (engine != null) {
+            Platform.runLater(() -> {
+                engine.executeScript("clearAll()");
+                lineCountLabel.setText("共 0 行");
+            });
+        }
+        // 重新启动 LogWatcher
+        startLogWatcher();
     }
 
     // ========== Util ==========

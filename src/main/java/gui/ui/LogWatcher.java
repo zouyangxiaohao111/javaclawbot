@@ -40,6 +40,9 @@ public class LogWatcher {
     private WatchService watchService;
     private Thread thread;
 
+    /** 用户选择的初始读取行数，默认为 200 */
+    private volatile int selectedInitialLines = 200;
+
     public LogWatcher(ConcurrentLinkedQueue<LogEntry> buffer) {
         this.buffer = buffer;
         String home = System.getProperty("user.home");
@@ -76,14 +79,32 @@ public class LogWatcher {
         return stopped.get();
     }
 
+    /**
+     * 设置用户选择的初始读取行数。
+     * @param lines 行数，必须大于 0
+     */
+    public void setSelectedInitialLines(int lines) {
+        if (lines > 0) {
+            this.selectedInitialLines = lines;
+        }
+    }
+
+    /**
+     * 获取用户选择的初始读取行数。
+     * @return 行数
+     */
+    public int getSelectedInitialLines() {
+        return selectedInitialLines;
+    }
+
     private void run() {
         try {
             ensureDirAndFile();
             openFile();
             registerWatcher();
-            // 初始读取：只保留最后 INITIAL_READ_MAX_LINES 行，
+            // 初始读取：只保留最后 selectedInitialLines 行，
             // 防止大文件（2MB+）撑爆缓冲区导致 UI 卡死
-            initialRead(INITIAL_READ_MAX_LINES);
+            initialRead(selectedInitialLines);
             mainLoop();
         } catch (Exception e) {
             buffer.offer(new LogEntry(

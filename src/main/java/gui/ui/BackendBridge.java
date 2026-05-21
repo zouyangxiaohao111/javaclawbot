@@ -1371,6 +1371,23 @@ public class BackendBridge {
         if (agentLoop == null || sessionManager == null) return 0.0;
         TabSessionContext ctx = getActiveContext();
         if (ctx == null) return 0.0;
+        return getContextUsageRatioForTab(ctx.tabId);
+    }
+
+    /**
+     * 获取指定标签的上下文使用率 (0.0 ~ 1.0)。
+     *
+     * 修复多标签场景下上下文错乱问题：通过 tabId 精确获取对应标签的上下文，
+     * 而不是依赖可能已切换的 activeTabId。
+     *
+     * @param tabId 标签 ID
+     * @return 上下文使用率 (0.0 ~ 1.0)
+     */
+    public double getContextUsageRatioForTab(String tabId) {
+        if (agentLoop == null || sessionManager == null) return 0.0;
+        if (tabId == null) return 0.0;
+        TabSessionContext ctx = tabContexts.get(tabId);
+        if (ctx == null) return 0.0;
         Session session = sessionManager.getOrCreate(ctx.sessionKey);
         if (session == null) return 0.0;
         UsageAccumulator usageAcc = session.obtainLastUsage();

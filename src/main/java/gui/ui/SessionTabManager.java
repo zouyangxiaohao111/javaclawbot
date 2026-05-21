@@ -219,7 +219,8 @@ public class SessionTabManager {
                     // 回复内容作为独立气泡添加
                     chatPage.addAssistantMessage(response, false);
                     chatPage.setStatusText("● 模型就绪 · " + getCurrentModelName());
-                    chatPage.setContextUsage(backendBridge.getContextUsageRatio());
+                    // 修复多标签上下文错乱：使用 tabId 精确获取对应标签的上下文
+                    chatPage.setContextUsage(backendBridge.getContextUsageRatioForTab(currentTabId));
                     // 更新标签状态
                     tabBar.updateTabStatus(currentTabId, TabItem.Status.COMPLETED);
                     // 重置工具卡片
@@ -457,7 +458,8 @@ public class SessionTabManager {
                     // 回复内容作为独立气泡添加
                     chatPage.addAssistantMessage(response, false);
                     chatPage.setStatusText("● 模型就绪 · " + getCurrentModelName());
-                    chatPage.setContextUsage(backendBridge.getContextUsageRatio());
+                    // 修复多标签上下文错乱：使用 tabId 精确获取对应标签的上下文
+                    chatPage.setContextUsage(backendBridge.getContextUsageRatioForTab(currentTabId));
                     // 更新标签状态
                     tabBar.updateTabStatus(currentTabId, TabItem.Status.COMPLETED);
                     // 重置工具卡片
