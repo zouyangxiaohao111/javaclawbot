@@ -366,9 +366,8 @@ public class SessionTabManager {
 
         // 没找到对应标签，检查是否超出限制
         if (tabBar.getTabCount() >= getMaxConcurrent()) {
-            // 超出限制：在当前标签加载会话，不创建新标签
-            log.info("标签数已达上限，在当前标签加载会话: sessionId={}", sessionId);
-            loadSessionInCurrentTab(sessionId);
+            // 超出限制：显示提示
+            showConcurrencyLimitToast();
             return;
         }
 
