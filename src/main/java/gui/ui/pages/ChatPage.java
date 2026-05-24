@@ -78,6 +78,7 @@ public class ChatPage extends VBox {
     private boolean isLoadingMore = false; // 防止重复加载
     private boolean hasMoreHistory = true; // 是否还有更多历史消息
     private Label loadingIndicator; // 加载指示器
+    private boolean disableTrim = false; // 禁用trimToWindow()，用于加载历史消息期间
 
     private static final Parser REASONING_PARSER;
     private static final HtmlRenderer REASONING_RENDERER;
@@ -123,6 +124,17 @@ public class ChatPage extends VBox {
 
         // 悬浮滚动到底部按钮（必须在 vvalue 监听器之前创建）
         scrollToBottomBtn = createScrollToBottomButton();
+
+        // 直接监听滚轮事件，解决 WebView 拦截导致 ScrollPane vvalue 不更新的问题
+        // 当用户在顶部附近向上滚动时，强制触发 loadMoreHistory()
+        scrollPane.addEventFilter(javafx.scene.input.ScrollEvent.SCROLL, e -> {
+            if (e.getDeltaY() > 0) { // 向上滚动
+                double v = scrollPane.getVvalue();
+                if (v <= 0.05 && hasMoreHistory && !isLoadingMore && fullHistory != null) {
+                    loadMoreHistory();
+                }
+            }
+        });
 
         // 跟踪滚动位置，判断是否在底部
         scrollPane.vvalueProperty().addListener((obs, old, val) -> {
@@ -739,6 +751,7 @@ public class ChatPage extends VBox {
      * 防止 WebView 累积导致内存爆炸和 GUI 卡顿。
      */
     private void trimToWindow() {
+        if (disableTrim) return; // 加载历史消息期间禁用trim
         var children = messageContainer.getChildren();
         int total = children.size();
         if (total <= MAX_VISIBLE_NODES) return;
@@ -787,6 +800,20 @@ public class ChatPage extends VBox {
         return chatInput;
     }
 
+    /**
+     * 获取当前滚动位置（0.0 ~ 1.0）
+     */
+    public double getScrollPosition() {
+        return scrollPane.getVvalue();
+    }
+
+    /**
+     * 设置滚动位置（0.0 ~ 1.0）
+     */
+    public void setScrollPosition(double position) {
+        Platform.runLater(() -> scrollPane.setVvalue(position));
+    }
+
     public void setStatusText(String text) {
         chatInput.setStatusText(text);
     }
@@ -807,6 +834,7 @@ public class ChatPage extends VBox {
         }
 
         isLoadingMore = true;
+        disableTrim = true; // 禁用trimToWindow()，防止移除用户正在查看的历史消息
         showLoadingIndicator();
 
         // 计算新的起始索引
@@ -860,6 +888,7 @@ public class ChatPage extends VBox {
 
                 hideLoadingIndicator();
                 isLoadingMore = false;
+                disableTrim = false; // 重新启用trimToWindow()
                 displayStartIndex = newStartIndex;
 
                 // 检查是否还有更多历史消息

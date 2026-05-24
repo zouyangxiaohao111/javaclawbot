@@ -33,6 +33,7 @@ public class SessionTabManager {
     private final VBox chatArea; // 包含 tabBar + chatPages 的容器
     private final Map<String, ChatPage> tabChatPages = new ConcurrentHashMap<>();
     private final Map<String, String> tabSessionMap = new ConcurrentHashMap<>(); // tabId → sessionId
+    private final Map<String, Double> tabScrollPositions = new ConcurrentHashMap<>(); // tabId → 滚动位置
     private String activeTabId = null;
     private int maxConcurrent = 4; // 默认值
     private final ModelSelectorPopup modelSelectorPopup = new ModelSelectorPopup();
@@ -282,10 +283,11 @@ public class SessionTabManager {
 
         log.debug("[标签切换] 从 {} 切换到 {}", activeTabId, tabId);
 
-        // 隐藏当前标签内容
+        // 保存当前标签的滚动位置
         if (activeTabId != null) {
             ChatPage oldPage = tabChatPages.get(activeTabId);
             if (oldPage != null) {
+                tabScrollPositions.put(activeTabId, oldPage.getScrollPosition());
                 oldPage.setVisible(false);
                 oldPage.setManaged(false);
             }
@@ -297,6 +299,11 @@ public class SessionTabManager {
         if (newPage != null) {
             newPage.setVisible(true);
             newPage.setManaged(true);
+            // 恢复目标标签的滚动位置
+            Double savedPosition = tabScrollPositions.get(tabId);
+            if (savedPosition != null) {
+                newPage.setScrollPosition(savedPosition);
+            }
             log.debug("[标签切换] ChatPage 已显示: tabId={}", tabId);
         } else {
             log.debug("[标签切换] ChatPage 不存在: tabId={}", tabId);

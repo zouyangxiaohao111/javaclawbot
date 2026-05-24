@@ -2,6 +2,18 @@
 
 All notable changes to NexusAI will be documented in this file.
 
+## [2.3.14] - 2026-05-24
+
+### Fixed
+- **GUI 历史消息无法滚动加载**：修复对话消息超过80条时，滚动到顶部不触发 `loadMoreHistory()` 的问题
+  - 根因：JavaFX `ScrollPane.vvalueProperty` 在 vvalue 已达 0.0 时不再触发，且 WebView 节点会拦截滚轮事件
+  - 新增 `ScrollEvent` 过滤器在 ScrollPane 上直接监听滚轮事件：当 `deltaY > 0` 且 `vvalue <= 0.05` 时触发加载
+  - 新增 `disableTrim` 标志：`loadMoreHistory()` 执行期间禁用 `trimToWindow()`，防止移除用户正在查看的历史消息
+- **GUI 标签切换滚动位置丢失**：修复多标签切换后回到第一个对话而非最后消息的问题
+  - 新增 `tabScrollPositions` 保存每个标签的滚动位置
+  - `switchToTab()` 时保存旧标签位置、恢复新标签位置
+  - ChatPage 新增 `getScrollPosition()` / `setScrollPosition()` 方法
+
 ## [2.3.13] - 2026-05-21
 
 ### Added
