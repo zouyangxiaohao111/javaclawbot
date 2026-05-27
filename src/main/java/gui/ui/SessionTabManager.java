@@ -299,10 +299,13 @@ public class SessionTabManager {
         if (newPage != null) {
             newPage.setVisible(true);
             newPage.setManaged(true);
-            // 恢复目标标签的滚动位置
+            // 恢复目标标签的滚动位置：等待布局完成后恢复，避免被 vvalue 监听器干扰
             Double savedPosition = tabScrollPositions.get(tabId);
             if (savedPosition != null) {
+                log.debug("[标签切换] 恢复滚动位置: tabId={}, position={}", tabId, savedPosition);
                 newPage.setScrollPosition(savedPosition);
+            } else {
+                log.debug("[标签切换] 无保存的滚动位置: tabId={}", tabId);
             }
             log.debug("[标签切换] ChatPage 已显示: tabId={}", tabId);
         } else {

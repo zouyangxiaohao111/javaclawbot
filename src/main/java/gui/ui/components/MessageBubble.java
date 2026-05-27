@@ -183,7 +183,7 @@ public class MessageBubble extends HBox {
             public void changed(javafx.beans.value.ObservableValue<? extends javafx.scene.Scene> obs,
                                 javafx.scene.Scene oldScene, javafx.scene.Scene newScene) {
                 if (newScene != null) {
-                    bubble.sceneProperty().removeListener(this);
+                    // 不 removeListener：节点从场景脱离后重新附着时需要重新加载 WebView 内容
                     Platform.runLater(() -> webView.getEngine().load(toDataUri(html)));
                 }
             }

@@ -79,6 +79,7 @@ public class ChatPage extends VBox {
     private boolean hasMoreHistory = true; // 是否还有更多历史消息
     private Label loadingIndicator; // 加载指示器
     private boolean disableTrim = false; // 禁用trimToWindow()，用于加载历史消息期间
+    private final java.util.List<javafx.scene.Node> trimmedNodes = new java.util.ArrayList<>(); // trimToWindow() 移除的节点，滚动到顶部时重新插入
 
     private static final Parser REASONING_PARSER;
     private static final HtmlRenderer REASONING_RENDERER;
@@ -130,7 +131,7 @@ public class ChatPage extends VBox {
         scrollPane.addEventFilter(javafx.scene.input.ScrollEvent.SCROLL, e -> {
             if (e.getDeltaY() > 0) { // 向上滚动
                 double v = scrollPane.getVvalue();
-                if (v <= 0.05 && hasMoreHistory && !isLoadingMore && fullHistory != null) {
+                if (v <= 0.05 && hasMoreHistory && !isLoadingMore) {
                     loadMoreHistory();
                 }
             }
@@ -151,7 +152,7 @@ public class ChatPage extends VBox {
             }
 
             // 当滚动到顶部附近时触发加载更多历史消息
-            if (v < 0.1 && hasMoreHistory && !isLoadingMore && fullHistory != null) {
+            if (v < 0.1 && hasMoreHistory && !isLoadingMore) {
                 loadMoreHistory();
             }
 
@@ -451,6 +452,12 @@ public class ChatPage extends VBox {
             }
             reasoningWv.getEngine().load(toDataUri(reasoningHtml));
         });
+        // 场景重新附着时重新加载 WebView 内容（trimToWindow 脱离后 loadMoreHistory 重新插入时触发）
+        row.sceneProperty().addListener((obs, oldScene, newScene) -> {
+            if (newScene != null) {
+                Platform.runLater(() -> reasoningWv.getEngine().load(toDataUri(reasoningHtml)));
+            }
+        });
     }
 
     public ToolCallCard addToolCallCard(String toolName, String status, String params) {
@@ -640,9 +647,8 @@ public class ChatPage extends VBox {
             public void changed(javafx.beans.value.ObservableValue<? extends javafx.scene.Scene> obs,
                                 javafx.scene.Scene oldScene, javafx.scene.Scene newScene) {
                 if (newScene != null) {
-                    row.sceneProperty().removeListener(this);
+                    // 不 removeListener：节点从场景脱离后重新附着时需要重新加载 WebView 内容
                     Platform.runLater(() -> {
-                        // 布局已完成，responseBubble 有了实际宽度
                         double w = responseBubble.getWidth();
                         if (w > 0) {
                             reasoningWv.setPrefWidth(w);
@@ -761,6 +767,8 @@ public class ChatPage extends VBox {
         if (startIdx >= children.size()) return;
 
         int endIdx = Math.min(startIdx + remove, children.size());
+        // 保存被移除的节点，滚动到顶部时可重新插入
+        trimmedNodes.addAll(children.subList(startIdx, endIdx));
         children.remove(startIdx, endIdx);
         nodesTrimmed += (endIdx - startIdx);
     }
@@ -802,16 +810,29 @@ public class ChatPage extends VBox {
 
     /**
      * 获取当前滚动位置（0.0 ~ 1.0）
+     * 程序化滚动期间返回保存的位置，避免返回被临时修改的值
      */
     public double getScrollPosition() {
+        if (programmaticScroll) {
+            return lastVvalue;
+        }
         return scrollPane.getVvalue();
     }
 
     /**
      * 设置滚动位置（0.0 ~ 1.0）
+     * 使用 programmaticScroll 标记防止 vvalue 监听器干扰 autoScroll 状态
      */
     public void setScrollPosition(double position) {
-        Platform.runLater(() -> scrollPane.setVvalue(position));
+        programmaticScroll = true;
+        Platform.runLater(() -> {
+            scrollPane.setVvalue(position);
+            // 等待布局完成后再解除标记，确保 vvalue 监听器不会误判为"在底部"
+            Platform.runLater(() -> {
+                programmaticScroll = false;
+                lastVvalue = position;
+            });
+        });
     }
 
     public void setStatusText(String text) {
@@ -829,7 +850,46 @@ public class ChatPage extends VBox {
      * 加载更多历史消息（滚动到顶部时触发）
      */
     private void loadMoreHistory() {
-        if (isLoadingMore || !hasMoreHistory || fullHistory == null) {
+        // trimmedNodes 路径：实时对话中被 trimToWindow() 移除的节点
+        if (fullHistory == null) {
+            if (isLoadingMore || trimmedNodes.isEmpty()) {
+                return;
+            }
+            isLoadingMore = true;
+            disableTrim = true;
+
+            Platform.runLater(() -> {
+                double currentVvalue = scrollPane.getVvalue();
+                double currentContentHeight = messageContainer.getHeight();
+
+                // 从末尾取出最早被 trim 的节点（最多 LOAD_MORE_COUNT 个），插入到容器顶部
+                int count = Math.min(LOAD_MORE_COUNT, trimmedNodes.size());
+                int fromIdx = trimmedNodes.size() - count;
+                java.util.List<javafx.scene.Node> toInsert = new java.util.ArrayList<>(
+                    trimmedNodes.subList(fromIdx, trimmedNodes.size()));
+                trimmedNodes.subList(fromIdx, trimmedNodes.size()).clear();
+
+                messageContainer.getChildren().addAll(0, toInsert);
+
+                Platform.runLater(() -> {
+                    double newContentHeight = messageContainer.getHeight();
+                    double heightDiff = newContentHeight - currentContentHeight;
+                    if (heightDiff > 0 && currentContentHeight > 0) {
+                        double newVvalue = Math.min(1.0, currentVvalue + heightDiff / newContentHeight);
+                        programmaticScroll = true;
+                        scrollPane.setVvalue(newVvalue);
+                        Platform.runLater(() -> programmaticScroll = false);
+                    }
+                    isLoadingMore = false;
+                    disableTrim = false;
+                    hasMoreHistory = !trimmedNodes.isEmpty();
+                });
+            });
+            return;
+        }
+
+        // fullHistory 路径：从完整历史消息中创建新节点
+        if (isLoadingMore || !hasMoreHistory) {
             return;
         }
 
@@ -1107,7 +1167,7 @@ public class ChatPage extends VBox {
             public void changed(javafx.beans.value.ObservableValue<? extends javafx.scene.Scene> obs,
                                 javafx.scene.Scene oldScene, javafx.scene.Scene newScene) {
                 if (newScene != null) {
-                    row.sceneProperty().removeListener(this);
+                    // 不 removeListener：节点从场景脱离后重新附着时需要重新加载 WebView 内容
                     Platform.runLater(() -> {
                         double w = responseBubble.getWidth();
                         if (w > 0) {
@@ -1213,6 +1273,12 @@ public class ChatPage extends VBox {
             }
             reasoningWv.getEngine().load(toDataUri(reasoningHtml));
         });
+        // 场景重新附着时重新加载 WebView 内容（trimToWindow 脱离后 loadMoreHistory 重新插入时触发）
+        row.sceneProperty().addListener((obs, oldScene, newScene) -> {
+            if (newScene != null) {
+                Platform.runLater(() -> reasoningWv.getEngine().load(toDataUri(reasoningHtml)));
+            }
+        });
 
         return row;
     }
@@ -1258,6 +1324,7 @@ public class ChatPage extends VBox {
         addWelcomeMessage();
         autoScroll = true;
         scrollToBottomBtn.setVisible(false);
+        trimmedNodes.clear();
     }
 
     public void loadMessages(java.util.List<java.util.Map<String, Object>> history) {
