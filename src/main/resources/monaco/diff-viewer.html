@@ -29,8 +29,9 @@ html,body{height:100%;overflow:hidden;
 #statusbar .add{color:#34c759;font-weight:500;}
 #statusbar .spacer{flex:1;}
 #statusbar .hint{color:#aeaeb2;font-size:10px;}
-
-/* Monaco 自定义主题覆盖 */
+#loading-msg{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
+  background:#f5f5f7;padding:16px 24px;border-radius:8px;font-size:13px;color:#86868b;
+  box-shadow:0 2px 8px rgba(0,0,0,0.1);z-index:100;}
 .monaco-editor .inserted-sign{background:#f0faf0 !important;}
 .monaco-editor .deleted-sign{background:#fff5f5 !important;}
 .monaco-editor .inserted-text{background:rgba(52,199,89,0.2) !important;}
@@ -61,43 +62,55 @@ html,body{height:100%;overflow:hidden;
   <span id="versionInfo"></span>
   <span class="hint">ESC 关闭</span>
 </div>
+<div id="loading-msg">正在加载对比视图…</div>
 
 <script src="vs/loader.js"></script>
 <script>
-// 全局错误捕获 — 确保任何 JS 错误都显示在 UI 上
-window.onerror = function(msg, url, line, col, error) {
-  var box = document.getElementById('diag-box');
-  if (!box) {
-    box = document.createElement('div');
-    box.id = 'diag-box';
-    box.style.cssText = 'position:fixed;top:50px;right:10px;background:rgba(255,0,0,0.9);color:#fff;padding:10px;border-radius:5px;font-size:11px;z-index:9999;font-family:monospace;white-space:pre;max-width:400px;max-height:300px;overflow:auto;';
-    document.body.appendChild(box);
-  }
-  box.textContent += '\n[ERROR] ' + msg + '\n  at ' + url + ':' + line + ':' + col;
-  return false;
-};
-
-// 关键修复：file:// 协议下 Worker 必须返回有效 blob URL，不能返回空字符串
-// 空字符串导致 Worker 创建失败 → Monaco 初始化中断 → require 回调永不触发
-var workerBlob = new Blob([
-  'self.onmessage = function(e) { /* no-op worker stub */ };'
-], { type: 'application/javascript' });
-var workerUrl = URL.createObjectURL(workerBlob);
-
-window.MonacoEnvironment = {
-  getWorkerUrl: function(moduleId, label) {
-    return workerUrl;
-  }
-};
-
-require.config({ paths: { vs: 'vs' } });
+'use strict';
 
 var diffEditor = null;
 var currentDiffIndex = -1;
 var diffRanges = [];
+var monacoReady = false;
 
-require(['vs/editor/editor.main'], function() {
-  // 定义 Apple 风格亮色主题
+// ========== Worker stub for file:// protocol ==========
+try {
+  var workerBlob = new Blob([
+    'self.onmessage = function(e) {};'
+  ], { type: 'application/javascript' });
+  var workerUrl = URL.createObjectURL(workerBlob);
+  window.MonacoEnvironment = {
+    getWorkerUrl: function() { return workerUrl; }
+  };
+} catch(e) {
+  showStatus('Worker stub 创建失败: ' + e.message);
+}
+
+// ========== Monaco init via AMD require ==========
+try {
+  require.config({ paths: { vs: 'vs' } });
+
+  require(['vs/editor/editor.main'], function() {
+    try {
+      initMonaco();
+    } catch(e) {
+      showStatus('Monaco 初始化失败: ' + e.message);
+    }
+  }, function(err) {
+    showStatus('Monaco 加载失败: ' + (err && err.message ? err.message : String(err)));
+  });
+} catch(e) {
+  showStatus('require.config 失败: ' + e.message);
+}
+
+// ========== Core init function ==========
+function initMonaco() {
+  if (monacoReady) return true;
+  if (typeof monaco === 'undefined') {
+    showStatus('monaco 对象不存在');
+    return false;
+  }
+
   monaco.editor.defineTheme('apple-light', {
     base: 'vs',
     inherit: true,
@@ -138,196 +151,118 @@ require(['vs/editor/editor.main'], function() {
     }
   );
 
-  // Monaco 就绪信号
+  monacoReady = true;
   window.__diffReady = true;
+  hideLoading();
   window.status = 'monaco-ready';
 
-  // 如果数据已就绪则加载
   if (window.__pendingDiffData) {
-    applyDiffData(window.__pendingDiffData);
+    try { applyDiffData(window.__pendingDiffData); } catch(e) {}
     window.__pendingDiffData = null;
   }
-});
-
-// Java 调用入口
-function setDiffData(json) {
-  var data = typeof json === 'string' ? JSON.parse(json) : json;
-  if (!diffEditor) {
-    window.__pendingDiffData = data;
-    return;
-  }
-  applyDiffData(data);
-}
-
-// Java 主动拉取：接受对象或字符串
-function fetchAndApplyDiff(jsonOrObj) {
-  if (!diffEditor || !jsonOrObj) return false;
-  var data = typeof jsonOrObj === 'string' ? JSON.parse(jsonOrObj) : jsonOrObj;
-  applyDiffData(data);
   return true;
 }
 
-function applyDiffData(data) {
+// ========== Java entry points ==========
+function setDiffData(json) {
   try {
-    console.log('[applyDiffData] 开始应用数据:', data.fileName);
-
-    document.getElementById('fileName').textContent = data.fileName || '';
-    document.getElementById('filePath').textContent = data.filePath || '';
-    document.getElementById('timestamp').textContent = data.timestamp || '';
-    document.getElementById('versionInfo').textContent =
-      '备份 ' + (data.backupVersion || 1) + ' / ' + (data.totalVersions || 1);
-
-    var lang = data.language || detectLanguage(data.fileName);
-    console.log('[applyDiffData] 检测到的语言:', lang);
-
-    // 创建模型 - 使用 'plaintext' 作为回退
-    var originalText = data.original || '';
-    var modifiedText = data.modified || '';
-    console.log('[applyDiffData] 原始文本长度:', originalText.length, '修改文本长度:', modifiedText.length);
-
-    var originalModel, modifiedModel;
-    try {
-      originalModel = monaco.editor.createModel(originalText, lang);
-      console.log('[applyDiffData] originalModel 创建成功:', !!originalModel);
-      console.log('[applyDiffData] originalModel 类型:', typeof originalModel);
-      console.log('[applyDiffData] originalModel 方法:', originalModel ? Object.keys(originalModel).slice(0, 10) : 'null');
-      console.log('[applyDiffData] originalModel.onDidChangeContent 类型:', typeof (originalModel && originalModel.onDidChangeContent));
-    } catch (e) {
-      console.error('[applyDiffData] 创建 originalModel 失败:', e);
-      originalModel = monaco.editor.createModel(originalText, 'plaintext');
-    }
-
-    try {
-      modifiedModel = monaco.editor.createModel(modifiedText, lang);
-      console.log('[applyDiffData] modifiedModel 创建成功:', !!modifiedModel);
-      console.log('[applyDiffData] modifiedModel 类型:', typeof modifiedModel);
-      console.log('[applyDiffData] modifiedModel 方法:', modifiedModel ? Object.keys(modifiedModel).slice(0, 10) : 'null');
-      console.log('[applyDiffData] modifiedModel.onDidChangeContent 类型:', typeof (modifiedModel && modifiedModel.onDidChangeContent));
-    } catch (e) {
-      console.error('[applyDiffData] 创建 modifiedModel 失败:', e);
-      modifiedModel = monaco.editor.createModel(modifiedText, 'plaintext');
-    }
-
-    // 验证模型是否有效 - 检查关键方法
-    if (!originalModel || !modifiedModel ||
-        !originalModel.onDidChangeContent || !modifiedModel.onDidChangeContent) {
-      console.error('[applyDiffData] 模型无效或缺少方法，使用 plaintext 重新创建');
-      originalModel = monaco.editor.createModel(originalText, 'plaintext');
-      modifiedModel = monaco.editor.createModel(modifiedText, 'plaintext');
-
-      // 再次验证
-      if (!originalModel.onDidChangeContent || !modifiedModel.onDidChangeContent) {
-        console.error('[applyDiffData] 即使使用 plaintext，模型仍然无效');
-        document.getElementById('fileName').textContent = 'Monaco 模型创建失败';
-        return;
-      }
-    }
-
-    // 关键修复：setModel 接受直接的模型对象，不是包装对象
-    console.log('[applyDiffData] 调用 setModel');
-    try {
-      diffEditor.setModel({
-        original: originalModel,
-        modified: modifiedModel
-      });
-      console.log('[applyDiffData] setModel 成功');
-
-      // 添加更多诊断信息
-      console.log('[applyDiffData] diffEditor 存在:', !!diffEditor);
-      console.log('[applyDiffData] diffEditor.getModel():', diffEditor.getModel());
-
-      var model = diffEditor.getModel();
-      if (model) {
-        console.log('[applyDiffData] model.original:', !!model.original);
-        console.log('[applyDiffData] model.modified:', !!model.modified);
-        if (model.original) {
-          console.log('[applyDiffData] original.getValue() 长度:', model.original.getValue().length);
-        }
-        if (model.modified) {
-          console.log('[applyDiffData] modified.getValue() 长度:', model.modified.getValue().length);
-        }
-      }
-
-      // 检查容器尺寸
-      var container = document.getElementById('diff-container');
-      var containerSize = {
-        width: container.offsetWidth,
-        height: container.offsetHeight,
-        clientWidth: container.clientWidth,
-        clientHeight: container.clientHeight
-      };
-      console.log('[applyDiffData] 容器尺寸:', containerSize);
-
-      // 强制重新布局
-      diffEditor.layout();
-      console.log('[applyDiffData] layout() 调用完成');
-
-      // 添加可见诊断信息
-      setTimeout(function() {
-        var diagDiv = document.createElement('div');
-        diagDiv.style.position = 'fixed';
-        diagDiv.style.top = '50px';
-        diagDiv.style.right = '10px';
-        diagDiv.style.background = 'rgba(255,255,0,0.9)';
-        diagDiv.style.color = '#000';
-        diagDiv.style.padding = '10px';
-        diagDiv.style.borderRadius = '5px';
-        diagDiv.style.fontSize = '12px';
-        diagDiv.style.zIndex = '9999';
-        diagDiv.style.fontFamily = 'monospace';
-        diagDiv.style.whiteSpace = 'pre';
-
-        var info = [];
-        info.push('=== 诊断信息 ===');
-        info.push('容器: ' + containerSize.width + 'x' + containerSize.height);
-        info.push('model.original: ' + (!!model.original));
-        info.push('model.modified: ' + (!!model.modified));
-        if (model && model.original) {
-          info.push('original 长度: ' + model.original.getValue().length);
-        }
-        if (model && model.modified) {
-          info.push('modified 长度: ' + model.modified.getValue().length);
-        }
-
-        var changeCount = diffEditor.getLineChanges ? diffEditor.getLineChanges().length : 'N/A';
-        info.push('changes: ' + changeCount);
-
-        diagDiv.textContent = info.join('\n');
-        document.body.appendChild(diagDiv);
-      }, 200);
-
-    } catch (e) {
-      console.error('[applyDiffData] setModel 失败:', e);
-      document.getElementById('fileName').textContent = '设置对比模型失败';
+    var data = typeof json === 'string' ? JSON.parse(json) : json;
+    if (!monacoReady || !diffEditor) {
+      window.__pendingDiffData = data;
       return;
     }
-
-    // 统计增删行
-    var changes = diffEditor.getLineChanges() || [];
-    console.log('[applyDiffData] getLineChanges() 返回:', changes);
-    console.log('[applyDiffData] 变更数量:', changes.length);
-    var delLines = 0, addLines = 0;
-    diffRanges = [];
-    for (var i = 0; i < changes.length; i++) {
-      var c = changes[i];
-      if (c.originalEndLineNumber > 0)
-        delLines += c.originalEndLineNumber - c.originalStartLineNumber + 1;
-      if (c.modifiedEndLineNumber > 0)
-        addLines += c.modifiedEndLineNumber - c.modifiedStartLineNumber + 1;
-      diffRanges.push(c);
-    }
-    document.getElementById('delCount').textContent = '− ' + delLines + ' 行删除';
-    document.getElementById('addCount').textContent = '+ ' + addLines + ' 行新增';
-    document.getElementById('navInfo').textContent =
-      diffRanges.length > 0 ? '1 / ' + diffRanges.length : '';
-    currentDiffIndex = -1;
-    console.log('[applyDiffData] 完成，删除:', delLines, '新增:', addLines);
-  } catch (e) {
-    console.error('[applyDiffData] 应用数据失败:', e);
-    document.getElementById('fileName').textContent = '加载失败: ' + e.message;
+    applyDiffData(data);
+  } catch(e) {
+    showStatus('setDiffData 失败: ' + e.message);
   }
 }
 
+function fetchAndApplyDiff(jsonOrObj) {
+  try {
+    if (!monacoReady || !diffEditor) return false;
+    var data = typeof jsonOrObj === 'string' ? JSON.parse(jsonOrObj) : jsonOrObj;
+    applyDiffData(data);
+    return true;
+  } catch(e) {
+    showStatus('fetchAndApplyDiff 失败: ' + e.message);
+    return false;
+  }
+}
+
+// ========== Core diff rendering ==========
+function applyDiffData(data) {
+  if (!diffEditor) {
+    showStatus('diffEditor 未初始化');
+    return;
+  }
+  hideLoading();
+
+  document.getElementById('fileName').textContent = data.fileName || '';
+  document.getElementById('filePath').textContent = data.filePath || '';
+  document.getElementById('timestamp').textContent = data.timestamp || '';
+  document.getElementById('versionInfo').textContent =
+    '备份 ' + (data.backupVersion || 1) + ' / ' + (data.totalVersions || 1);
+
+  var lang = data.language || detectLanguage(data.fileName);
+  var originalText = data.original || '';
+  var modifiedText = data.modified || '';
+
+  var originalModel = monaco.editor.createModel(originalText, lang);
+  var modifiedModel = monaco.editor.createModel(modifiedText, lang);
+
+  diffEditor.setModel({
+    original: originalModel,
+    modified: modifiedModel
+  });
+
+  diffEditor.layout();
+
+  var changes = diffEditor.getLineChanges() || [];
+  var delLines = 0, addLines = 0;
+  diffRanges = [];
+  for (var i = 0; i < changes.length; i++) {
+    var c = changes[i];
+    if (c.originalEndLineNumber > 0)
+      delLines += c.originalEndLineNumber - c.originalStartLineNumber + 1;
+    if (c.modifiedEndLineNumber > 0)
+      addLines += c.modifiedEndLineNumber - c.modifiedStartLineNumber + 1;
+    diffRanges.push(c);
+  }
+  document.getElementById('delCount').textContent = '− ' + delLines + ' 行删除';
+  document.getElementById('addCount').textContent = '+ ' + addLines + ' 行新增';
+  document.getElementById('navInfo').textContent =
+    diffRanges.length > 0 ? '1 / ' + diffRanges.length : '';
+  currentDiffIndex = -1;
+}
+
+// ========== Navigation ==========
+function prevDiff() {
+  if (!diffEditor || diffRanges.length === 0) return;
+  if (currentDiffIndex <= 0) currentDiffIndex = diffRanges.length;
+  currentDiffIndex--;
+  var change = diffRanges[currentDiffIndex];
+  var line = change.modifiedStartLineNumber || change.originalStartLineNumber;
+  diffEditor.revealLineInCenter(line);
+  document.getElementById('navInfo').textContent =
+    (currentDiffIndex + 1) + ' / ' + diffRanges.length;
+}
+
+function nextDiff() {
+  if (!diffEditor || diffRanges.length === 0) return;
+  currentDiffIndex++;
+  if (currentDiffIndex >= diffRanges.length) currentDiffIndex = 0;
+  var change = diffRanges[currentDiffIndex];
+  var line = change.modifiedStartLineNumber || change.originalStartLineNumber;
+  diffEditor.revealLineInCenter(line);
+  document.getElementById('navInfo').textContent =
+    (currentDiffIndex + 1) + ' / ' + diffRanges.length;
+}
+
+function doRollback() {
+  window.status = 'rollback';
+}
+
+// ========== Helpers ==========
 function detectLanguage(fileName) {
   if (!fileName) return 'plaintext';
   var ext = fileName.split('.').pop().toLowerCase();
@@ -342,38 +277,42 @@ function detectLanguage(fileName) {
   return map[ext] || 'plaintext';
 }
 
-function prevDiff() {
-  if (diffRanges.length === 0) return;
-  if (currentDiffIndex <= 0) currentDiffIndex = diffRanges.length;
-  currentDiffIndex--;
-  var change = diffRanges[currentDiffIndex];
-  var line = change.modifiedStartLineNumber || change.originalStartLineNumber;
-  diffEditor.revealLineInCenter(line);
-  document.getElementById('navInfo').textContent =
-    (currentDiffIndex + 1) + ' / ' + diffRanges.length;
+function showStatus(msg) {
+  var el = document.getElementById('loading-msg');
+  if (el) {
+    el.textContent = msg;
+    el.style.display = 'block';
+    el.style.background = '#fff5f5';
+    el.style.color = '#ff3b30';
+  }
 }
 
-function nextDiff() {
-  if (diffRanges.length === 0) return;
-  currentDiffIndex++;
-  if (currentDiffIndex >= diffRanges.length) currentDiffIndex = 0;
-  var change = diffRanges[currentDiffIndex];
-  var line = change.modifiedStartLineNumber || change.originalStartLineNumber;
-  diffEditor.revealLineInCenter(line);
-  document.getElementById('navInfo').textContent =
-    (currentDiffIndex + 1) + ' / ' + diffRanges.length;
+function hideLoading() {
+  var el = document.getElementById('loading-msg');
+  if (el) el.style.display = 'none';
 }
 
-function doRollback() {
-  window.status = 'rollback';
-}
-
-// ESC 关闭
+// ========== Keyboard shortcuts ==========
 document.addEventListener('keydown', function(e) {
   if (e.key === 'Escape') window.status = 'close';
   if (e.altKey && e.key === 'ArrowUp') { e.preventDefault(); prevDiff(); }
   if (e.altKey && e.key === 'ArrowDown') { e.preventDefault(); nextDiff(); }
 });
+
+// ========== Fallback ==========
+setTimeout(function() {
+  if (!monacoReady) {
+    try {
+      if (typeof monaco !== 'undefined') {
+        initMonaco();
+      } else {
+        showStatus('Monaco 未加载，请检查 WebView 兼容性');
+      }
+    } catch(e) {
+      showStatus('备用初始化失败: ' + e.message);
+    }
+  }
+}, 2000);
 </script>
 </body>
 </html>
