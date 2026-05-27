@@ -218,6 +218,36 @@ function applyDiffData(data) {
         modified: modifiedModel
       });
       console.log('[applyDiffData] setModel 成功');
+
+      // 添加更多诊断信息
+      console.log('[applyDiffData] diffEditor 存在:', !!diffEditor);
+      console.log('[applyDiffData] diffEditor.getModel():', diffEditor.getModel());
+
+      var model = diffEditor.getModel();
+      if (model) {
+        console.log('[applyDiffData] model.original:', !!model.original);
+        console.log('[applyDiffData] model.modified:', !!model.modified);
+        if (model.original) {
+          console.log('[applyDiffData] original.getValue() 长度:', model.original.getValue().length);
+        }
+        if (model.modified) {
+          console.log('[applyDiffData] modified.getValue() 长度:', model.modified.getValue().length);
+        }
+      }
+
+      // 检查容器尺寸
+      var container = document.getElementById('diff-container');
+      console.log('[applyDiffData] 容器尺寸:', {
+        width: container.offsetWidth,
+        height: container.offsetHeight,
+        clientWidth: container.clientWidth,
+        clientHeight: container.clientHeight
+      });
+
+      // 强制重新布局
+      diffEditor.layout();
+      console.log('[applyDiffData] layout() 调用完成');
+
     } catch (e) {
       console.error('[applyDiffData] setModel 失败:', e);
       document.getElementById('fileName').textContent = '设置对比模型失败';
@@ -226,6 +256,7 @@ function applyDiffData(data) {
 
     // 统计增删行
     var changes = diffEditor.getLineChanges() || [];
+    console.log('[applyDiffData] getLineChanges() 返回:', changes);
     console.log('[applyDiffData] 变更数量:', changes.length);
     var delLines = 0, addLines = 0;
     diffRanges = [];
