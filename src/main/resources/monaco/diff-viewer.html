@@ -237,16 +237,51 @@ function applyDiffData(data) {
 
       // 检查容器尺寸
       var container = document.getElementById('diff-container');
-      console.log('[applyDiffData] 容器尺寸:', {
+      var containerSize = {
         width: container.offsetWidth,
         height: container.offsetHeight,
         clientWidth: container.clientWidth,
         clientHeight: container.clientHeight
-      });
+      };
+      console.log('[applyDiffData] 容器尺寸:', containerSize);
 
       // 强制重新布局
       diffEditor.layout();
       console.log('[applyDiffData] layout() 调用完成');
+
+      // 添加可见诊断信息
+      setTimeout(function() {
+        var diagDiv = document.createElement('div');
+        diagDiv.style.position = 'fixed';
+        diagDiv.style.top = '50px';
+        diagDiv.style.right = '10px';
+        diagDiv.style.background = 'rgba(255,255,0,0.9)';
+        diagDiv.style.color = '#000';
+        diagDiv.style.padding = '10px';
+        diagDiv.style.borderRadius = '5px';
+        diagDiv.style.fontSize = '12px';
+        diagDiv.style.zIndex = '9999';
+        diagDiv.style.fontFamily = 'monospace';
+        diagDiv.style.whiteSpace = 'pre';
+
+        var info = [];
+        info.push('=== 诊断信息 ===');
+        info.push('容器: ' + containerSize.width + 'x' + containerSize.height);
+        info.push('model.original: ' + (!!model.original));
+        info.push('model.modified: ' + (!!model.modified));
+        if (model && model.original) {
+          info.push('original 长度: ' + model.original.getValue().length);
+        }
+        if (model && model.modified) {
+          info.push('modified 长度: ' + model.modified.getValue().length);
+        }
+
+        var changeCount = diffEditor.getLineChanges ? diffEditor.getLineChanges().length : 'N/A';
+        info.push('changes: ' + changeCount);
+
+        diagDiv.textContent = info.join('\n');
+        document.body.appendChild(diagDiv);
+      }, 200);
 
     } catch (e) {
       console.error('[applyDiffData] setModel 失败:', e);
