@@ -102,7 +102,7 @@ src/main/java/skills - 技能
 src/main/java/utils - 通用工具
 
 ## 变动
-版本变动，修复bug 请放入 [CHANGELOG.md](CHANGELOG.md) 中 ,如果该文档中版本新增了，pom.xml中也同步更新，每次版本变动需要同步在git中打上tag和branch,比如版本变动到2.3.4 远程需要同步新增这个分支
+版本变动需要认为确认，不要自动新增递增版本号，修复bug 请放入 [CHANGELOG.md](CHANGELOG.md) 中 ,如果该文档中版本新增了，pom.xml中也同步更新，每次版本变动需要同步在git中打上tag和branch,比如版本变动到2.3.4 远程需要同步新增这个分支
 ## git
 由于在中国，github访问不稳定，需要 git -c http.proxy=http://127.0.0.1:7897  你需要检测是否开启代理，如果未开启代理 尝试一次原始提交 失败后提醒用户开启代理 
 ## 更新日志

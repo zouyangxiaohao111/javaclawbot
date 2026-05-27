@@ -135,10 +135,13 @@ public class DiffViewerPopup {
                                     Object ready = wv.getEngine().executeScript(
                                             "window.__diffReady === true");
                                     if (Boolean.TRUE.equals(ready)) {
-                                        // Monaco ready — inject data directly
+                                        // Monaco ready — 两步注入：先存数据，再调用函数
+                                        // 避免大文件内容拼接成超长单条 JS 语句
                                         wv.getEngine().executeScript(
-                                                "fetchAndApplyDiff(" + jsonString + ")");
-                                        log.debug("Monaco data injected (attempt {})", attempt);
+                                                "window.__injectedData=" + jsonString);
+                                        Object result = wv.getEngine().executeScript(
+                                                "fetchAndApplyDiff(window.__injectedData)");
+                                        log.info("Monaco data injected (attempt {}), result={}", attempt, result);
                                         done[0] = true;
                                     } else if (!stored[0]) {
                                         // Monaco not ready — store pending data once

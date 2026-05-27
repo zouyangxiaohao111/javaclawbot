@@ -64,6 +64,19 @@ html,body{height:100%;overflow:hidden;
 
 <script src="vs/loader.js"></script>
 <script>
+// 全局错误捕获 — 确保任何 JS 错误都显示在 UI 上
+window.onerror = function(msg, url, line, col, error) {
+  var box = document.getElementById('diag-box');
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'diag-box';
+    box.style.cssText = 'position:fixed;top:50px;right:10px;background:rgba(255,0,0,0.9);color:#fff;padding:10px;border-radius:5px;font-size:11px;z-index:9999;font-family:monospace;white-space:pre;max-width:400px;max-height:300px;overflow:auto;';
+    document.body.appendChild(box);
+  }
+  box.textContent += '\n[ERROR] ' + msg + '\n  at ' + url + ':' + line + ':' + col;
+  return false;
+};
+
 // 关键修复：file:// 协议下 Worker 必须返回有效 blob URL，不能返回空字符串
 // 空字符串导致 Worker 创建失败 → Monaco 初始化中断 → require 回调永不触发
 var workerBlob = new Blob([
