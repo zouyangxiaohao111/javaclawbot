@@ -176,6 +176,9 @@ function applyDiffData(data) {
     try {
       originalModel = monaco.editor.createModel(originalText, lang);
       console.log('[applyDiffData] originalModel 创建成功:', !!originalModel);
+      console.log('[applyDiffData] originalModel 类型:', typeof originalModel);
+      console.log('[applyDiffData] originalModel 方法:', originalModel ? Object.keys(originalModel).slice(0, 10) : 'null');
+      console.log('[applyDiffData] originalModel.onDidChangeContent 类型:', typeof (originalModel && originalModel.onDidChangeContent));
     } catch (e) {
       console.error('[applyDiffData] 创建 originalModel 失败:', e);
       originalModel = monaco.editor.createModel(originalText, 'plaintext');
@@ -184,6 +187,9 @@ function applyDiffData(data) {
     try {
       modifiedModel = monaco.editor.createModel(modifiedText, lang);
       console.log('[applyDiffData] modifiedModel 创建成功:', !!modifiedModel);
+      console.log('[applyDiffData] modifiedModel 类型:', typeof modifiedModel);
+      console.log('[applyDiffData] modifiedModel 方法:', modifiedModel ? Object.keys(modifiedModel).slice(0, 10) : 'null');
+      console.log('[applyDiffData] modifiedModel.onDidChangeContent 类型:', typeof (modifiedModel && modifiedModel.onDidChangeContent));
     } catch (e) {
       console.error('[applyDiffData] 创建 modifiedModel 失败:', e);
       modifiedModel = monaco.editor.createModel(modifiedText, 'plaintext');
