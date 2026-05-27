@@ -48,3 +48,7 @@ installer/*
 maven-compiled.log
 maven-compiled.tmp
 node_modules/
+*.tmp
+package.json
+package-lock.json
+scripts/tem/
