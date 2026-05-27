@@ -2,6 +2,11 @@
 
 All notable changes to NexusAI will be documented in this file.
 
+## [2.4.0] - 2026-05-27
+
+### Changed
+- **DiffViewerPopup 升级实验**：启动 Monaco Editor 替换手写 HTML diff 的原型验证（feature/monaco-diff-viewer 分支）
+
 ## [2.3.14] - 2026-05-24
 
 ### Fixed
