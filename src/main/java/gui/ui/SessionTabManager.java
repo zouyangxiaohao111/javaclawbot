@@ -512,6 +512,13 @@ public class SessionTabManager {
         backendBridge.resumeSession(tabId, sessionId);
         tabSessionMap.put(tabId, sessionId);
 
+        // 设置备份管理器（必须在 loadMessages 之前，否则工具卡片的对比/回滚按钮无法获取 FileBackupManager）
+        agent.tool.file.FileBackupManager fbm = backendBridge.getFileBackupManager();
+        if (fbm != null) {
+            chatPage.getFileDiffBadge().setBackupManager(fbm);
+            chatPage.getFileDiffBadge().loadFromBackupManager();
+        }
+
         // 加载历史消息
         var history = backendBridge.getSessionHistory(sessionId);
         chatPage.loadMessages(history);
@@ -573,6 +580,13 @@ public class SessionTabManager {
         // 恢复会话
         backendBridge.setActiveTab(activeTabId);
         backendBridge.resumeSession(activeTabId, sessionId);
+
+        // 设置备份管理器（必须在 loadMessages 之前）
+        agent.tool.file.FileBackupManager fbm = backendBridge.getFileBackupManager();
+        if (fbm != null) {
+            chatPage.getFileDiffBadge().setBackupManager(fbm);
+            chatPage.getFileDiffBadge().loadFromBackupManager();
+        }
 
         // 加载历史消息
         var history = backendBridge.getSessionHistory(sessionId);

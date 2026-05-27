@@ -1678,19 +1678,8 @@ public class AgentLoop {
             m.startTurn();
         }
 
-        context.setCurrentModelType(runtimeSnapshot().modelType());
-        List<Map<String, Object>> history = session.getHistory();
-        List<Map<String, Object>> initialMessages = context.buildMessages(
-                history,
-                msg.getContent(),
-                msg.getMedia(),
-                msg.getChannel(),
-                msg.getChatId()
-        );
-
-        ProgressCallback progress = getBusProgressCallback(msg, onProgress);
-
         // ── 消息级别模型切换：如果消息携带 customProvider，临时 swap ──
+        // 必须在 buildMessages 之前完成，以便 context 能正确解析模型类型（如 VISION/MULTIMODAL 的图片嵌入）
         LLMProvider savedProvider = null;
         String savedModel = null;
         boolean useCustomModel = false;
@@ -1705,6 +1694,36 @@ public class AgentLoop {
                 log.info("Using per-message model: provider={} model={}", msg.getProviderName(), msg.getModel());
             }
         }
+
+        // 解析模型类型：优先使用当前消息的自定义模型类型，否则使用默认模型类型
+        ModelConfig.ModelType modelType = runtimeSnapshot().modelType();
+        if (useCustomModel && msg.getProviderName() != null && msg.getModel() != null) {
+            try {
+                ModelConfig mc = currentConfig().getModelConfig(msg.getProviderName(), msg.getModel());
+                if (mc != null && mc.getType() != null) {
+                    modelType = mc.getType();
+                    if (log.isDebugEnabled()) {
+                        log.debug("Resolved custom model type: provider={} model={} type={}",
+                            msg.getProviderName(), msg.getModel(), modelType);
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("Failed to resolve model type for {}/{}: {}",
+                    msg.getProviderName(), msg.getModel(), e.getMessage());
+            }
+        }
+        context.setCurrentModelType(modelType);
+
+        List<Map<String, Object>> history = session.getHistory();
+        List<Map<String, Object>> initialMessages = context.buildMessages(
+                history,
+                msg.getContent(),
+                msg.getMedia(),
+                msg.getChannel(),
+                msg.getChatId()
+        );
+
+        ProgressCallback progress = getBusProgressCallback(msg, onProgress);
 
         try {
             return runAgentLoop(msg, initialMessages, requestTools, true, progress).thenApply(rr -> {

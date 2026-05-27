@@ -47,3 +47,4 @@ installer/*
 /installer/
 maven-compiled.log
 maven-compiled.tmp
+node_modules/

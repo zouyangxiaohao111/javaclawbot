@@ -754,7 +754,7 @@ public class ContextBuilder {
         // 构建带路径说明的文本
         StringBuilder textWithPaths = new StringBuilder();
         if (!allPaths.isEmpty()) {
-            textWithPaths.append("用户提供以下文件，你可以使用工具（如 Read、查看图片/视频工具等）查看和处理：\n");
+            textWithPaths.append("用户提供以下文件，你可以使用工具（如 MCP中 查看图片/视频工具等）查看和处理：\n");
             for (String fp : allPaths) {
                 textWithPaths.append("- ").append(fp).append("\n");
             }

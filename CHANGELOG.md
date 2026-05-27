@@ -6,6 +6,16 @@ All notable changes to NexusAI will be documented in this file.
 
 ### Changed
 - **DiffViewerPopup 升级实验**：启动 Monaco Editor 替换手写 HTML diff 的原型验证（feature/monaco-diff-viewer 分支）
+  - Monaco Editor 0.45.0 资源打包到 `src/main/resources/monaco/`（114 文件，13MB）
+  - `diff-viewer.html` 模板：Apple 设计风格 + 全中文 UI + Monaco DiffEditor 左右分屏
+  - `DiffViewerPopup.java` 重构：移除 203 行手写 HTML/LCS diff 代码，改用 Monaco + Gson JSON 注入
+  - 双模式资源加载：开发模式从项目目录加载，生产模式从 jar 提取到临时目录
+  - 新增 `manifest.txt` 资源清单用于 jar 内提取
+
+### Fixed
+- **历史会话恢复时 [查看对比]/[回滚] 按钮无反应**：`SessionTabManager` 恢复会话时未调用 `setBackupManager()`，导致 `loadMessages()` 中 `ToolCallCard` 的 `fileBackupManager` 为 null
+  - 根因：`restoreSessionToNewTab()` 和 `loadSessionInCurrentTab()` 两个恢复路径均缺少 `setBackupManager()` 调用
+  - 修复：在两个路径的 `loadMessages()` 之前注入 `backendBridge.getFileBackupManager()` → `setBackupManager()` + `loadFromBackupManager()`
 
 ## [2.3.14] - 2026-05-24
 

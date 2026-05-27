@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+html,body{height:100%;overflow:hidden;
+  font-family:'SF Pro Display','SF Pro Text',system-ui,-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;
+  background:#ffffff;color:#1d1d1f;}
+#toolbar{display:flex;align-items:center;padding:10px 16px;gap:8px;
+  background:#f5f5f7;border-bottom:1px solid #e0e0e0;height:44px;}
+#toolbar .file-icon{font-size:14px;}
+#toolbar .file-name{font-weight:600;font-size:14px;color:#1d1d1f;letter-spacing:-0.2px;}
+#toolbar .file-path{color:#86868b;font-size:12px;margin-left:4px;}
+#toolbar .spacer{flex:1;}
+#toolbar .nav-group{display:flex;gap:1px;background:#d2d2d7;border-radius:6px;padding:1px;}
+#toolbar .nav-btn{border:none;background:#ffffff;color:#1d1d1f;border-radius:5px;
+  padding:4px 12px;font-size:11px;cursor:pointer;font-family:inherit;font-weight:500;}
+#toolbar .nav-btn:hover{background:#f0f0f2;}
+#toolbar .nav-info{font-size:11px;color:#86868b;padding:0 6px;}
+#toolbar .rollback-btn{border:none;background:#ff3b30;color:#fff;border-radius:6px;
+  padding:5px 14px;font-size:12px;cursor:pointer;font-family:inherit;font-weight:500;margin-left:4px;}
+#toolbar .rollback-btn:hover{background:#e0342a;}
+#toolbar .timestamp{color:#86868b;font-size:11px;margin-left:8px;}
+#diff-container{height:calc(100% - 44px - 28px);}
+#statusbar{display:flex;padding:4px 16px;font-size:11px;color:#86868b;
+  background:#f5f5f7;border-top:1px solid #e0e0e0;gap:16px;align-items:center;height:28px;}
+#statusbar .del{color:#ff3b30;font-weight:500;}
+#statusbar .add{color:#34c759;font-weight:500;}
+#statusbar .spacer{flex:1;}
+#statusbar .hint{color:#aeaeb2;font-size:10px;}
+
+/* Monaco 自定义主题覆盖 */
+.monaco-editor .inserted-sign{background:#f0faf0 !important;}
+.monaco-editor .deleted-sign{background:#fff5f5 !important;}
+.monaco-editor .inserted-text{background:rgba(52,199,89,0.2) !important;}
+.monaco-editor .deleted-text{background:rgba(255,59,48,0.2) !important;}
+.monaco-editor .line-numbers{color:#c7c7c7 !important;}
+.monaco-editor{font-family:'SF Mono','JetBrains Mono','Menlo',monospace !important;font-size:13px !important;}
+</style>
+</head>
+<body>
+<div id="toolbar">
+  <span class="file-icon">📄</span>
+  <span class="file-name" id="fileName">--</span>
+  <span class="file-path" id="filePath"></span>
+  <span class="spacer"></span>
+  <div class="nav-group">
+    <button class="nav-btn" onclick="prevDiff()">← 上一处</button>
+    <button class="nav-btn" onclick="nextDiff()">下一处 →</button>
+  </div>
+  <span class="nav-info" id="navInfo"></span>
+  <button class="rollback-btn" onclick="doRollback()">↩ 回滚此版本</button>
+  <span class="timestamp" id="timestamp"></span>
+</div>
+<div id="diff-container"></div>
+<div id="statusbar">
+  <span class="del" id="delCount">− 0 行删除</span>
+  <span class="add" id="addCount">+ 0 行新增</span>
+  <span class="spacer"></span>
+  <span id="versionInfo"></span>
+  <span class="hint">ESC 关闭</span>
+</div>
+
+<script src="vs/loader.js"></script>
+<script>
+// 关键修复：file:// 协议下 Worker 必须返回有效 blob URL，不能返回空字符串
+// 空字符串导致 Worker 创建失败 → Monaco 初始化中断 → require 回调永不触发
+var workerBlob = new Blob([
+  'self.onmessage = function(e) { /* no-op worker stub */ };'
+], { type: 'application/javascript' });
+var workerUrl = URL.createObjectURL(workerBlob);
+
+window.MonacoEnvironment = {
+  getWorkerUrl: function(moduleId, label) {
+    return workerUrl;
+  }
+};
+
+require.config({ paths: { vs: 'vs' } });
+
+var diffEditor = null;
+var currentDiffIndex = -1;
+var diffRanges = [];
+
+require(['vs/editor/editor.main'], function() {
+  // 定义 Apple 风格亮色主题
+  monaco.editor.defineTheme('apple-light', {
+    base: 'vs',
+    inherit: true,
+    rules: [
+      { token: 'comment', foreground: '86868b', fontStyle: 'italic' },
+      { token: 'keyword', foreground: '0066cc' },
+      { token: 'string', foreground: '248a3d' },
+      { token: 'number', foreground: 'af5c02' },
+      { token: 'type', foreground: '8250df' }
+    ],
+    colors: {
+      'editor.background': '#ffffff',
+      'editor.foreground': '#1d1d1f',
+      'editorLineNumber.foreground': '#c7c7c7',
+      'editorLineNumber.activeForeground': '#1d1d1f',
+      'diffEditor.insertedTextBackground': '#34c75920',
+      'diffEditor.removedTextBackground': '#ff3b3020',
+      'diffEditor.insertedLineBackground': '#f0faf0',
+      'diffEditor.removedLineBackground': '#fff5f5',
+      'scrollbarSlider.background': '#00000015',
+      'scrollbarSlider.hoverBackground': '#00000025'
+    }
+  });
+
+  diffEditor = monaco.editor.createDiffEditor(
+    document.getElementById('diff-container'),
+    {
+      theme: 'apple-light',
+      readOnly: true,
+      renderSideBySide: true,
+      originalEditable: false,
+      minimap: { enabled: false },
+      scrollbar: { verticalScrollbarSize: 8, horizontalScrollbarSize: 8 },
+      fontSize: 13,
+      lineHeight: 20,
+      fontFamily: "'SF Mono','JetBrains Mono','Menlo',monospace",
+      padding: { top: 8 }
+    }
+  );
+
+  // Monaco 就绪信号
+  window.__diffReady = true;
+  window.status = 'monaco-ready';
+
+  // 如果数据已就绪则加载
+  if (window.__pendingDiffData) {
+    applyDiffData(window.__pendingDiffData);
+    window.__pendingDiffData = null;
+  }
+});
+
+// Java 调用入口
+function setDiffData(json) {
+  var data = typeof json === 'string' ? JSON.parse(json) : json;
+  if (!diffEditor) {
+    window.__pendingDiffData = data;
+    return;
+  }
+  applyDiffData(data);
+}
+
+// Java 主动拉取：接受对象或字符串
+function fetchAndApplyDiff(jsonOrObj) {
+  if (!diffEditor || !jsonOrObj) return false;
+  var data = typeof jsonOrObj === 'string' ? JSON.parse(jsonOrObj) : jsonOrObj;
+  applyDiffData(data);
+  return true;
+}
+
+function applyDiffData(data) {
+  document.getElementById('fileName').textContent = data.fileName || '';
+  document.getElementById('filePath').textContent = data.filePath || '';
+  document.getElementById('timestamp').textContent = data.timestamp || '';
+  document.getElementById('versionInfo').textContent =
+    '备份 ' + (data.backupVersion || 1) + ' / ' + (data.totalVersions || 1);
+
+  var lang = data.language || detectLanguage(data.fileName);
+
+  var originalModel = monaco.editor.createModel(data.original || '', lang);
+  var modifiedModel = monaco.editor.createModel(data.modified || '', lang);
+
+  diffEditor.setModel({
+    original: { textModel: originalModel, title: '备份版本 · v' + (data.backupVersion || 1) },
+    modified: { textModel: modifiedModel, title: '当前文件' }
+  });
+
+  // 统计增删行
+  var changes = diffEditor.getLineChanges() || [];
+  var delLines = 0, addLines = 0;
+  diffRanges = [];
+  for (var i = 0; i < changes.length; i++) {
+    var c = changes[i];
+    if (c.originalEndLineNumber > 0)
+      delLines += c.originalEndLineNumber - c.originalStartLineNumber + 1;
+    if (c.modifiedEndLineNumber > 0)
+      addLines += c.modifiedEndLineNumber - c.modifiedStartLineNumber + 1;
+    diffRanges.push(c);
+  }
+  document.getElementById('delCount').textContent = '− ' + delLines + ' 行删除';
+  document.getElementById('addCount').textContent = '+ ' + addLines + ' 行新增';
+  document.getElementById('navInfo').textContent =
+    diffRanges.length > 0 ? '1 / ' + diffRanges.length : '';
+  currentDiffIndex = -1;
+}
+
+function detectLanguage(fileName) {
+  if (!fileName) return 'plaintext';
+  var ext = fileName.split('.').pop().toLowerCase();
+  var map = {
+    'java':'java','js':'javascript','ts':'typescript','py':'python',
+    'rb':'ruby','go':'go','rs':'rust','c':'c','cpp':'cpp','h':'cpp',
+    'cs':'csharp','xml':'xml','json':'json','yaml':'yaml','yml':'yaml',
+    'md':'markdown','html':'html','css':'css','sql':'sql','sh':'shell',
+    'bat':'bat','ps1':'powershell','kt':'kotlin','swift':'swift',
+    'php':'php','scala':'scala','r':'r','lua':'lua','toml':'ini'
+  };
+  return map[ext] || 'plaintext';
+}
+
+function prevDiff() {
+  if (diffRanges.length === 0) return;
+  if (currentDiffIndex <= 0) currentDiffIndex = diffRanges.length;
+  currentDiffIndex--;
+  var change = diffRanges[currentDiffIndex];
+  var line = change.modifiedStartLineNumber || change.originalStartLineNumber;
+  diffEditor.revealLineInCenter(line);
+  document.getElementById('navInfo').textContent =
+    (currentDiffIndex + 1) + ' / ' + diffRanges.length;
+}
+
+function nextDiff() {
+  if (diffRanges.length === 0) return;
+  currentDiffIndex++;
+  if (currentDiffIndex >= diffRanges.length) currentDiffIndex = 0;
+  var change = diffRanges[currentDiffIndex];
+  var line = change.modifiedStartLineNumber || change.originalStartLineNumber;
+  diffEditor.revealLineInCenter(line);
+  document.getElementById('navInfo').textContent =
+    (currentDiffIndex + 1) + ' / ' + diffRanges.length;
+}
+
+function doRollback() {
+  window.status = 'rollback';
+}
+
+// ESC 关闭
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') window.status = 'close';
+  if (e.altKey && e.key === 'ArrowUp') { e.preventDefault(); prevDiff(); }
+  if (e.altKey && e.key === 'ArrowDown') { e.preventDefault(); nextDiff(); }
+});
+</script>
+</body>
+</html>
