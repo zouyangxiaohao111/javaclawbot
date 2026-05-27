@@ -1158,6 +1158,7 @@ public class AgentLoop {
             Session session = sessions.getOrCreate(sessionKey);
             commandManager.addLocalCommand(new LocalCommand(cmd, "新会话已开始"));
             sessions.createNew(session.getKey());
+            sharedFileCache.clear();
             return CompletableFuture.completedFuture(new OutboundMessage(
                     msg.getChannel(),
                     msg.getChatId(),
@@ -1426,6 +1427,7 @@ public class AgentLoop {
 
                     // Clear read file state after compaction (files will be re-tracked on next read)
                     readFileState.clear();
+                    sharedFileCache.clear();
 
                     PostCompactCleanup.runPostCompactCleanup();
                     PostCompactCleanup.notifyCompaction("auto", null);
@@ -1531,6 +1533,7 @@ public class AgentLoop {
 
             // Clear read file state after compaction
             readFileState.clear();
+            sharedFileCache.clear();
 
             // 运行 post-compact cleanup
             PostCompactCleanup.runPostCompactCleanup();
@@ -1852,6 +1855,7 @@ public class AgentLoop {
 
             // 清除缓存，强制重新加载
             sessions.invalidate(sessionKey);
+            sharedFileCache.clear();
 
             // 加载 todos
             loadTodosForSession(sessionsDir, sessionId);
@@ -2165,6 +2169,7 @@ public class AgentLoop {
                     );
 
                     messages.clear();
+                    sharedFileCache.clear();
                     messages.addAll(prunedMessages);
                     // 修剪场景：过滤后替换 session 的消息列表
                     // 跳过 system 和常驻技能/本地命令描述消息

@@ -208,7 +208,7 @@ public class SessionTabManager {
                 },
                 response -> {
                     // 最终回复
-                    log.info("[最终回复] tabId={}, response={}", currentTabId,
+                    log.debug("[最终回复] tabId={}, response={}", currentTabId,
                         response != null ? response.substring(0, Math.min(50, response.length())) : "null");
                     chatPage.getChatInput().setSending(false);
                     chatPage.removeThinkingPlaceholder();
@@ -216,7 +216,7 @@ public class SessionTabManager {
                     // 顺序关键：工具调用轮次的流式推理属于前一轮，不应影响当前轮的推理判断
                     chatPage.clearStreamingBubble();
                     boolean hadStreamingReasoning = chatPage.hasStreamingReasoningBlocks();
-                    log.info("[DIAG] hadStreamingReasoning={}, streamingReasoningBlocks.size={}",
+                    log.debug("[DIAG] hadStreamingReasoning={}, streamingReasoningBlocks.size={}",
                         hadStreamingReasoning,
                         chatPage.getStreamingReasoningBlockCount());
                     String reasoning = backendBridge.getLastReasoningContent();
@@ -255,7 +255,7 @@ public class SessionTabManager {
 
         // 创建后端上下文
         backendBridge.createTabContext(tabId);
-        log.info("[后端上下文] 创建完成: tabId={}, sessionKey=cli:{}", tabId, tabId);
+        log.debug("[后端上下文] 创建完成: tabId={}, sessionKey=cli:{}", tabId, tabId);
 
         // 将 ChatPage 添加到 chatArea
         chatPage.setVisible(false);
