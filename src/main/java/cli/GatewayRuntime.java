@@ -1,6 +1,7 @@
 package cli;
 
 import agent.AgentLoop;
+import bus.InboundMessage;
 import bus.MessageBus;
 import bus.OutboundMessage;
 import channels.ChannelManager;
@@ -18,6 +19,7 @@ import session.SessionManager;
 
 import java.nio.file.Path;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
@@ -223,24 +225,54 @@ public final class GatewayRuntime {
         );
 
         cron.setOnJob(job -> {
+            var payload = job.getPayload();
+            String channel = payload.getChannel() != null ? payload.getChannel() : "cli";
+            String to = payload.getTo() != null ? payload.getTo() : "direct";
+            String message = payload.getMessage();
+
+            if (message == null || message.isBlank()) {
+                log.warn("[Cron] 跳过执行: jobId={}, message={}", job.getId(), message);
+                return CompletableFuture.completedFuture(null);
+            }
+
+            // 确定 sessionKey
+            String sessionKey;
+            if (payload.isUseMainSession()) {
+                sessionKey = to.contains(":") ? to : (channel + ":" + to);
+                if (agent.isSessionBusy(sessionKey)) {
+                    log.info("[Cron] 主会话繁忙，跳过本次执行: jobId={}, sessionKey={}", job.getId(), sessionKey);
+                    return CompletableFuture.completedFuture(null);
+                }
+            } else {
+                sessionKey = payload.isNewConversation()
+                        ? "cron:" + job.getId() + ":" + System.currentTimeMillis()
+                        : "cron:" + job.getId();
+            }
+
             var cronTool = agent.getCronTool();
             if (cronTool != null) cronTool.setCronContext(true);
             try {
                 return agent.processDirect(
-                        job.getPayload().getMessage(),
-                        "cron:" + job.getId(),
-                        job.getPayload().getChannel() != null ? job.getPayload().getChannel() : "cli",
-                        job.getPayload().getTo() != null ? job.getPayload().getTo() : "direct",
+                        message,
+                        sessionKey,
+                        channel,
+                        to,
                         (c, toolHint) -> CompletableFuture.completedFuture(null)
                 ).thenCompose(resp -> {
-                    if (job.getPayload().isDeliver() && job.getPayload().getTo() != null) {
-                        return bus.publishOutbound(new OutboundMessage(
-                                job.getPayload().getChannel() != null ? job.getPayload().getChannel() : "cli",
-                                job.getPayload().getTo(),
-                                resp != null ? resp : "",
-                                null,
-                                null
-                        )).thenApply(x -> resp);
+                    if (payload.isDeliver() && resp != null && !resp.isBlank()) {
+                        // 参照 subagent 通知模式：发布 InboundMessage 让 agent 处理并显示
+                        String notification = String.format(
+                                "[定时任务 '%s' (id: %s) 执行完成]\n\n%s",
+                                job.getName(), job.getId(),
+                                resp.length() > 500 ? resp.substring(0, 500) + "..." : resp
+                        );
+                        Map<String, Object> msgMeta = new java.util.HashMap<>();
+                        msgMeta.put("_cronTask", true);
+                        msgMeta.put("jobId", job.getId());
+                        InboundMessage cronMsg = new InboundMessage(
+                                channel, "cron", to, notification, List.of(), msgMeta
+                        );
+                        return bus.publishInbound(cronMsg).thenApply(x -> resp);
                     }
                     return CompletableFuture.completedFuture(resp);
                 });

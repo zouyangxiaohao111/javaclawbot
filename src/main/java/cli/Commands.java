@@ -544,7 +544,7 @@ public class Commands implements Runnable {
                 Path storePath = ConfigIO.getDataDir().resolve("cron").resolve("jobs.json");
                 CronService service = new CronService(storePath, null);
 
-                CronJob job = service.addJob(name, schedule, message, deliver, to, channel, false);
+                CronJob job = service.addJob(name, schedule, message, deliver, to, channel, false, false, true);
                 System.out.println("✓ Added job '" + job.getName() + "' (" + job.getId() + ")");
             }
         }

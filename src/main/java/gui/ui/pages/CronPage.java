@@ -281,8 +281,9 @@ public class CronPage extends VBox {
                     existing.setUpdatedAtMs(System.currentTimeMillis());
                     // Persist happens automatically via cron service's store mechanism
                 } else {
-                    backendBridge.getCronService().addJob(name, schedule, msg, false,
-                        channel.isBlank() ? "cli" : channel, null, false);
+                    backendBridge.getCronService().addJob(name, schedule, msg, true,
+                        channel.isBlank() ? "cli" : channel, backendBridge.getActiveTabChatId(), false,
+                        false, true);
                 }
                 dialog.close();
                 Platform.runLater(() -> refresh());

@@ -378,7 +378,9 @@ public class CronService {
             boolean deliver,
             String channel,
             String to,
-            boolean deleteAfterRun
+            boolean deleteAfterRun,
+            boolean useMainSession,
+            boolean newConversation
     ) {
         Objects.requireNonNull(name, "name");
         Objects.requireNonNull(schedule, "schedule");
@@ -399,6 +401,8 @@ public class CronService {
         payload.setDeliver(deliver);
         payload.setChannel(channel);
         payload.setTo(to);
+        payload.setUseMainSession(useMainSession);
+        payload.setNewConversation(newConversation);
         job.setPayload(payload);
 
         job.setSchedule(schedule);

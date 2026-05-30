@@ -165,6 +165,16 @@ public class AgentLoopQueue {
     }
 
     /**
+     * 检查会话是否正在执行任务（有活跃的 currentRun 或排队任务）
+     */
+    public boolean isSessionBusy(String sessionKey) {
+        SessionLane lane = sessionLanes.get(sessionKey);
+        if (lane == null) return false;
+        return (lane.currentRun != null && !lane.currentRun.isDone())
+                || !lane.queue.isEmpty();
+    }
+
+    /**
      * 获取全局并发数
      */
     public int getMaxConcurrent() {

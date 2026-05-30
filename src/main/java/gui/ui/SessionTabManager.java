@@ -255,6 +255,8 @@ public class SessionTabManager {
 
         // 创建后端上下文
         backendBridge.createTabContext(tabId);
+        // 注册异步消息处理器：cron/子代理等异步通知直接显示到此标签页
+        backendBridge.setTabAsyncMessageHandler(tabId, chatPage::addAssistantMessage);
         log.debug("[后端上下文] 创建完成: tabId={}, sessionKey=cli:{}", tabId, tabId);
 
         // 将 ChatPage 添加到 chatArea
@@ -508,6 +510,8 @@ public class SessionTabManager {
 
         // 创建后端上下文并恢复会话
         backendBridge.createTabContext(tabId);
+        // 注册异步消息处理器：cron/子代理等异步通知直接显示到此标签页
+        backendBridge.setTabAsyncMessageHandler(tabId, chatPage::addAssistantMessage);
         backendBridge.setActiveTab(tabId);
         backendBridge.resumeSession(tabId, sessionId);
         tabSessionMap.put(tabId, sessionId);

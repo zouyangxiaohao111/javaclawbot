@@ -108,6 +108,16 @@ public class CronTool extends Tool {
                 "description", "Job ID for remove"
         ));
 
+        props.put("use_main_session", Map.of(
+                "type", "boolean",
+                "description", "Whether to join the main agent session (default false = independent session)"
+        ));
+
+        props.put("new_conversation", Map.of(
+                "type", "boolean",
+                "description", "Whether each execution starts a new conversation (default true). Set false to accumulate context across runs."
+        ));
+
         Map<String, Object> schema = new LinkedHashMap<>();
         schema.put("type", "object");
         schema.put("properties", props);
@@ -127,9 +137,11 @@ public class CronTool extends Tool {
             String cronExpr = strOrNull(args.get("cron_expr"));
             String tz = strOrNull(args.get("tz"));
             String at = strOrNull(args.get("at"));
+            boolean useMainSession = Boolean.TRUE.equals(args.get("use_main_session"));
+            boolean newConversation = !Boolean.FALSE.equals(args.get("new_conversation")); // 默认 true
 
             return CompletableFuture.completedFuture(
-                    addJob(message, inSeconds, everySeconds, cronExpr, tz, at)
+                    addJob(message, inSeconds, everySeconds, cronExpr, tz, at, useMainSession, newConversation)
             );
         }
 
@@ -158,7 +170,9 @@ public class CronTool extends Tool {
                           Integer everySeconds,
                           String cronExpr,
                           String tz,
-                          String at) {
+                          String at,
+                          boolean useMainSession,
+                          boolean newConversation) {
 
         // 防止 cron 作业内部递归调度新作业
         if (inCronContext.get()) {
@@ -265,7 +279,9 @@ public class CronTool extends Tool {
                     true,
                     channel,
                     chatId,
-                    deleteAfter
+                    deleteAfter,
+                    useMainSession,
+                    newConversation
             );
 
             log.info("成功创建定时任务: '{}', id: {}", job.getName(), job.getId());

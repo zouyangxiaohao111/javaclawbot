@@ -884,6 +884,14 @@ public class AgentLoop {
         return cronToolFacade;
     }
 
+    /**
+     * 检查指定会话是否正在执行任务（有活跃任务或排队任务）
+     * 用于 cron 任务在 useMainSession=true 时判断是否可以插入执行
+     */
+    public boolean isSessionBusy(String sessionKey) {
+        return queue.isSessionBusy(sessionKey);
+    }
+
     private CompletionStage<Void> connectMcp() {
         return mcpManager.ensureConnected()
                 .thenApply(v -> {
@@ -3215,6 +3223,9 @@ public class AgentLoop {
                                     null,
                                     null
                             );
+                            // 必须设置 sessionKeyOverride，否则 runAgentLoop 中
+                            // msg.getSessionKey() 会返回 channel:chatId 而非预期的 sessionKey
+                            msg.setSessionKeyOverride(effectiveSessionKey);
                             return processMessage(msg, effectiveSessionKey, onProgress)
                                     .thenApply(resp -> resp != null ? resp.getContent() : "");
                         })

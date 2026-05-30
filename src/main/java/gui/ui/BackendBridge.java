@@ -30,6 +30,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -105,6 +106,8 @@ public class BackendBridge {
         volatile String model;        // 标签级别模型名称
         final AtomicReference<Consumer<ProgressEvent>> progressCallback = new AtomicReference<>();
         final AtomicReference<Consumer<String>> responseCallback = new AtomicReference<>();
+        /** 异步消息处理：当 responseCallback 为 null 时（cron/子代理等异步通知），直接显示到标签页 */
+        volatile Consumer<String> asyncMessageHandler;
         final AtomicInteger userMessageCount = new AtomicInteger(0);
         volatile boolean waitingForResponse = false;
         volatile boolean titleGenerated = false;
@@ -151,6 +154,14 @@ public class BackendBridge {
     /** 为新标签创建会话上下文 */
     public void createTabContext(String tabId) {
         getOrCreateContext(tabId);
+    }
+
+    /** 设置标签的异步消息处理器（用于 cron/子代理等无 responseCallback 的消息显示） */
+    public void setTabAsyncMessageHandler(String tabId, Consumer<String> handler) {
+        TabSessionContext ctx = tabContexts.get(tabId);
+        if (ctx != null) {
+            ctx.asyncMessageHandler = handler;
+        }
     }
 
     /** 设置当前激活标签，并同步全局 projectRegistry 到该标签的上下文 */
@@ -320,6 +331,75 @@ public class BackendBridge {
                 this.projectRegistry
         );
 
+        // 7b) 设置 CronService 的 onJob 回调（定时任务触发 agent 处理并投递结果到对应标签）
+        this.cron.setOnJob(job -> {
+            var payload = job.getPayload();
+            String channel = payload.getChannel() != null ? payload.getChannel() : CLI_CHANNEL;
+            String to = payload.getTo();
+            String message = payload.getMessage();
+
+            if (to == null || message == null || message.isBlank()) {
+                log.warn("[Cron] 跳过执行: jobId={}, to={}, message={}", job.getId(), to, message);
+                return CompletableFuture.completedFuture(null);
+            }
+
+            // 确定 sessionKey：独立会话 vs 加入主会话
+            String sessionKey;
+            if (payload.isUseMainSession()) {
+                // 加入主会话：复用标签的 sessionKey
+                sessionKey = to.contains(":") ? to : (CLI_CHANNEL + ":" + to);
+
+                // 防止阻塞：如果标签会话正在执行任务，跳过本次执行
+                // 避免 cron 任务排队在标签任务后面导致相互阻塞
+                if (this.agentLoop.isSessionBusy(sessionKey)) {
+                    log.info("[Cron] 主会话繁忙，跳过本次执行: jobId={}, sessionKey={}", job.getId(), sessionKey);
+                    return CompletableFuture.completedFuture(null);
+                }
+            } else {
+                // 独立会话：newConversation=true 时每次新对话，否则复用
+                sessionKey = payload.isNewConversation()
+                        ? "cron:" + job.getId() + ":" + System.currentTimeMillis()
+                        : "cron:" + job.getId();
+            }
+
+            log.info("[Cron] 执行定时任务: jobId={}, sessionKey={}, message={}", job.getId(), sessionKey,
+                    message.length() > 50 ? message.substring(0, 50) + "..." : message);
+
+            var cronTool = this.agentLoop.getCronTool();
+            if (cronTool != null) cronTool.setCronContext(true);
+            try {
+                return this.agentLoop.processDirect(
+                        message,
+                        sessionKey,
+                        channel,
+                        to,
+                        (c, toolHint) -> CompletableFuture.completedFuture(null)
+                ).thenCompose(resp -> {
+                    if (payload.isDeliver() && resp != null && !resp.isBlank()) {
+                        // 参照 subagent 通知模式：将 cron 结果作为 InboundMessage 发布到主代理
+                        // 这样 agent 会处理结果并在标签页中显示响应（与 subagent 完成通知一致）
+                        String notification = String.format(
+                                "[定时任务 '%s' (id: %s) 执行完成]\n\n%s",
+                                job.getName(), job.getId(),
+                                resp.length() > 500 ? resp.substring(0, 500) + "...\n\n(结果已截断)" : resp
+                        );
+                        Map<String, Object> msgMeta = new HashMap<>();
+                        msgMeta.put("_cronTask", true);
+                        msgMeta.put("jobId", job.getId());
+                        msgMeta.put("jobName", job.getName());
+                        InboundMessage cronMsg = new InboundMessage(
+                                channel, "cron", to, notification, List.of(), msgMeta
+                        );
+                        return this.bus.publishInbound(cronMsg).thenApply(x -> resp);
+                    }
+                    return CompletableFuture.completedFuture(resp);
+                });
+            } finally {
+                if (cronTool != null) cronTool.setCronContext(false);
+            }
+        });
+        this.cron.start();
+
         // 8) SkillsLoader
         this.skillsLoader = new SkillsLoader(this.config.getWorkspacePath());
 
@@ -417,11 +497,15 @@ public class BackendBridge {
 
                         // 标题生成已在用户发送消息时触发，此处不再重复触发
 
-                        Platform.runLater(() -> {
-                            if (cb != null) {
-                                cb.accept(content);
-                            }
-                        });
+                        if (cb != null) {
+                            // 正常路径：用户消息的回复，通过回调显示
+                            Platform.runLater(() -> cb.accept(content));
+                        } else if (ctx.asyncMessageHandler != null && !content.isBlank()) {
+                            // 异步通知路径：cron/子代理等没有 responseCallback 的消息
+                            // 直接通过 asyncMessageHandler 显示到标签页
+                            Consumer<String> handler = ctx.asyncMessageHandler;
+                            Platform.runLater(() -> handler.accept(content));
+                        }
                     }
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
@@ -619,6 +703,18 @@ public class BackendBridge {
     public String getActiveSessionId() {
         TabSessionContext ctx = getActiveContext();
         return ctx != null && ctx.session != null ? ctx.session.getSessionId() : null;
+    }
+
+    /**
+     * 获取当前活跃标签的 chatId（格式：cli:tabId），用于定时任务消息路由。
+     * 若无活跃标签则回退到 "cli:default"。
+     */
+    public String getActiveTabChatId() {
+        TabSessionContext ctx = getActiveContext();
+        if (ctx != null) return ctx.sessionKey;
+        // 回退：确保有标签上下文
+        String fallbackId = activeTabId != null ? activeTabId : "default";
+        return CLI_CHANNEL + ":" + fallbackId;
     }
 
     /**
