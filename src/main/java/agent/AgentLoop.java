@@ -2371,6 +2371,29 @@ public class AgentLoop {
                         return;
                     }
 
+                    // 空响应检测：当 LLM 返回空内容时重试
+                    boolean isEmptyResponse = StrUtil.isBlank(clean) && !resp.hasToolCalls();
+                    if (isEmptyResponse) {
+                        st.emptyResponseCount++;
+                        if (st.emptyResponseCount <= State.MAX_EMPTY_RESPONSE_RETRIES) {
+                            log.warn("【会话：{}】LLM 返回空响应 ({}/{}), 重试中...",
+                                    sess.getKey(), st.emptyResponseCount, State.MAX_EMPTY_RESPONSE_RETRIES);
+                            // 重试：递归调用继续循环
+                            executor.execute(this);
+                            return;
+                        } else {
+                            log.error("【会话：{}】LLM 连续返回空响应 {} 次，终止循环",
+                                    sess.getKey(), st.emptyResponseCount);
+                            st.finalContent = "错误：LLM 连续返回空响应，请检查模型配置或重试。";
+                            st.done.set(true);
+                            out.complete(new RunResult(st.finalContent, toolsUsed, messages, usageAcc.getTotal()));
+                            return;
+                        }
+                    } else {
+                        // 有正常响应，重置空响应计数器
+                        st.emptyResponseCount = 0;
+                    }
+
                     // 添加原始日志（包含 usage，对齐 Claude Code）
                     Map<String, Object> assistant = new HashMap<>();
                     assistant.put("role", "assistant");
