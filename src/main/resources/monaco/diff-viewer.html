@@ -177,11 +177,15 @@ function setDiffData(json) {
   }
 }
 
+var diffApplied = false;
+
 function fetchAndApplyDiff(jsonOrObj) {
   try {
+    if (diffApplied) return true; // 防止重复调用导致 diff 高亮被覆盖
     if (!monacoReady || !diffEditor) return false;
     var data = typeof jsonOrObj === 'string' ? JSON.parse(jsonOrObj) : jsonOrObj;
     applyDiffData(data);
+    diffApplied = true;
     return true;
   } catch(e) {
     showStatus('fetchAndApplyDiff 失败: ' + e.message);

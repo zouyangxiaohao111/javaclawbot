@@ -149,11 +149,20 @@ public class ModelSelectorPopup {
         ProvidersConfig provCfg = config.getProviders();
         java.util.Set<String> allNames = provCfg.names();
 
-        // 按 PROVIDERS 顺序排列
+        // 内置优先，自定义追加（与 ModelsPage 对齐）
+        java.util.List<String> sortedNames = new java.util.ArrayList<>();
         for (ProviderRegistry.ProviderSpec spec : ProviderRegistry.PROVIDERS) {
-            String pName = spec.getName();
-            if (!allNames.contains(pName)) continue;
+            if (allNames.contains(spec.getName())) {
+                sortedNames.add(spec.getName());
+            }
+        }
+        for (String name : allNames) {
+            if (!sortedNames.contains(name)) {
+                sortedNames.add(name);
+            }
+        }
 
+        for (String pName : sortedNames) {
             Button pill = new Button(pName.substring(0, 1).toUpperCase() + pName.substring(1));
             boolean isSelected = pName.equals(selectedProvider);
             pill.setStyle(buildPillStyle(isSelected));

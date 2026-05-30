@@ -143,7 +143,9 @@ public class DiffViewerPopup {
                                                 "fetchAndApplyDiff(window.__injectedData)");
                                         log.info("Monaco data injected (attempt {}), result={}", attempt, result);
                                         done[0] = true;
-                                    } else if (!stored[0]) {
+                                        return; // 不再走 stored 分支
+                                    }
+                                    if (!stored[0]) {
                                         // Monaco not ready — store pending data once
                                         wv.getEngine().executeScript(
                                                 "window.__pendingDiffData=" + jsonString);

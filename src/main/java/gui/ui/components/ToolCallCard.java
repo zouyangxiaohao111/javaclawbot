@@ -226,6 +226,13 @@ public class ToolCallCard extends VBox {
             log.error("[ToolCallCard] handleDiffAction: fileBackupManager is null for " + fileEditPath);
             return;
         }
+        // 诊断日志：定位 FileBackupManager 指向的目录和查询路径
+        java.nio.file.Path normalizedPath = fileEditPath.normalize();
+        log.info("[ToolCallCard] handleDiffAction: backupRoot={}, fileEditPath={}, normalized={}, indexKeys={}",
+                fileBackupManager.getBackupRoot(),
+                fileEditPath,
+                normalizedPath,
+                fileBackupManager.getAllModifiedFiles());
         java.util.List<agent.tool.file.FileBackupManager.BackupEntry> versions =
                 fileBackupManager.getVersions(fileEditPath);
         if (versions.isEmpty()) {

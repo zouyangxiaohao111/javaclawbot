@@ -140,11 +140,7 @@ public class AgentLoop {
      * Session Memory 服务
      */
     private final SessionMemoryService sessionMemoryService;
-    /**
-     * Read file state tracking (for post-compact file restoration)
-     * Aligned with Open-ClaudeCode readFileState in ToolUseContext
-     */
-    private final ReadFileState readFileState = new ReadFileState();
+    // readFileState is now managed by sessionFileManager (per-session)
     private final AgentRuntimeSettings runtimeSettings;
     private final ExecutorService executor;
     private final MemoryStore memoryStore;
@@ -155,9 +151,9 @@ public class AgentLoop {
      */
     private final ToolRegistry sharedTools;
     /**
-     * 共享 FileStateCache：Read 读入缓存 → Edit/Write 校验通过
+     * 会话级文件状态管理器：每个 session 独立的 FileStateCache + ReadFileState
      */
-    private final FileStateCache sharedFileCache;
+    private final SessionFileStateManager sessionFileManager;
     private volatile AtomicBoolean running = new AtomicBoolean(false);
     private final Map<String, MCPServerConfig> mcpServers;
     /**
@@ -350,7 +346,7 @@ public class AgentLoop {
 
         // 创建共享工具和文件缓存（需要在 registerSharedTools 之前）
         this.sharedTools = new ToolRegistry();
-        this.sharedFileCache = new FileStateCache();
+        this.sessionFileManager = new SessionFileStateManager();
 
         // 注册工具
         registerSharedTools();
@@ -628,9 +624,9 @@ public class AgentLoop {
         // 共享 FileStateCache：Read 读入缓存 → Edit/Write 校验通过
 
         // 文件/命令/网络工具：无会话上下文，可共享
-        sharedTools.register(new ReadFileTool(workspace, allowedDir, sharedFileCache));
-        sharedTools.register(new WriteTool(workspace, allowedDir, sharedFileCache));
-        sharedTools.register(new EditTool(workspace, allowedDir, sharedFileCache));
+        sharedTools.register(new ReadFileTool(workspace, allowedDir, sessionFileManager));
+        sharedTools.register(new WriteTool(workspace, allowedDir, sessionFileManager));
+        sharedTools.register(new EditTool(workspace, allowedDir, sessionFileManager));
         sharedTools.register(new FileSystemTools.ReadWordTool(workspace, allowedDir));
         sharedTools.register(new FileSystemTools.ReadWordStructuredTool(workspace, allowedDir));
 
@@ -746,8 +742,8 @@ public class AgentLoop {
 
         // ---- 添加会话级 EditTool/WriteTool（带 FileBackupManager，按 sessionId 隔离） ----
         agent.tool.file.FileBackupManager fbm = getOrCreateBackupManager(backupSessionId);
-        localTools.register(new EditTool(workspace, null, sharedFileCache, fbm));
-        localTools.register(new WriteTool(workspace, null, sharedFileCache, fbm));
+        localTools.register(new EditTool(workspace, null, sessionFileManager, fbm));
+        localTools.register(new WriteTool(workspace, null, sessionFileManager, fbm));
 
         ToolView toolView = new CompositeToolView(sharedTools, mcpTools, localTools);
 
@@ -828,11 +824,11 @@ public class AgentLoop {
 
         // 每次请求独立创建 MessageTool，避免串会话
         localTools.register(new MessageTool(bus::publishOutbound, channel, chatId, messageId));
-        localTools.register(new ReadFileTool(workspace, null, sharedFileCache));
+        localTools.register(new ReadFileTool(workspace, null, sessionFileManager));
         localTools.register(new GlobTool(workspace, null, cliAgentHandler::getProjectRegistry));
         localTools.register(new GrepTool(workspace, null, cliAgentHandler::getProjectRegistry));
-        localTools.register(new EditTool(workspace, null, sharedFileCache));
-        localTools.register(new WriteTool(workspace, null, sharedFileCache));
+        localTools.register(new EditTool(workspace, null, sessionFileManager));
+        localTools.register(new WriteTool(workspace, null, sessionFileManager));
         localTools.register(new SkillTool(commandManager, skillsLoader));
 
         return new CompositeToolView(localTools, sharedTools);
@@ -852,9 +848,9 @@ public class AgentLoop {
 
         // 每次请求独立创建 MessageTool，避免串会话
         localTools.register(new MessageTool(bus::publishOutbound, channel, chatId, messageId));
-        localTools.register(new ReadFileTool(workspace, null, sharedFileCache));
-        localTools.register(new EditTool(workspace, null, sharedFileCache));
-        localTools.register(new WriteTool(workspace, null, sharedFileCache));
+        localTools.register(new ReadFileTool(workspace, null, sessionFileManager));
+        localTools.register(new EditTool(workspace, null, sessionFileManager));
+        localTools.register(new WriteTool(workspace, null, sessionFileManager));
         localTools.register(new GlobTool(workspace, null, cliAgentHandler::getProjectRegistry));
         localTools.register(new GrepTool(workspace, null, cliAgentHandler::getProjectRegistry));
 
@@ -1158,7 +1154,7 @@ public class AgentLoop {
             Session session = sessions.getOrCreate(sessionKey);
             commandManager.addLocalCommand(new LocalCommand(cmd, "新会话已开始"));
             sessions.createNew(session.getKey());
-            sharedFileCache.clear();
+            sessionFileManager.clearSession(sessionKey);
             return CompletableFuture.completedFuture(new OutboundMessage(
                     msg.getChannel(),
                     msg.getChatId(),
@@ -1370,7 +1366,7 @@ public class AgentLoop {
             }
 
             // Snapshot read file state before compaction (for post-compact restoration)
-            Map<String, Long> preCompactReadFileSnapshot = readFileState.snapshot();
+            Map<String, Long> preCompactReadFileSnapshot = sessionFileManager.getReadState(sessionKey).snapshot();
 
             // 估计压缩前的 token 数
             long preCompactTokenCount = CompactService.estimatePreCompactTokenCount(messages);
@@ -1425,9 +1421,7 @@ public class AgentLoop {
 
                     sessions.save(sess);
 
-                    // Clear read file state after compaction (files will be re-tracked on next read)
-                    readFileState.clear();
-                    sharedFileCache.clear();
+                    // 注：readFileState 和 sessionFileManager 的清理已移至 finally 块
 
                     PostCompactCleanup.runPostCompactCleanup();
                     PostCompactCleanup.notifyCompaction("auto", null);
@@ -1531,9 +1525,7 @@ public class AgentLoop {
             sess.setLastCallOutput(0);
             sessions.save(sess);
 
-            // Clear read file state after compaction
-            readFileState.clear();
-            sharedFileCache.clear();
+            // 注：readFileState 和 sessionFileManager 的清理已移至 finally 块
 
             // 运行 post-compact cleanup
             PostCompactCleanup.runPostCompactCleanup();
@@ -1563,6 +1555,16 @@ public class AgentLoop {
             UsageAccumulator compressUsageAcc = usageTrackers.get(sessionKey);
             if (compressUsageAcc != null) {
                 compressUsageAcc.reset();
+            }
+
+            // 无条件清除文件状态缓存（安全网）
+            // 修复：上下文压缩后 read_file 返回 "File unchanged since last read" 的问题
+            // 原因：压缩/修剪移除了对话中的旧 read_file 工具结果，但缓存仍认为文件已读，
+            //       导致 LLM 再次读取同一文件时获得空存根而非实际内容
+            // 放在 finally 块中确保即使压缩过程中发生异常，缓存也会被清除
+            sessionFileManager.clearSession(sessionKey);
+            if (log.isDebugEnabled()) {
+                log.debug("executeContextCompress finally: 已清除 sessionFileManager for session {}", sessionKey);
             }
         }
     }
@@ -1874,7 +1876,7 @@ public class AgentLoop {
 
             // 清除缓存，强制重新加载
             sessions.invalidate(sessionKey);
-            sharedFileCache.clear();
+            sessionFileManager.clearSession(sessionKey);
 
             // 加载 todos
             loadTodosForSession(sessionsDir, sessionId);
@@ -2188,7 +2190,7 @@ public class AgentLoop {
                     );
 
                     messages.clear();
-                    sharedFileCache.clear();
+                    sessionFileManager.clearSession(msg.getSessionKey());
                     messages.addAll(prunedMessages);
                     // 修剪场景：过滤后替换 session 的消息列表
                     // 跳过 system 和常驻技能/本地命令描述消息
@@ -2575,7 +2577,7 @@ public class AgentLoop {
         }
 
         String result = maybePersistToolResult(tools, tc.getName(), tc.getId(), rawResult);
-        trackFileReadIfNeeded(tc, result);
+        trackFileReadIfNeeded(tc, result, sessionKey);
 
         List<Map<String, Object>> updated =
                 Helpers.addToolResult(messages, tc.getId(), tc.getName(), result);
@@ -2708,7 +2710,7 @@ public class AgentLoop {
                     }
                     // 正常执行结果：注入到 messages
                     String r = maybePersistToolResult(tools, tc.getName(), tc.getId(), result);
-                    trackFileReadIfNeeded(tc, r);
+                    trackFileReadIfNeeded(tc, r, msg.getSessionKey());
                     return injectToolResult(tc, msg, messages, tools, r);
                 });
     }
@@ -2718,7 +2720,7 @@ public class AgentLoop {
             ToolCallRequest tc, InboundMessage msg, List<Map<String, Object>> messages,
             ToolView tools, String resultContent) {
         String r = maybePersistToolResult(tools, tc.getName(), tc.getId(), resultContent);
-        trackFileReadIfNeeded(tc, r);
+        trackFileReadIfNeeded(tc, r, msg.getSessionKey());
 
         List<Map<String, Object>> updated =
                 Helpers.addToolResult(messages, tc.getId(), tc.getName(), r);
@@ -2748,7 +2750,7 @@ public class AgentLoop {
         String structuredJson = GsonFactory.toJson(structured);
 
         String r = maybePersistToolResult(tools, tc.getName(), tc.getId(), structuredJson);
-        trackFileReadIfNeeded(tc, r);
+        trackFileReadIfNeeded(tc, r, msg.getSessionKey());
 
         List<Map<String, Object>> updated =
                 Helpers.addToolResult(messages, tc.getId(), tc.getName(), r);
@@ -2967,7 +2969,7 @@ public class AgentLoop {
      * @param tc Tool call request
      * @param result Tool execution result
      */
-    private void trackFileReadIfNeeded(ToolCallRequest tc, String result) {
+    private void trackFileReadIfNeeded(ToolCallRequest tc, String result, String sessionKey) {
         if (!"Read".equals(tc.getName()) || result == null) return;
         // Only track successful reads (not errors or file-not-found)
         if (result.startsWith("Error:")) return;
@@ -2981,7 +2983,7 @@ public class AgentLoop {
 
         try {
             Path resolvedPath = workspace.resolve(filePath).normalize();
-            readFileState.track(resolvedPath.toString());
+            sessionFileManager.getReadState(sessionKey).track(resolvedPath.toString());
         } catch (Exception e) {
             // Ignore tracking failures
         }

@@ -16,6 +16,12 @@ All notable changes to NexusAI will be documented in this file.
 - **历史会话恢复时 [查看对比]/[回滚] 按钮无反应**：`SessionTabManager` 恢复会话时未调用 `setBackupManager()`，导致 `loadMessages()` 中 `ToolCallCard` 的 `fileBackupManager` 为 null
   - 根因：`restoreSessionToNewTab()` 和 `loadSessionInCurrentTab()` 两个恢复路径均缺少 `setBackupManager()` 调用
   - 修复：在两个路径的 `loadMessages()` 之前注入 `backendBridge.getFileBackupManager()` → `setBackupManager()` + `loadFromBackupManager()`
+- **Monaco DiffViewer 空白屏修复**：修复 `file://` 协议下 Monaco Editor 初始化失败的多个问题
+  - Worker 创建失败：用 Blob URL 替代空字符串 `getWorkerUrl()`
+  - `setModel()` 参数格式错误：传入包装对象而非裸模型
+  - `window.onerror` 错误洪水：移除全局错误处理器，改用 `showStatus()` 显示可见错误
+  - 大文件 JSON 注入超限：改用两步注入（先存 `window.__injectedData`，再调用函数）
+  - 全面重写 `diff-viewer.html`：空值保护、require 错误回调、2 秒降级定时器
 
 ## [2.3.14] - 2026-05-24
 

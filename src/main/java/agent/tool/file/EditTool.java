@@ -1,6 +1,7 @@
 package agent.tool.file;
 
 import agent.tool.Tool;
+import agent.tool.ToolUseContext;
 import lombok.extern.slf4j.Slf4j;
 import utils.PathUtil;
 
@@ -51,12 +52,14 @@ public final class EditTool extends Tool {
     private final Path workspace;
     private final Path allowedDir;
     private final FileStateCache fileStateCache;
+    private final SessionFileStateManager sessionManager;
     private final FileBackupManager fileBackupManager;
 
     public EditTool(Path workspace, Path allowedDir, FileStateCache fileStateCache, FileBackupManager fileBackupManager) {
         this.workspace = workspace;
         this.allowedDir = allowedDir;
         this.fileStateCache = fileStateCache != null ? fileStateCache : new FileStateCache.NoOp();
+        this.sessionManager = new SessionFileStateManager();
         this.fileBackupManager = fileBackupManager;
     }
 
@@ -67,6 +70,22 @@ public final class EditTool extends Tool {
     /** Backward-compatible constructor (no cache enforcement) */
     public EditTool(Path workspace, Path allowedDir) {
         this(workspace, allowedDir, new FileStateCache.NoOp(), null);
+    }
+
+    public EditTool(Path workspace, Path allowedDir, SessionFileStateManager sessionManager) {
+        this.workspace = workspace;
+        this.allowedDir = allowedDir;
+        this.fileStateCache = new FileStateCache.NoOp();
+        this.sessionManager = sessionManager != null ? sessionManager : new SessionFileStateManager();
+        this.fileBackupManager = null;
+    }
+
+    public EditTool(Path workspace, Path allowedDir, SessionFileStateManager sessionManager, FileBackupManager fileBackupManager) {
+        this.workspace = workspace;
+        this.allowedDir = allowedDir;
+        this.fileStateCache = new FileStateCache.NoOp();
+        this.sessionManager = sessionManager != null ? sessionManager : new SessionFileStateManager();
+        this.fileBackupManager = fileBackupManager;
     }
 
     // ---- Port of TOOL_NAME ----
@@ -160,7 +179,20 @@ public final class EditTool extends Tool {
      *   12. Return result
      */
     @Override
+    public CompletionStage<String> execute(Map<String, Object> args, ToolUseContext parentUseContext) {
+        FileStateCache activeCache = this.fileStateCache;
+        if (parentUseContext != null && parentUseContext.getSessionId() != null && sessionManager != null) {
+            activeCache = sessionManager.getFileCache(parentUseContext.getSessionId());
+        }
+        return doExecute(args, activeCache);
+    }
+
+    @Override
     public CompletionStage<String> execute(Map<String, Object> args) {
+        return doExecute(args, this.fileStateCache);
+    }
+
+    private CompletionStage<String> doExecute(Map<String, Object> args, FileStateCache afc) {
         String filePath = FileSystemTools.asString(args.get("file_path"));
         String oldString = FileSystemTools.asString(args.get("old_string"));
         String newString = FileSystemTools.asString(args.get("new_string"));
@@ -236,7 +268,7 @@ public final class EditTool extends Tool {
 
             // ---- validateInput: read-before-write enforcement (errorCode: 6) ----
             // Port of: if (!readTimestamp || readTimestamp.isPartialView)
-            FileStateCache.FileState readState = fileStateCache.getState(resolvedPath);
+            FileStateCache.FileState readState = afc.getState(resolvedPath);
             if (readState == null || readState.isPartialView) {
                 return CompletableFuture.completedFuture(
                         "Error: File has not been read yet. Read it first before writing to it. " +
@@ -339,8 +371,8 @@ public final class EditTool extends Tool {
             // Port of: readFileState.set(absoluteFilePath, {content, timestamp, offset, limit})
             long newMtime = Files.getLastModifiedTime(resolvedPath).toMillis();
             long newSize = Files.size(resolvedPath);
-            fileStateCache.invalidate(resolvedPath);
-            fileStateCache.markRead(resolvedPath, updatedContent, newMtime, newSize);
+            afc.invalidate(resolvedPath);
+            afc.markRead(resolvedPath, updatedContent, newMtime, newSize);
 
             // ---- mapToolResultToToolResultBlockParam ----
             // Port of CC's mapToolResultToToolResultBlockParam
