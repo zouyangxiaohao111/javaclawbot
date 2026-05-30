@@ -208,7 +208,7 @@ public class SessionTabManager {
                 },
                 response -> {
                     // 最终回复
-                    log.info("[最终回复] tabId={}, response={}", currentTabId,
+                    log.debug("[最终回复] tabId={}, response={}", currentTabId,
                         response != null ? response.substring(0, Math.min(50, response.length())) : "null");
                     chatPage.getChatInput().setSending(false);
                     chatPage.removeThinkingPlaceholder();
@@ -216,7 +216,7 @@ public class SessionTabManager {
                     // 顺序关键：工具调用轮次的流式推理属于前一轮，不应影响当前轮的推理判断
                     chatPage.clearStreamingBubble();
                     boolean hadStreamingReasoning = chatPage.hasStreamingReasoningBlocks();
-                    log.info("[DIAG] hadStreamingReasoning={}, streamingReasoningBlocks.size={}",
+                    log.debug("[DIAG] hadStreamingReasoning={}, streamingReasoningBlocks.size={}",
                         hadStreamingReasoning,
                         chatPage.getStreamingReasoningBlockCount());
                     String reasoning = backendBridge.getLastReasoningContent();
@@ -255,7 +255,7 @@ public class SessionTabManager {
 
         // 创建后端上下文
         backendBridge.createTabContext(tabId);
-        log.info("[后端上下文] 创建完成: tabId={}, sessionKey=cli:{}", tabId, tabId);
+        log.debug("[后端上下文] 创建完成: tabId={}, sessionKey=cli:{}", tabId, tabId);
 
         // 将 ChatPage 添加到 chatArea
         chatPage.setVisible(false);
@@ -299,10 +299,13 @@ public class SessionTabManager {
         if (newPage != null) {
             newPage.setVisible(true);
             newPage.setManaged(true);
-            // 恢复目标标签的滚动位置
+            // 恢复目标标签的滚动位置：等待布局完成后恢复，避免被 vvalue 监听器干扰
             Double savedPosition = tabScrollPositions.get(tabId);
             if (savedPosition != null) {
+                log.debug("[标签切换] 恢复滚动位置: tabId={}, position={}", tabId, savedPosition);
                 newPage.setScrollPosition(savedPosition);
+            } else {
+                log.debug("[标签切换] 无保存的滚动位置: tabId={}", tabId);
             }
             log.debug("[标签切换] ChatPage 已显示: tabId={}", tabId);
         } else {
@@ -509,6 +512,13 @@ public class SessionTabManager {
         backendBridge.resumeSession(tabId, sessionId);
         tabSessionMap.put(tabId, sessionId);
 
+        // 设置备份管理器（必须在 loadMessages 之前，否则工具卡片的对比/回滚按钮无法获取 FileBackupManager）
+        agent.tool.file.FileBackupManager fbm = backendBridge.getFileBackupManager();
+        if (fbm != null) {
+            chatPage.getFileDiffBadge().setBackupManager(fbm);
+            chatPage.getFileDiffBadge().loadFromBackupManager();
+        }
+
         // 加载历史消息
         var history = backendBridge.getSessionHistory(sessionId);
         chatPage.loadMessages(history);
@@ -570,6 +580,13 @@ public class SessionTabManager {
         // 恢复会话
         backendBridge.setActiveTab(activeTabId);
         backendBridge.resumeSession(activeTabId, sessionId);
+
+        // 设置备份管理器（必须在 loadMessages 之前）
+        agent.tool.file.FileBackupManager fbm = backendBridge.getFileBackupManager();
+        if (fbm != null) {
+            chatPage.getFileDiffBadge().setBackupManager(fbm);
+            chatPage.getFileDiffBadge().loadFromBackupManager();
+        }
 
         // 加载历史消息
         var history = backendBridge.getSessionHistory(sessionId);

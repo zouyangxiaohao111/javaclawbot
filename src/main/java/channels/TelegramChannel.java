@@ -405,7 +405,7 @@ public class TelegramChannel extends BaseChannel {
 
                 // 语音/音频尝试转写（默认 Noop 返回 null）
                 if ("voice".equals(pick.mediaType) || "audio".equals(pick.mediaType)) {
-                    String transcription = transcriber.transcribe(saved).toCompletableFuture().get(60, TimeUnit.SECONDS);
+                    String transcription = transcriber.transcribe(saved).toCompletableFuture().get(300, TimeUnit.SECONDS);
                     if (!isBlank(transcription)) {
                         logInfo("Transcribed " + pick.mediaType + ": " + transcription.substring(0, Math.min(50, transcription.length())) + "...");
                         contentParts.add("[transcription: " + transcription + "]");

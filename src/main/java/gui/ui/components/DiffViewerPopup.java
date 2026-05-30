@@ -1,13 +1,18 @@
 package gui.ui.components;
 
 import agent.tool.file.FileBackupManager;
+import com.google.gson.Gson;
+import com.google.gson.JsonObject;
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.Base64;
+import java.nio.file.StandardCopyOption;
 import java.util.List;
+import javafx.concurrent.Worker;
 import javafx.scene.Scene;
 import javafx.scene.input.KeyCode;
 import javafx.scene.layout.StackPane;
@@ -15,63 +20,38 @@ import javafx.scene.paint.Color;
 import javafx.scene.web.WebView;
 import javafx.stage.Stage;
 import javafx.stage.StageStyle;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
- * IDEA 分屏风格差异查看器弹窗 — 全 WebView 渲染。
+ * Monaco Editor based diff viewer popup.
  * <p>
- * 左右分屏对比，白色主题，支持文本选择与复制。
+ * Loads diff-viewer.html with Monaco Editor for side-by-side diff rendering,
+ * replacing the previous hand-crafted HTML diff renderer.
  */
 public class DiffViewerPopup {
 
+    private static final Logger log = LoggerFactory.getLogger(DiffViewerPopup.class);
+
     private static final double DEFAULT_WIDTH = 1000;
     private static final double DEFAULT_HEIGHT = 680;
+    private static final Gson GSON = new Gson();
 
-    private static final String HTML_TEMPLATE =
-        "<!DOCTYPE html><html style='height:100%;'>"
-        + "<head><meta charset='UTF-8'><style>"
-        + "*{margin:0;padding:0;box-sizing:border-box;}"
-        + "body{font-family:'JetBrains Mono','Fira Code',monospace;font-size:12px;"
-        + "background:#fff;color:rgba(0,0,0,0.7);display:flex;flex-direction:column;height:100%;}"
-        + ".toolbar{display:flex;align-items:center;padding:8px 16px;background:#f8f9fa;"
-        + "border-bottom:1px solid rgba(0,0,0,0.08);flex-shrink:0;}"
-        + ".toolbar .file{font-size:13px;font-weight:500;margin-right:12px;}"
-        + ".toolbar .ts{font-size:11px;color:rgba(0,0,0,0.4);margin-right:auto;}"
-        + ".toolbar button{border:none;background:rgba(0,0,0,0.06);border-radius:4px;"
-        + "padding:2px 10px;font-size:11px;cursor:pointer;margin:0 2px;color:rgba(0,0,0,0.6);}"
-        + ".toolbar button.rollback{background:#ef4444;color:white;font-weight:500;padding:3px 12px;}"
-        + ".toolbar .nav{font-size:11px;color:rgba(0,0,0,0.4);padding:0 4px;}"
-        + ".toolbar .sep{width:1px;height:20px;background:rgba(0,0,0,0.08);margin:0 4px;}"
-        + ".split{display:flex;flex:1;overflow:hidden;}"
-        + ".side{flex:1;display:flex;flex-direction:column;overflow:hidden;}"
-        + ".side:first-child{border-right:2px solid rgba(0,0,0,0.06);}"
-        + ".side-header{display:flex;justify-content:space-between;padding:4px 12px;"
-        + "background:#f8f9fa;border-bottom:1px solid rgba(0,0,0,0.06);font-size:11px;"
-        + "color:rgba(0,0,0,0.5);flex-shrink:0;}"
-        + ".code{flex:1;overflow-y:auto;overflow-x:auto;}"
-        + ".line{display:flex;height:20px;line-height:20px;}"
-        + ".line .ln{width:36px;text-align:right;padding-right:8px;"
-        + "color:rgba(0,0,0,0.25);font-size:11px;user-select:none;flex-shrink:0;}"
-        + ".line .txt{padding-left:4px;white-space:pre;overflow:hidden;flex:1;}"
-        + ".line.removed{background:#fff0f0;}"
-        + ".line.removed .ln{background:#fff0f0;}"
-        + ".line.added{background:#f0fff0;}"
-        + ".line.added .ln{background:#f0fff0;}"
-        + ".line.empty{background:rgba(0,0,0,0.02);}"
-        + ".statusbar{display:flex;justify-content:space-between;padding:4px 16px;"
-        + "background:#f8f9fa;border-top:1px solid rgba(0,0,0,0.06);"
-        + "font-size:11px;color:rgba(0,0,0,0.4);flex-shrink:0;}"
-        + ".statusbar .del{color:#dc2626;}"
-        + ".statusbar .add{color:#16a34a;}"
-        + "</style></head><body>%s</body></html>";
-
-    private enum DiffType { UNCHANGED, ADDED, REMOVED }
-    private record DiffLinePair(String oldLine, String newLine, DiffType type,
-                                 int oldLineNum, int newLineNum) {}
+    /** Cached path to extracted Monaco resources directory. */
+    private static Path monacoDir = null;
 
     private DiffViewerPopup() {}
 
     public static void show(Path originalPath, FileBackupManager.BackupEntry entry,
                             FileBackupManager backupManager) {
+        // 1. Extract Monaco resources
+        Path htmlPath = extractMonacoResources();
+        if (htmlPath == null) {
+            log.error("Cannot load diff viewer: Monaco resources unavailable");
+            return;
+        }
+
+        // 2. Read file contents
         String oldContent;
         String newContent;
         try {
@@ -79,130 +59,125 @@ public class DiffViewerPopup {
             newContent = Files.exists(originalPath)
                     ? Files.readString(originalPath, StandardCharsets.UTF_8) : "";
         } catch (IOException e) {
+            log.error("Failed to read files for diff", e);
             return;
         }
 
-        List<String> oldLines = List.of(oldContent.split("\n", -1));
-        List<String> newLines = List.of(newContent.split("\n", -1));
-        List<DiffLinePair> diffLines = computeDiff(oldLines, newLines);
-
+        // 3. Build JSON data with Gson
         String fileName = originalPath.getFileName().toString();
-        String ts = formatTimestamp(entry.timestamp());
+        String filePath = originalPath.toString();
+        String timestamp = formatTimestamp(entry.timestamp());
 
-        long removed = diffLines.stream().filter(d -> d.type() == DiffType.REMOVED).count();
-        long added = diffLines.stream().filter(d -> d.type() == DiffType.ADDED).count();
-
-        StringBuilder html = new StringBuilder();
-
-        // Toolbar
-        html.append("<div class='toolbar'>");
-        html.append("<span class='file'>📄 ").append(esc(fileName)).append("</span>");
-        html.append("<span class='ts'>← v1 · ").append(ts).append("</span>");
-        html.append("<button onclick='prevHunk()'>◀</button>");
-        html.append("<span class='nav' id='hunk-nav'>1 / ").append(countHunks(diffLines)).append("</span>");
-        html.append("<button onclick='nextHunk()'>▶</button>");
-        html.append("<span class='sep'></span>");
-        html.append("<button class='rollback' onclick='window.status=\"rollback\"'>↺ 回滚</button>");
-        html.append("<button onclick='window.status=\"close\"' style='font-size:14px;padding:0 4px;'>✕</button>");
-        html.append("</div>");
-
-        // Split
-        html.append("<div class='split'>");
-
-        // Left side (original)
-        html.append("<div class='side'>");
-        html.append("<div class='side-header'><span>原始版本</span><span>v1 · ").append(ts).append("</span></div>");
-        html.append("<div class='code' id='left-code'>");
-        for (int i = 0; i < diffLines.size(); i++) {
-            DiffLinePair d = diffLines.get(i);
-            int ln = d.oldLineNum();
-            String text = esc(d.oldLine());
-            boolean isEmpty = d.type() == DiffType.ADDED;
-            String cls = isEmpty ? "empty" : (d.type() == DiffType.REMOVED ? "removed" : "");
-            html.append(renderLine(ln, isEmpty ? "" : text, cls, i));
-        }
-        html.append("</div></div>");
-
-        // Right side (current)
-        html.append("<div class='side'>");
-        html.append("<div class='side-header'><span>当前版本</span><span>已修改</span></div>");
-        html.append("<div class='code' id='right-code'>");
-        for (int i = 0; i < diffLines.size(); i++) {
-            DiffLinePair d = diffLines.get(i);
-            int ln = d.newLineNum();
-            String text = esc(d.newLine());
-            boolean isEmpty = d.type() == DiffType.REMOVED;
-            String cls = isEmpty ? "empty" : (d.type() == DiffType.ADDED ? "added" : "");
-            html.append(renderLine(ln, isEmpty ? "" : text, cls, i));
-        }
-        html.append("</div></div>");
-
-        html.append("</div>");
-
-        // Status bar
-        html.append("<div class='statusbar'>");
-        html.append("<span><span class='del'>").append(removed).append(" 处删除</span>  <span class='add'>")
-             .append(added).append(" 处新增</span></span>");
-        html.append("<span>分屏对比</span>");
-        html.append("</div>");
-
-        // Hunk navigation script
-        html.append("<script>");
-        html.append("var hunks=[");
-        boolean inHunk = false;
-        List<Integer> hunkStarts = new ArrayList<>();
-        for (int i = 0; i < diffLines.size(); i++) {
-            DiffLinePair d = diffLines.get(i);
-            if (d.type() != DiffType.UNCHANGED) {
-                if (!inHunk) {
-                    hunkStarts.add(i);
-                    inHunk = true;
+        int backupVersion = 1;
+        int totalVersions = 1;
+        if (backupManager != null) {
+            List<FileBackupManager.BackupEntry> versions = backupManager.getVersions(originalPath);
+            totalVersions = versions.size();
+            for (int i = 0; i < versions.size(); i++) {
+                if (versions.get(i).backupFilePath().equals(entry.backupFilePath())) {
+                    backupVersion = i + 1;
+                    break;
                 }
-            } else {
-                inHunk = false;
             }
         }
-        for (int hi = 0; hi < hunkStarts.size(); hi++) {
-            if (hi > 0) html.append(",");
-            html.append(hunkStarts.get(hi));
-        }
-        html.append("];var currentHunk=0;var totalHunks=hunks.length||1;");
-        html.append("function scrollToHunk(idx){if(hunks.length===0)return;");
-        html.append("var line=hunks[Math.min(idx,hunks.length-1)];");
-        html.append("var left=document.getElementById('left-code');");
-        html.append("var right=document.getElementById('right-code');");
-        html.append("var target=left.children[line];if(target){target.scrollIntoView({block:'center'});}");
-        html.append("if(right.children[line]){right.children[line].scrollIntoView({block:'center'});}");
-        html.append("document.getElementById('hunk-nav').textContent=(idx+1)+' / '+totalHunks;}");
-        html.append("function prevHunk(){if(currentHunk>0)currentHunk--;scrollToHunk(currentHunk);}");
-        html.append("function nextHunk(){if(currentHunk<totalHunks-1)currentHunk++;scrollToHunk(currentHunk);}");
-        // 同步滚动：左右分屏同时滚动
-        html.append("var syncing=false;");
-        html.append("document.getElementById('left-code').addEventListener('scroll',function(){");
-        html.append("if(!syncing){syncing=true;document.getElementById('right-code').scrollTop=this.scrollTop;syncing=false;}});");
-        html.append("document.getElementById('right-code').addEventListener('scroll',function(){");
-        html.append("if(!syncing){syncing=true;document.getElementById('left-code').scrollTop=this.scrollTop;syncing=false;}});");
-        html.append("</script>");
 
-        String fullHtml = HTML_TEMPLATE.replace("%s", html.toString());
+        JsonObject json = new JsonObject();
+        json.addProperty("original", oldContent);
+        json.addProperty("modified", newContent);
+        json.addProperty("fileName", fileName);
+        json.addProperty("filePath", filePath);
+        json.addProperty("timestamp", timestamp);
+        json.addProperty("backupVersion", backupVersion);
+        json.addProperty("totalVersions", totalVersions);
+        String jsonString = GSON.toJson(json);
 
+        // 4. Create Stage + WebView
         Stage stage = new Stage();
         stage.initStyle(StageStyle.TRANSPARENT);
 
         WebView wv = new WebView();
         wv.setContextMenuEnabled(true);
         wv.setStyle("-fx-background-color: white;");
+
+        // 5. window.status callback (rollback / close)
         wv.getEngine().setOnStatusChanged(event -> {
             String s = event.getData();
             if ("close".equals(s)) {
                 stage.close();
             } else if ("rollback".equals(s) && backupManager != null) {
-                backupManager.restore(originalPath, entry);
+                boolean ok = backupManager.restore(originalPath, entry);
+                log.debug("Rollback result for {}: {}", originalPath, ok);
                 stage.close();
             }
         });
-        wv.getEngine().load(toDataUri(fullHtml));
 
+        // 6. Load HTML
+        wv.getEngine().load(htmlPath.toUri().toString());
+
+        // 7. Inject diff data after page load completes (with retry for Monaco async init)
+        wv.getEngine().getLoadWorker().stateProperty().addListener(
+            (obs, oldState, newState) -> {
+                if (newState == Worker.State.SUCCEEDED) {
+                    // Monaco loads asynchronously via AMD require(); use retry loop
+                    // instead of fixed delay to handle slow initialization
+                    Thread injector = new Thread(() -> {
+                        int maxRetries = 30; // 30 * 200ms = 6 seconds max
+                        final boolean[] stored = {false};
+                        for (int i = 0; i < maxRetries; i++) {
+                            try { Thread.sleep(200); } catch (InterruptedException e) {
+                                Thread.currentThread().interrupt();
+                                return;
+                            }
+                            final int attempt = i;
+                            final boolean[] done = {false};
+                            javafx.application.Platform.runLater(() -> {
+                                try {
+                                    Object ready = wv.getEngine().executeScript(
+                                            "window.__diffReady === true");
+                                    if (Boolean.TRUE.equals(ready)) {
+                                        // Monaco ready — 两步注入：先存数据，再调用函数
+                                        // 避免大文件内容拼接成超长单条 JS 语句
+                                        wv.getEngine().executeScript(
+                                                "window.__injectedData=" + jsonString);
+                                        Object result = wv.getEngine().executeScript(
+                                                "fetchAndApplyDiff(window.__injectedData)");
+                                        log.info("Monaco data injected (attempt {}), result={}", attempt, result);
+                                        done[0] = true;
+                                        return; // 不再走 stored 分支
+                                    }
+                                    if (!stored[0]) {
+                                        // Monaco not ready — store pending data once
+                                        wv.getEngine().executeScript(
+                                                "window.__pendingDiffData=" + jsonString);
+                                        stored[0] = true;
+                                        log.debug("Stored __pendingDiffData, waiting for Monaco (attempt {})", attempt);
+                                    }
+                                    // If already stored, just wait for Monaco require() callback
+                                } catch (Exception e) {
+                                    log.warn("Monaco injection attempt {} failed: {}", attempt, e.getMessage());
+                                }
+                            });
+                            try { Thread.sleep(50); } catch (InterruptedException e) {
+                                Thread.currentThread().interrupt();
+                                return;
+                            }
+                            if (done[0]) {
+                                log.info("Monaco diff data injection succeeded");
+                                return;
+                            }
+                        }
+                        log.error("Monaco data injection timed out after {} retries ({} seconds)",
+                                maxRetries, maxRetries * 250 / 1000);
+                    }, "monaco-data-injector");
+                    injector.setDaemon(true);
+                    injector.start();
+                } else if (newState == Worker.State.FAILED) {
+                    log.error("Failed to load diff viewer HTML from {}", htmlPath);
+                }
+            }
+        );
+
+        // 8. Stage shell (Apple-style rounded corners + shadow)
         StackPane root = new StackPane(wv);
         root.setStyle("-fx-background-color: white; -fx-background-radius: 12px;"
                 + " -fx-border-color: rgba(0,0,0,0.08); -fx-border-radius: 12px;"
@@ -214,89 +189,97 @@ public class DiffViewerPopup {
         scene.setOnKeyPressed(e -> { if (e.getCode() == KeyCode.ESCAPE) stage.close(); });
         stage.setScene(scene);
 
+        // Center on owner or screen
         if (stage.getOwner() != null) {
             stage.setX(stage.getOwner().getX() + (stage.getOwner().getWidth() - DEFAULT_WIDTH) / 2);
             stage.setY(stage.getOwner().getY() + (stage.getOwner().getHeight() - DEFAULT_HEIGHT) / 2);
         } else {
-            // 无人所有者时用屏幕居中
             double sw = javafx.stage.Screen.getPrimary().getVisualBounds().getWidth();
             double sh = javafx.stage.Screen.getPrimary().getVisualBounds().getHeight();
             stage.setX((sw - DEFAULT_WIDTH) / 2);
             stage.setY((sh - DEFAULT_HEIGHT) / 2);
         }
         stage.show();
+
+        log.info("Diff viewer opened: {} (v{}/{})", fileName, backupVersion, totalVersions);
     }
 
-    // ===== Diff Algorithm (LCS) =====
+    // ===== Monaco Resource Extraction =====
 
-    private static List<DiffLinePair> computeDiff(List<String> oldLines, List<String> newLines) {
-        int m = oldLines.size(), n = newLines.size();
-        int[][] dp = new int[m + 1][n + 1];
-        for (int i = 1; i <= m; i++)
-            for (int j = 1; j <= n; j++)
-                if (oldLines.get(i - 1).equals(newLines.get(j - 1)))
-                    dp[i][j] = dp[i - 1][j - 1] + 1;
-                else
-                    dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+    /**
+     * Extracts Monaco Editor resources to a temporary directory.
+     * <p>
+     * Dev mode: returns path directly from src/main/resources/monaco if available.
+     * Production (jar): extracts resources listed in manifest.txt to a temp directory.
+     *
+     * @return path to diff-viewer.html, or null on failure
+     */
+    private static Path extractMonacoResources() {
+        // Dev mode: load directly from project resources directory
+        Path projectMonaco = Path.of("src/main/resources/monaco");
+        if (Files.exists(projectMonaco.resolve("diff-viewer.html"))) {
+            return projectMonaco.resolve("diff-viewer.html");
+        }
 
-        List<DiffLinePair> reversed = new ArrayList<>();
-        int i = m, j = n;
-        while (i > 0 || j > 0) {
-            if (i > 0 && j > 0 && oldLines.get(i - 1).equals(newLines.get(j - 1))) {
-                reversed.add(new DiffLinePair(oldLines.get(i - 1), newLines.get(j - 1),
-                        DiffType.UNCHANGED, i, j));
-                i--; j--;
-            } else if (j > 0 && (i == 0 || dp[i][j - 1] >= dp[i - 1][j])) {
-                reversed.add(new DiffLinePair("", newLines.get(j - 1),
-                        DiffType.ADDED, 0, j));
-                j--;
-            } else {
-                reversed.add(new DiffLinePair(oldLines.get(i - 1), "",
-                        DiffType.REMOVED, i, 0));
-                i--;
+        // Production mode: extract from jar to temp directory
+        if (monacoDir != null && Files.exists(monacoDir)) {
+            return monacoDir.resolve("diff-viewer.html");
+        }
+
+        try {
+            monacoDir = Files.createTempDirectory("nexusai-monaco-");
+            monacoDir.toFile().deleteOnExit();
+
+            // Read manifest listing all Monaco files
+            InputStream manifestStream =
+                    DiffViewerPopup.class.getResourceAsStream("/monaco/manifest.txt");
+            if (manifestStream == null) {
+                log.error("Monaco manifest.txt not found in jar resources");
+                return null;
             }
+
+            List<String> files;
+            try (BufferedReader reader =
+                         new BufferedReader(new InputStreamReader(manifestStream, StandardCharsets.UTF_8))) {
+                files = reader.lines()
+                        .map(String::trim)
+                        .filter(s -> !s.isEmpty())
+                        .toList();
+            }
+
+            // Extract each listed file
+            for (String file : files) {
+                extractSingleResource("/monaco/" + file, monacoDir.resolve(file));
+            }
+
+            log.info("Extracted {} Monaco resource files to {}", files.size(), monacoDir);
+            return monacoDir.resolve("diff-viewer.html");
+        } catch (IOException e) {
+            log.error("Failed to extract Monaco resources", e);
+            return null;
         }
-        List<DiffLinePair> result = new ArrayList<>(reversed.size());
-        for (int k = reversed.size() - 1; k >= 0; k--) result.add(reversed.get(k));
-        return result;
     }
 
-    private static int countHunks(List<DiffLinePair> lines) {
-        int hunks = 0; boolean inHunk = false;
-        for (DiffLinePair d : lines) {
-            if (d.type() != DiffType.UNCHANGED) { if (!inHunk) { hunks++; inHunk = true; } }
-            else { inHunk = false; }
+    /**
+     * Extracts a single resource from the classpath to the target file path.
+     */
+    private static void extractSingleResource(String resourcePath, Path target) throws IOException {
+        Files.createDirectories(target.getParent());
+        try (InputStream is = DiffViewerPopup.class.getResourceAsStream(resourcePath)) {
+            if (is == null) {
+                log.warn("Resource not found: {}", resourcePath);
+                return;
+            }
+            Files.copy(is, target, StandardCopyOption.REPLACE_EXISTING);
+            target.toFile().deleteOnExit();
         }
-        return Math.max(hunks, 1);
     }
 
     // ===== Helpers =====
-
-    private static String renderLine(int ln, String text, String cls, int idx) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("<div class='line ").append(cls).append("' id='line-").append(idx).append("'>");
-        sb.append("<span class='ln'>").append(ln > 0 ? ln : "").append("</span>");
-        sb.append("<span class='txt'>").append(text).append("</span>");
-        sb.append("</div>");
-        return sb.toString();
-    }
 
     private static String formatTimestamp(String ts) {
         if (ts == null || ts.isEmpty()) return "";
         String s = ts.replace("_", " ");
         return s.length() > 19 ? s.substring(0, 19) : s;
-    }
-
-    private static String esc(String s) {
-        if (s == null) return "";
-        return s.replace("&", "&amp;")
-                .replace("<", "&lt;")
-                .replace(">", "&gt;")
-                .replace("\"", "&quot;");
-    }
-
-    private static String toDataUri(String html) {
-        byte[] bytes = html.getBytes(StandardCharsets.UTF_8);
-        return "data:text/html;charset=UTF-8;base64," + Base64.getEncoder().encodeToString(bytes);
     }
 }

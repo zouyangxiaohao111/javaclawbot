@@ -1,6 +1,7 @@
 package agent.tool.file;
 
 import agent.tool.Tool;
+import agent.tool.ToolUseContext;
 import utils.PathUtil;
 
 import java.nio.charset.Charset;
@@ -48,6 +49,7 @@ public final class WriteTool extends Tool {
     private final Path workspace;
     private final Path allowedDir;
     private final FileStateCache fileStateCache;
+    private final SessionFileStateManager sessionManager;
     private final FileBackupManager fileBackupManager;
 
     public WriteTool(Path workspace, Path allowedDir, FileStateCache fileStateCache, FileBackupManager fileBackupManager) {
@@ -55,6 +57,7 @@ public final class WriteTool extends Tool {
         this.allowedDir = allowedDir;
         this.fileStateCache = fileStateCache != null ? fileStateCache : new FileStateCache.NoOp();
         this.fileBackupManager = fileBackupManager;
+        this.sessionManager = new SessionFileStateManager();
     }
 
     public WriteTool(Path workspace, Path allowedDir, FileStateCache fileStateCache) {
@@ -64,6 +67,22 @@ public final class WriteTool extends Tool {
     /** Backward-compatible constructor (no cache enforcement) */
     public WriteTool(Path workspace, Path allowedDir) {
         this(workspace, allowedDir, new FileStateCache.NoOp(), null);
+    }
+
+    public WriteTool(Path workspace, Path allowedDir, SessionFileStateManager sessionManager) {
+        this.workspace = workspace;
+        this.allowedDir = allowedDir;
+        this.fileStateCache = new FileStateCache.NoOp();
+        this.sessionManager = sessionManager != null ? sessionManager : new SessionFileStateManager();
+        this.fileBackupManager = null;
+    }
+
+    public WriteTool(Path workspace, Path allowedDir, SessionFileStateManager sessionManager, FileBackupManager fileBackupManager) {
+        this.workspace = workspace;
+        this.allowedDir = allowedDir;
+        this.fileStateCache = new FileStateCache.NoOp();
+        this.sessionManager = sessionManager != null ? sessionManager : new SessionFileStateManager();
+        this.fileBackupManager = fileBackupManager;
     }
 
     // ---- Port of TOOL_NAME ----
@@ -139,7 +158,20 @@ public final class WriteTool extends Tool {
      *   11. Return result with create/update distinction
      */
     @Override
+    public CompletionStage<String> execute(Map<String, Object> args, ToolUseContext parentUseContext) {
+        FileStateCache activeCache = this.fileStateCache;
+        if (parentUseContext != null && parentUseContext.getSessionId() != null && sessionManager != null) {
+            activeCache = sessionManager.getFileCache(parentUseContext.getSessionId());
+        }
+        return doExecute(args, activeCache);
+    }
+
+    @Override
     public CompletionStage<String> execute(Map<String, Object> args) {
+        return doExecute(args, this.fileStateCache);
+    }
+
+    private CompletionStage<String> doExecute(Map<String, Object> args, FileStateCache afc) {
         String filePath = FileSystemTools.asString(args.get("file_path"));
         String content = FileSystemTools.asString(args.get("content"));
 
@@ -163,7 +195,7 @@ public final class WriteTool extends Tool {
             // Port of CC: if file exists, MUST have been read first
             // For new files (ENOENT), return {result: true} immediately
             if (fileExists) {
-                FileStateCache.FileState readState = fileStateCache.getState(resolvedPath);
+                FileStateCache.FileState readState = afc.getState(resolvedPath);
                 if (readState == null || readState.isPartialView) {
                     return CompletableFuture.completedFuture(
                             "Error: File has not been read yet. Read it first before writing to it. " +
@@ -217,9 +249,9 @@ public final class WriteTool extends Tool {
 
             // ---- call: recheck mtime staleness (runtime throw) ----
             // Port of CC's critical section: avoid async ops between staleness check and write
-            if (fileExists && fileStateCache.getState(resolvedPath) != null) {
+            if (fileExists && afc.getState(resolvedPath) != null) {
                 long lastWriteTime = Files.getLastModifiedTime(resolvedPath).toMillis();
-                FileStateCache.FileState lastRead = fileStateCache.getState(resolvedPath);
+                FileStateCache.FileState lastRead = afc.getState(resolvedPath);
                 if (lastRead != null && lastWriteTime > lastRead.timestamp) {
                     boolean isFullRead = lastRead.offset == null && lastRead.limit == null;
                     if (!isFullRead || (oldContent != null && !oldContent.equals(
@@ -251,8 +283,8 @@ public final class WriteTool extends Tool {
             // Port of CC: readFileState.set(fullFilePath, {content, timestamp, offset, limit})
             long newMtime = Files.getLastModifiedTime(resolvedPath).toMillis();
             long newSize = Files.size(resolvedPath);
-            fileStateCache.invalidate(resolvedPath);
-            fileStateCache.markRead(resolvedPath, normalizedContent, newMtime, newSize);
+            afc.invalidate(resolvedPath);
+            afc.markRead(resolvedPath, normalizedContent, newMtime, newSize);
 
             // ---- call: generate result ----
             // Port of CC's mapToolResultToToolResultBlockParam

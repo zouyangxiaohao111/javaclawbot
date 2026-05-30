@@ -1,6 +1,7 @@
 package agent.tool.file;
 
 import agent.tool.Tool;
+import agent.tool.ToolUseContext;
 import utils.PathUtil;
 
 import java.nio.file.Files;
@@ -77,6 +78,7 @@ public final class ReadFileTool extends Tool {
     private final Path workspace;
     private final Path allowedDir;
     private final FileStateCache fileStateCache;
+    private final SessionFileStateManager sessionManager;
 
     public ReadFileTool(Path workspace, Path allowedDir) {
         this(workspace, allowedDir, new FileStateCache.NoOp());
@@ -86,6 +88,14 @@ public final class ReadFileTool extends Tool {
         this.workspace = workspace;
         this.allowedDir = allowedDir;
         this.fileStateCache = fileStateCache != null ? fileStateCache : new FileStateCache.NoOp();
+        this.sessionManager = new SessionFileStateManager();
+    }
+
+    public ReadFileTool(Path workspace, Path allowedDir, SessionFileStateManager sessionManager) {
+        this.workspace = workspace;
+        this.allowedDir = allowedDir;
+        this.fileStateCache = new FileStateCache.NoOp();
+        this.sessionManager = sessionManager != null ? sessionManager : new SessionFileStateManager();
     }
 
     @Override
@@ -148,7 +158,20 @@ public final class ReadFileTool extends Tool {
     }
 
     @Override
+    public CompletionStage<String> execute(Map<String, Object> args, ToolUseContext parentUseContext) {
+        FileStateCache activeCache = this.fileStateCache;
+        if (parentUseContext != null && parentUseContext.getSessionId() != null && sessionManager != null) {
+            activeCache = sessionManager.getFileCache(parentUseContext.getSessionId());
+        }
+        return doExecute(args, activeCache);
+    }
+
+    @Override
     public CompletionStage<String> execute(Map<String, Object> args) {
+        return doExecute(args, this.fileStateCache);
+    }
+
+    private CompletionStage<String> doExecute(Map<String, Object> args, FileStateCache afc) {
         // Support both file_path (Claude Code) and path (legacy)
         String filePath = asString(args.get("file_path"));
         if (filePath == null || filePath.isBlank()) filePath = asString(args.get("path"));
@@ -194,8 +217,8 @@ public final class ReadFileTool extends Tool {
             // }
 
             // --- Port of Claude Code: file_unchanged dedup ---
-            if (!hasLineLimit && fileStateCache.isUnchanged(resolvedPath)) {
-                FileStateCache.FileState state = fileStateCache.getState(resolvedPath);
+            if (!hasLineLimit && afc.isUnchanged(resolvedPath)) {
+                FileStateCache.FileState state = afc.getState(resolvedPath);
                 if (state != null && !state.isPartialView) {
                     return CompletableFuture.completedFuture(FILE_UNCHANGED_STUB);
                 }
@@ -296,7 +319,7 @@ public final class ReadFileTool extends Tool {
             // --- Port of Claude Code: update FileStateCache ---
             long mtimeMs = Files.getLastModifiedTime(resolvedPath).toMillis();
             long sizeBytes = Files.size(resolvedPath);
-            fileStateCache.markRead(resolvedPath, content, mtimeMs, sizeBytes);
+            afc.markRead(resolvedPath, content, mtimeMs, sizeBytes);
 
             return CompletableFuture.completedFuture(content);
 
