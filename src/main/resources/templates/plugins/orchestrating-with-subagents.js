@@ -1,14 +1,15 @@
 /**
- * JavaClawBot zjkycode 插件（Node.js 版本）
+ * JavaClawBot orchestrating-with-subagents 插件（Node.js 版本）
  *
  * 功能：
- * - 读取 zjkycode 技能目录中的 SKILL.md 文件
+ * - 读取 orchestrating-with-subagents 技能目录中的 SKILL.md 文件
  * - 生成引导上下文内容注入到系统提示词
+ * - 与 plugin/zjkycode.js 协同：zjkycode 提供"如何使用"，orchestrating 提供"如何派 subagent"
  *
  * 说明：
  * - 本插件通过 Node.js 执行（检测到 ES6 模块语法自动切换）
  * - 可使用完整的 Node.js API（fs、path、os 等）
- * - 使用 console.log 输出结果，或调用 setResult(value)
+ * - 使用 console.log 输出结果
  *
  * 可用变量：
  * - workspace: 工作区路径（字符串）
@@ -21,7 +22,7 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// 简单的 frontmatter 提取
+// 复用 frontmatter 提取逻辑（与 zjkycode.js 一致）
 const extractAndStripFrontmatter = (content) => {
   const match = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
   if (!match) return { frontmatter: {}, content };
@@ -44,18 +45,17 @@ const extractAndStripFrontmatter = (content) => {
 
 // 主逻辑
 const homeDir = os.homedir();
-const configDir = path.join(homeDir, '.javaclawbot');
 
 // 尝试多个可能的技能目录位置
 const possibleSkillDirs = [
-    path.join(workspace, 'skills', 'zjkycode'),
-    path.join(homeDir, '.javaclawbot',"workspace", 'skills', 'zjkycode')
+    path.join(workspace, 'skills', 'codeskills'),
+    path.join(workspace, 'skills', 'orchestrating-with-subagents'),
 ];
 
-// 查找 using-zjkycode SKILL.md 文件
+// 查找 SKILL.md 文件
 function findSkillFile() {
     for (const skillDir of possibleSkillDirs) {
-        const skillFile = path.join(skillDir, 'using-zjkycode', 'SKILL.md');
+        const skillFile = path.join(skillDir, 'SKILL.md');
         if (fs.existsSync(skillFile) && fs.statSync(skillFile).isFile()) {
             return skillFile;
         }
@@ -72,37 +72,41 @@ function getBootstrapContent() {
 
     try {
         const fullContent = fs.readFileSync(skillFile, 'utf8');
-        const { content } = extractAndStripFrontmatter(fullContent);
+        const { frontmatter, content } = extractAndStripFrontmatter(fullContent);
 
-        const toolMapping = `** 工具映射：**
-当技能引用你没有的工具时，请替换为 你具备的 等效工具：
+        // 运行时补充（与 zjkycode.js 风格一致）
+        const runtimeSupplement = `**运行说明：**
+本插件与zjkycode 系列技能
+
+**触发条件：**
+- 用户提出新任务，需要实施代码
+- 上下文已变长（>30% 容量）
+- 任务需要 3+ 个文件修改，或跨 2+ 个模块
+- 你发现自己想"直接动手写代码"
+
+**核心约束（Iron Law）：**
+主 agent 走"实现路径"（改源代码 / 写新文件 / 重构）——**永不允许**，
+除非决策表明确说"不派"。任何"任务太简单" / "派单浪费 token" 都是合理化借口。
+
+**工具映射：**
+当 orchestrating 技能引用你没有的工具时，请替换为你具备的等效工具：
+- \`Task\` 工具配合子代理 → 使用 Agent 工具
 - \`TodoWrite\` → 内置任务管理工具
-- \`Task\` 工具配合子代理 → 使用 `Agent`` 工具
 - \`Skill\` 工具 → skill 工具
 - \`Read\`、\`Write\`、\`Edit\`、\`Bash\` → read_file、write_file、edit_file、exec
 
-**视觉伙伴技能特别说明：**
-在Windows上运行时特别说明，
-方式\t进程链\tOwner PID\t结果
-PS1 脚本\tbash → powershell → cmd → node\t设置 → 父进程退出 → 被杀\t❌
-直接 node\tbash → node\t未设置 → 不检测\t✅
-一句话总结：start-server.ps1 的"父进程退出自动清理"机制在 Bash 工具的后台执行模式下被误触发，而直接 node server.cjs 没有这个机制，所以稳定运行。
-
-**技能位置：**
-zjkycode 技能位于 \`${workspace}/skills/zjkycode/\`
-该技能包下面的所有技能加载都需要加前缀,示例: zjkycode/brainstorming
-使用  原生 skill 工具来列出和加载技能。`;
+当主 agent 收到任何实施类任务时，应自动按 orchestrating 的 4 维决策矩阵决定派/不派。`;
 
         return `<非常重要>
-你拥有 zjkycode 能力。
+你拥有 orchestrating-with-subagents 能力。
 
-**重要提示：下方已包含 using-zjkycode 技能内容。它已经加载完成 —— 你当前正在遵循它。切勿再次使用 skill 工具加载 "using-zjkycode" —— 那样做是多余的。**
+**重要提示：下方已包含 orchestrating-with-subagents 技能内容。它已经加载完成 —— 你当前正在遵循它。切勿再次使用 skill 工具加载 "orchestrating-with-subagents" —— 那样做是多余的。**
 
 ${content}
 
-${toolMapping}
+${runtimeSupplement}
 </非常重要>
-强制按照zjkycode流程执行
+强制按 orchestrating 4 维决策矩阵执行——简单任务也派 subagent，除非决策表明确说"不派"
 `;
     } catch (e) {
         return null;
@@ -114,7 +118,7 @@ const bootstrapContent = getBootstrapContent();
 if (bootstrapContent) {
     console.log(bootstrapContent);
 } else {
-    console.log(`<!-- zjkycode 插件：未找到 using-zjkycode/SKILL.md 文件 -->
+    console.log(`<!-- orchestrating-with-subagents 插件：未找到 SKILL.md 文件 -->
 <!-- 请确保技能目录存在：
   - ${possibleSkillDirs.join('\n  - ')} -->`);
 }

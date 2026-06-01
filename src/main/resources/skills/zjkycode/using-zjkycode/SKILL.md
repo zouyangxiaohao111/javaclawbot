@@ -194,7 +194,7 @@ Skill 本身会告诉你属于哪种类型。
 
 ## UI/前端任务特殊要求
 
-涉及以下内容时，**必须使用 craft-studio（视觉伴侣）技能**：
+涉及以下内容时，**必须使用 craft-studio（视觉设计）技能**：
 
 - UI 界面设计
 - 前端布局
@@ -221,7 +221,6 @@ brainstorming
 
 | 技能 | 触发条件 | 不可跳过原因 |
 |------|---------|-------------|
-| **orchestrating-with-subagents** | 任何非简单任务的执行阶段 | 防止主 agent 亲自实现；确保 subagent 派发和 context 完整 |
 | **brainstorming** | 构建类/重构类任务 | 理解需求是实施基础 |
 | **writing-plans** | brainstorming 完成后 | 计划指导有序执行 |
 | **systematic-debugging** | 调试类任务 | 防止随机修复制造新 bug |
