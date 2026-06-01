@@ -4,6 +4,11 @@ All notable changes to NexusAI will be documented in this file.
 
 ## [2.4.0] - 2026-05-27
 
+### Added
+- **orchestrating-with-subagents skill** (2026-06-01)：新增高层编排器，强制用 subagent 实施任务
+  - 包含 SKILL.md + 4 examples（new-feature / bugfix / refactor / parallel-tasks）+ 7 references（anti-patterns / asset-directory-structure / context-packet-template / decision-matrix / integration-map / main-loop-pseudocode / multi-tab-behavior）+ test-scenarios（共 13 文件）
+  - `using-zjkycode` 强制表 + 可选表两处引用
+
 ### Changed
 - **DiffViewerPopup 升级实验**：启动 Monaco Editor 替换手写 HTML diff 的原型验证（feature/monaco-diff-viewer 分支）
   - Monaco Editor 0.45.0 资源打包到 `src/main/resources/monaco/`（114 文件，13MB）
