@@ -221,6 +221,7 @@ brainstorming
 
 | 技能 | 触发条件 | 不可跳过原因 |
 |------|---------|-------------|
+| **orchestrating-with-subagents** | 任何非简单任务的执行阶段 | 防止主 agent 亲自实现；确保 subagent 派发和 context 完整 |
 | **brainstorming** | 构建类/重构类任务 | 理解需求是实施基础 |
 | **writing-plans** | brainstorming 完成后 | 计划指导有序执行 |
 | **systematic-debugging** | 调试类任务 | 防止随机修复制造新 bug |
@@ -234,6 +235,7 @@ brainstorming
 | **requesting-code-review** | 复杂功能完成后、合并前 |
 | **test-driven-development** | 需要测试保障的功能 |
 | **using-git-worktrees** | 需要隔离工作区 |
+| **orchestrating-with-subagents** | **任何非简单任务执行**——高层编排器，确保 subagent 被正确派发 |
 | **dispatching-parallel-agents** | 多个独立任务可并行 |
 
 ## 用户豁免条件
