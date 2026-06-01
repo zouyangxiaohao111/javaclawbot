@@ -441,6 +441,26 @@ components:
     textColor: "{colors.steel}"
     typography: "{typography.body-sm}"
     padding: "{spacing.xxs} 0"
+craft_notes:
+  anti_ai_decision: "温暖极简 - 不冷漠、不'工业感'，但保持简洁"
+  signature_moves:
+    - "emoji + 真实图标混用（icon 系统允许人格化）"
+    - "microcopy 像朋友说话：'What's on your mind?'"
+    - "3D 渲染 hero（区别于普通 SaaS 的产品截图）"
+  human_voice: "温暖、鼓励、不评判。'新页面？好极了，咱们开始'"
+  use_when:
+    - "协作工具 / 知识管理"
+    - "个人 productivity"
+    - "需要'温度'的工具类应用"
+  avoid_when:
+    - "硬核开发者工具（太温柔不专业）"
+    - "金融 / 医疗（语气不合）"
+  reference_examples:
+    - url: "https://www.notion.so"
+      what_to_learn: "3D 渲染的 hero + 'Your wiki, docs, & projects. Together.'"
+    - url: "https://www.notion.so/templates"
+      what_to_learn: "template 页的卡片 hover 状态有温度（不是死板阴影）"
+
 ---
 
 ## Overview

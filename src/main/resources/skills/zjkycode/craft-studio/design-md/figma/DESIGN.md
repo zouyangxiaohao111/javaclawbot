@@ -268,6 +268,26 @@ components:
     typography: "{typography.caption}"
     rounded: "{rounded.xs}"
     padding: 64px 32px
+craft_notes:
+  anti_ai_decision: "工具感 - 像 IDE，不像营销页"
+  signature_moves:
+    - "紫色/蓝色系工具感（#A259FF）+ 真实 UI 截图"
+    - "monospace 代码块经常出现，强调'这是工具'"
+    - "community 板块鼓励用户作品（UGC）"
+  human_voice: "创作者文化。'Make, share, and learn' 而非 'use our platform'"
+  use_when:
+    - "设计 / 创作工具"
+    - "协作平台"
+    - "社区驱动产品"
+  avoid_when:
+    - "金融 / 医疗（工具感不合）"
+    - "B2B 后台（非创作者向）"
+  reference_examples:
+    - url: "https://www.figma.com"
+      what_to_learn: "Hero 用真实协作场景截图（多人光标）"
+    - url: "https://www.figma.com/community"
+      what_to_learn: "community 页用真实用户作品，不用 stock 图"
+
 ---
 
 ## Overview

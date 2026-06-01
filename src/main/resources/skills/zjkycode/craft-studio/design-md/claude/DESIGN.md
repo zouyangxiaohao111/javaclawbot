@@ -296,6 +296,26 @@ components:
     textColor: "{colors.on-dark-soft}"
     typography: "{typography.body-sm}"
     padding: 64px
+craft_notes:
+  anti_ai_decision: "诚实克制 - 承认局限，不假装完美"
+  signature_moves:
+    - "暖色调（橙/赭石）+ 米色背景，不用冷蓝白"
+    - "serif 字体点缀（学术感）"
+    - "承认'我不知道'比假装权威更真诚"
+  human_voice: "诚实、克制、思考型。'让我想想'比'我确定'更可信"
+  use_when:
+    - "AI 工具 / 研究助手"
+    - "需要建立信任的内容"
+    - "哲学 / 学术 / 深度思考的产品"
+  avoid_when:
+    - "快速消费的内容（节奏不对）"
+    - "娱乐向产品"
+  reference_examples:
+    - url: "https://claude.ai"
+      what_to_learn: "暖色调 #C9A961 + 米色 #F5E9D4，与众不同的 AI 调性"
+    - url: "https://www.anthropic.com/research"
+      what_to_learn: "research 页用 serif 标题 + sans body，学术感"
+
 ---
 
 ## Overview

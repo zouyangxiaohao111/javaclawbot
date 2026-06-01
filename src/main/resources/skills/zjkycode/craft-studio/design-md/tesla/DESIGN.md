@@ -1,3 +1,26 @@
+---
+craft_notes:
+  anti_ai_decision: "彻底减法 - 几乎无 UI，UI 是'陪衬'，不是主角"
+  signature_moves:
+    - "Full-viewport hero (100vh) + 全屏摄影"
+    - "近零 UI 装饰：无阴影、无渐变、无边框、无图案"
+    - "Universal Sans 字体：Display + Text 双变体统一多端"
+  human_voice: "不卖。让产品说话。文案少到极致"
+  use_when:
+    - "高端硬件 / 汽车 / 极致产品"
+    - "品牌仪式感 > 信息密度"
+    - "产品本身就是英雄"
+  avoid_when:
+    - "复杂工具（信息密度不够）"
+    - "B2B SaaS 后台"
+    - "需要 onboarding 引导的产品"
+  reference_examples:
+    - url: "https://www.tesla.com/model3"
+      what_to_learn: "Full-viewport product photo + 几乎无 UI"
+    - url: "https://www.tesla.com"
+      what_to_learn: "整页就是一个 hero + nav，无装饰元素"
+---
+
 # Design System Inspired by Tesla
 
 ## 1. Visual Theme & Atmosphere

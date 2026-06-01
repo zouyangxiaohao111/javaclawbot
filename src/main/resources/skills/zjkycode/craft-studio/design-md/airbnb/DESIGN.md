@@ -324,6 +324,26 @@ components:
     backgroundColor: "{colors.canvas}"
     textColor: "{colors.muted}"
     typography: "{typography.caption-sm}"
+craft_notes:
+  anti_ai_decision: "真实感 - 真实 host 照片，UGC 优先"
+  signature_moves:
+    - "真实 host 头像（不用 stock 团队照）"
+    - "Cereal 字体（衬线 + sans 混排）"
+    - "Rausch (#FF385C) accent + 米色背景"
+  human_voice: "温暖、归属感、'belong anywhere'。像朋友推荐住处"
+  use_when:
+    - "市场平台（需要 UGC 信任）"
+    - "消费品牌（重情感）"
+    - "旅行 / 体验 / 住宿类"
+  avoid_when:
+    - "硬核技术工具（语气不合）"
+    - "B2B 后台"
+  reference_examples:
+    - url: "https://www.airbnb.com"
+      what_to_learn: "Hero 用真实房源照片（不是 stock 城市照）"
+    - url: "https://www.airbnb.com/host"
+      what_to_learn: "host 页用真实 host 头像 + 真名，建立信任"
+
 ---
 
 ## Overview

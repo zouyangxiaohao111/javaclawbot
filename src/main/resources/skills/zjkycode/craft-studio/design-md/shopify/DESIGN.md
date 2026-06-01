@@ -261,6 +261,26 @@ components:
     typography: "{typography.caption}"
     rounded: "{rounded.xs}"
     padding: 64px 24px
+craft_notes:
+  anti_ai_decision: "商家友好 - 实用主义，不花哨"
+  signature_moves:
+    - "绿色 (#008060) CTA + 大量 white space"
+    - "Merchant-first 文案：'Start selling online' 而非 'Empower your commerce'"
+    - "产品截图配真实数据（订单、销售额）"
+  human_voice: "务实、乐观、伙伴感。'我们一起做生意'"
+  use_when:
+    - "电商平台 / 商家工具"
+    - "B2B SaaS（中小企业向）"
+    - "需要建立'伙伴'感的产品"
+  avoid_when:
+    - "高端奢侈品（语气太亲民）"
+    - "硬核开发者工具"
+  reference_examples:
+    - url: "https://www.shopify.com"
+      what_to_learn: "绿色 CTA + 商家案例的'真实数据'展示"
+    - url: "https://www.shopify.com/pricing"
+      what_to_learn: "pricing tier 用 merchant 真实场景描述，不是 features 列表"
+
 ---
 
 ## Overview

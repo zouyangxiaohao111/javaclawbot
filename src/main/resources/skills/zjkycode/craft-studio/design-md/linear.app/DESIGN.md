@@ -253,6 +253,26 @@ components:
     typography: "{typography.caption}"
     rounded: "{rounded.xs}"
     padding: 64px 32px
+craft_notes:
+  anti_ai_decision: "物理感 - 动画有 spring physics，像操作真实物体"
+  signature_moves:
+    - "spring physics 而非 ease-in-out：stiffness 320 / damping 30"
+    - "每屏一个 primary CTA，没有抢戏的次要按钮"
+    - "紫色 (#5E6AD2) + 黑色 + 灰阶，零渐变零阴影"
+  human_voice: "直接、冷静、精确。产品文案像在和工程师讨论 issue"
+  use_when:
+    - "B2B SaaS 工具（issue / project / docs）"
+    - "需要快速操作响应的应用"
+    - "开发者向 / 设计师向"
+  avoid_when:
+    - "消费品（太严肃）"
+    - "教育 / 儿童（语气不合）"
+  reference_examples:
+    - url: "https://linear.app/method"
+      what_to_learn: "Method 文档里所有动画都用 spring，不是 fade"
+    - url: "https://linear.app/integrations"
+      what_to_learn: "集成页用 monospace logo + 精确 grid，不用通用卡片"
+
 ---
 
 ## Overview

@@ -271,6 +271,26 @@ components:
     textColor: "{colors.ink-muted-80}"
     typography: "{typography.fine-print}"
     padding: 64px
+craft_notes:
+  anti_ai_decision: "减法 - 留白是设计决策，不是'忘记填内容'"
+  signature_moves:
+    - "Full-viewport hero（100vh）+ 全屏产品图"
+    - "大字号 SF Pro Display + 居中偏左 4-8px 偏移"
+    - "每个 section 一个动作，不堆信息"
+  human_voice: "克制、优雅、不卖。产品页让产品说话"
+  use_when:
+    - "高端消费品"
+    - "产品发布 / 营销活动"
+    - "需要品牌仪式感的场景"
+  avoid_when:
+    - "复杂工具（信息密度不够）"
+    - "B2B 后台系统"
+  reference_examples:
+    - url: "https://www.apple.com/iphone-15-pro/"
+      what_to_learn: "Full-viewport product photo + 4-8px 偏移的标题"
+    - url: "https://www.apple.com/macbook-pro/"
+      what_to_learn: "整页就 5 个 section，每个一个动作"
+
 ---
 
 ## Overview

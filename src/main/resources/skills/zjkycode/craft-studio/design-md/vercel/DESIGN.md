@@ -387,6 +387,26 @@ components:
     padding: "{spacing.sm} {spacing.md}"
     typography: "{typography.body-sm}"
 
+craft_notes:
+  anti_ai_decision: "速度本身是设计 - 动画时长 200-300ms 是品牌"
+  signature_moves:
+    - "Geist Sans + Geist Mono 一字体家族（不用外部字体）"
+    - "黑色 + 白色 + 极少量 accent（蓝色或绿色）"
+    - "deploy 按钮的 loading 状态显示真实进度"
+  human_voice: "技术、精确、开发者向。'Ship faster' 实际是事实"
+  use_when:
+    - "开发者工具 / 平台"
+    - "B2B 技术 SaaS"
+    - "需要强调速度的产品"
+  avoid_when:
+    - "消费品（太技术化）"
+    - "教育 / 儿童"
+  reference_examples:
+    - url: "https://vercel.com"
+      what_to_learn: "Hero 用 Geist Sans + Geist Mono 混排，强调开发感"
+    - url: "https://vercel.com/templates"
+      what_to_learn: "templates 页的卡片用 monochrome + 1 accent，不堆色"
+
 ---
 
 

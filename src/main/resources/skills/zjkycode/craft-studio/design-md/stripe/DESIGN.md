@@ -241,6 +241,26 @@ components:
     typography: "{typography.caption}"
     rounded: "{rounded.xs}"
     padding: 64px 24px
+craft_notes:
+  anti_ai_decision: "技术诚实 - 不用渐变模拟高级感，每像素都有功能"
+  signature_moves:
+    - "渐变是色彩混合的视觉表达，不是装饰"
+    - "microcopy 像工程师：'Webhook 已经发了 23 个'"
+    - "代码块用等宽字体强调'这就是真的'"
+  human_voice: "直接、精确、不做作。Slack 上和工程师聊天的语气"
+  use_when:
+    - "B2B SaaS 需要建立技术信任"
+    - "开发者工具 / DevTools"
+    - "金融基础设施"
+  avoid_when:
+    - "消费品 / 移动 App（风格偏严肃）"
+    - "需要快速情绪唤起的场景"
+  reference_examples:
+    - url: "https://stripe.com/docs/api"
+      what_to_learn: "API 文档的'复制'按钮 hover 状态精确到像素"
+    - url: "https://stripe.com/pricing"
+      what_to_learn: "pricing card 的'featured'变体是 dark navy on white，色块对比是品牌资产"
+
 ---
 
 ## Overview
