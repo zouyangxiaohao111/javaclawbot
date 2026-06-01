@@ -77,7 +77,7 @@ function getBootstrapContent() {
         const toolMapping = `** 工具映射：**
 当技能引用你没有的工具时，请替换为 你具备的 等效工具：
 - \`TodoWrite\` → 内置任务管理工具
-- \`Task\` 工具配合子代理 → 使用 `Agent`` 工具
+- \`Task\` 工具配合子代理 → 使用 \`Agent\` 工具
 - \`Skill\` 工具 → skill 工具
 - \`Read\`、\`Write\`、\`Edit\`、\`Bash\` → read_file、write_file、edit_file、exec
 

@@ -90,7 +90,7 @@ function getBootstrapContent() {
 
 **工具映射：**
 当 orchestrating 技能引用你没有的工具时，请替换为你具备的等效工具：
-- \`Task\` 工具配合子代理 → 使用 Agent 工具
+- \`Task\` 工具配合子代理 → 使用 \`Agent\` 工具
 - \`TodoWrite\` → 内置任务管理工具
 - \`Skill\` 工具 → skill 工具
 - \`Read\`、\`Write\`、\`Edit\`、\`Bash\` → read_file、write_file、edit_file、exec
