@@ -27,7 +27,7 @@ WHILE task_plan.md 还有未完成 Phase:
         a. 准备 context packet：
            - 读 plan/contracts/ 找相关契约
            - 读 findings/ 找相关子代理的输出
-           - 用 templates/context-packet-template.md 格式
+           - 用 references/context-packet-template.md 格式
         b. 派 subagent（Agent 工具 或 cli_agent 工具）
         c. 等 subagent 完成
         d. 读 findings/<task-id>.md
