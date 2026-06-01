@@ -36,7 +36,7 @@
 | 任意 | 高 | 高 | 中 | **派 1 个** | subagent-driven-development |
 | 任意 | 高 | 低 | 中 | **派 1 个串行** | subagent-driven-development |
 | 任意 | 中-高 | 高 | 中 | **派多并行** | dispatching-parallel-agents |
-| UI/视觉 | 任意 | 中 | 中 | **派 + visual-companion** | visual-companion + subagent-driven |
+| UI/视觉 | 任意 | 中 | 中 | **派 + craft-studio** | craft-studio + subagent-driven |
 | 调试 | 任意 | 中 | 高 | **派 systematic-debugging** | systematic-debugging |
 | 写 skill | 任意 | 高 | 低 | **派 writing-skills** | writing-skills |
 | 重构 | 中-高 | 中 | 中 | **派 + TDD** | subagent-driven + TDD |

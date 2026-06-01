@@ -194,7 +194,7 @@ Skill 本身会告诉你属于哪种类型。
 
 ## UI/前端任务特殊要求
 
-涉及以下内容时，**必须使用 visual-companion（视觉伴侣）技能**：
+涉及以下内容时，**必须使用 craft-studio（视觉伴侣）技能**：
 
 - UI 界面设计
 - 前端布局
@@ -226,7 +226,7 @@ brainstorming
 | **writing-plans** | brainstorming 完成后 | 计划指导有序执行 |
 | **systematic-debugging** | 调试类任务 | 防止随机修复制造新 bug |
 | **verification-before-completion** | 声称完成之前 | 防止虚假完成 |
-| **visual-companion** | UI/前端/图标任务 | 视觉内容需要视觉验证 |
+| **craft-studio** | UI/前端/图标任务 | 视觉内容需要视觉验证 |
 
 ### 可选技能（按需调用）
 

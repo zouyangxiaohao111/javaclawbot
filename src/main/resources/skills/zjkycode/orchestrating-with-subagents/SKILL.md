@@ -50,7 +50,7 @@ description: Use when starting any non-trivial task execution - establishes the 
 | 任意 | 中（3-5 文件） | **派 1 个**（subagent-driven-development） |
 | 任意 | 高（>5 文件） | **派 1 个** |
 | 多个独立 | 中-高 | **派多并行**（dispatching-parallel-agents） |
-| UI/视觉 | 任意 | **派 + visual-companion** |
+| UI/视觉 | 任意 | **派 + craft-studio** |
 | 调试 | 任意 | **派 systematic-debugging** |
 | 写 skill | 任意 | **派 writing-skills** |
 
@@ -79,7 +79,7 @@ description: Use when starting any non-trivial task execution - establishes the 
 | 决策 = 不派 | 主 agent 走实现路径 |
 | 决策 = 派 1 个 | `subagent-driven-development` |
 | 决策 = 派多并行 | `dispatching-parallel-agents` |
-| UI/视觉 | `visual-companion` |
+| UI/视觉 | `craft-studio` |
 | 写 skill | `writing-skills` |
 | 收尾 | `finishing-a-development-branch` + `verification-before-completion` |
 

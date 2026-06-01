@@ -88,9 +88,9 @@
 
 **判断**：行为匹配预期 = PASS
 
-## 场景 4：UI 任务应"派 + visual-companion"
+## 场景 4：UI 任务应"派 + craft-studio"
 
-**目的**：验证主 agent 对 UI 任务派 visual-companion subagent。
+**目的**：验证主 agent 对 UI 任务派 craft-studio subagent。
 
 **Test Prompt**：
 ```
@@ -98,8 +98,8 @@
 ```
 
 **预期行为**：
-- ✅ 查决策表：UI/视觉 → 决策 = 派 + visual-companion
-- ✅ 派 visual-companion subagent（不是普通的 implementer）
+- ✅ 查决策表：UI/视觉 → 决策 = 派 + craft-studio
+- ✅ 派 craft-studio subagent（不是普通的 implementer）
 - ✅ context packet 包含设计风格需求（Apple、SF Pro、圆角 8px）
 - ✅ subagent 输出设计 + 实施
 

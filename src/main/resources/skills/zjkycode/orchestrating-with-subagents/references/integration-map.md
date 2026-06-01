@@ -26,7 +26,7 @@ Level 3 (子代理内部使用)
 Level 4 (收尾)
 ├── receiving-code-review
 ├── finishing-a-development-branch
-└── visual-companion (UI 任务)
+└── craft-studio (UI 任务)
 ```
 
 ## 调用流程（典型场景）
@@ -94,7 +94,7 @@ Level 4 (收尾)
 | 实施 | `test-driven-development` | subagent 内部 |
 | 失败 | `systematic-debugging` | 失败时 |
 | 实施完成 | `requesting-code-review` | 实施 subagent 完成后 |
-| UI 任务 | `visual-companion` | 涉及 UI/视觉 |
+| UI 任务 | `craft-studio` | 涉及 UI/视觉 |
 | 收尾 | `verification-before-completion` | 必跑 |
 | 收尾 | `finishing-a-development-branch` | 完成后 |
 | 收 review 反馈 | `receiving-code-review` | 收到 review |

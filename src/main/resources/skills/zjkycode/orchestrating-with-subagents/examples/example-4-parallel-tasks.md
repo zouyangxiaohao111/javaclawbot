@@ -117,7 +117,7 @@ Phase 1: 并行实施（plan/task_plan.md）
 
 ## 触发相关 skill
 - test-driven-development
-- visual-companion (UI 任务)
+- craft-studio (UI 任务)
 - verification-before-completion
 ```
 
