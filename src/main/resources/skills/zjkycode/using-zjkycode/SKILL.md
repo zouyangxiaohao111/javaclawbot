@@ -235,7 +235,6 @@ brainstorming
 | **requesting-code-review** | 复杂功能完成后、合并前 |
 | **test-driven-development** | 需要测试保障的功能 |
 | **using-git-worktrees** | 需要隔离工作区 |
-| **orchestrating-with-subagents** | **任何非简单任务执行**——高层编排器，确保 subagent 被正确派发 |
 | **dispatching-parallel-agents** | 多个独立任务可并行 |
 
 ## 用户豁免条件
