@@ -1,8 +1,12 @@
 package gui.ui.components;
 
+import javafx.application.Platform;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
+import javafx.scene.Node;
 import javafx.scene.control.*;
+import javafx.scene.input.KeyCode;
+import javafx.scene.input.KeyEvent;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
@@ -54,6 +58,32 @@ public class QuestionDialog extends Dialog<Map<String, String>> {
 
         getDialogPane().setMinWidth(520);
         getDialogPane().setMinHeight(300);
+
+        // 防止键盘（Enter/Space/ESC）意外关闭弹窗 —— 必须鼠标点击按钮才能确认/取消。
+        // 监听 Scene 创建时机，按钮节点要等 Scene 就绪后才会被实例化。
+        getDialogPane().sceneProperty().addListener((obs, oldScene, newScene) -> {
+            if (newScene == null) return;
+            Platform.runLater(() -> {
+                Node submitNode = getDialogPane().lookupButton(submitBtn);
+                if (submitNode instanceof Button btn) {
+                    btn.setDefaultButton(false);
+                }
+                Node cancelNode = getDialogPane().lookupButton(ButtonType.CANCEL);
+                if (cancelNode instanceof Button btn) {
+                    btn.setCancelButton(false);
+                }
+            });
+            // Scene 级键盘过滤器：吞掉 Enter/Space/ESC（TextField 输入框内仍允许正常输入）
+            newScene.addEventFilter(KeyEvent.KEY_PRESSED, e -> {
+                if (e.getTarget() instanceof TextField) {
+                    return;
+                }
+                KeyCode code = e.getCode();
+                if (code == KeyCode.ENTER || code == KeyCode.SPACE || code == KeyCode.ESCAPE) {
+                    e.consume();
+                }
+            });
+        });
     }
 
     private QuestionBlock createQuestionBlock(Map<String, Object> q) {

@@ -118,7 +118,10 @@ public class DbTool extends Tool {
         // 前置检查：是否需要用户确认
         String sql = (String) args.get("sql");
         if (sql != null) {
-            String upper = sql.trim().toUpperCase();
+            // Strip leading comments before checking for destructive SQL
+            String stripped = stripLeadingComments(sql);
+            if (stripped.isEmpty()) return execute(args);
+            String upper = stripped.toUpperCase();
             String firstStmt = upper.split(";")[0].trim();
             if (isDestructive(firstStmt)) {
                 @SuppressWarnings("unchecked")
@@ -212,7 +215,13 @@ public class DbTool extends Tool {
             return executeStatement(conn, statements[0], params, isTx, args, dsName);
         } catch (Exception e) {
             if (!isTx) {
-                conn.rollback();
+                try {
+                    if (!conn.getAutoCommit()) {
+                        conn.rollback();
+                    }
+                } catch (SQLException rollbackEx) {
+                    log.warn("Rollback failed on autoCommit connection", rollbackEx);
+                }
             }
             throw e;
         } finally {
@@ -220,6 +229,55 @@ public class DbTool extends Tool {
                 conn.close();
             }
         }
+    }
+
+    /**
+     * Strip leading SQL comments (-- line comments and /* block comments * /) to find the first real keyword.
+     */
+    private String stripLeadingComments(String sql) {
+        String s = sql.trim();
+        while (true) {
+            if (s.startsWith("--")) {
+                int eol = s.indexOf('\n');
+                if (eol < 0) return "";
+                s = s.substring(eol + 1).trim();
+            } else if (s.startsWith("/*")) {
+                int end = s.indexOf("*/");
+                if (end < 0) return "";
+                s = s.substring(end + 2).trim();
+            } else {
+                break;
+            }
+        }
+        return s;
+    }
+
+    /**
+     * Strip all SQL comments (both -- line comments and /* block comments * /)
+     * from the entire SQL string. Used before wrapping queries or appending clauses
+     * so that inline/end-of-line comments don't break the transformed SQL.
+     */
+    private String stripAllComments(String sql) {
+        StringBuilder sb = new StringBuilder(sql.length());
+        int i = 0;
+        while (i < sql.length()) {
+            if (i + 1 < sql.length() && sql.charAt(i) == '-' && sql.charAt(i + 1) == '-') {
+                // Single-line comment: skip to end of line
+                int eol = sql.indexOf('\n', i);
+                if (eol < 0) break; // rest of string is comment
+                i = eol + 1;
+                sb.append('\n'); // preserve structure for line-sensitive SQL
+            } else if (i + 1 < sql.length() && sql.charAt(i) == '/' && sql.charAt(i + 1) == '*') {
+                // Block comment: skip to * /
+                int end = sql.indexOf("*/", i + 2);
+                if (end < 0) break; // unclosed comment, treat rest as comment
+                i = end + 2;
+            } else {
+                sb.append(sql.charAt(i));
+                i++;
+            }
+        }
+        return sb.toString().trim();
     }
 
     private boolean isDestructive(String sql) {
@@ -235,7 +293,12 @@ public class DbTool extends Tool {
 
     private String executeStatement(Connection conn, String sql, Map<String, Object> params,
                                      boolean isTx, Map<String, Object> args, String dsName) throws Exception {
-        String trimmed = sql.trim().toUpperCase();
+        // Strip leading comments before routing to the correct execution method
+        String cleaned = stripLeadingComments(sql);
+        if (cleaned.isEmpty()) {
+            return GsonFactory.toJson(Map.of("error", "Empty SQL statement after stripping comments"));
+        }
+        String trimmed = cleaned.toUpperCase();
 
         if (trimmed.startsWith("SELECT") || trimmed.startsWith("SHOW")
                 || trimmed.startsWith("DESCRIBE") || trimmed.startsWith("EXPLAIN")
@@ -253,11 +316,18 @@ public class DbTool extends Tool {
     private String executeQuery(Connection conn, String sql, Map<String, Object> params,
                                  Map<String, Object> args, String dsName) throws Exception {
         sql = sql.trim();
+        // Strip all comments before pagination/transformation to prevent inline
+        // or end-of-line comments from breaking the appended LIMIT/OFFSET and COUNT subquery
+        String strippedSql = stripAllComments(sql);
+        if (strippedSql.isEmpty()) {
+            return GsonFactory.toJson(Map.of("error", "Empty SQL after stripping comments"));
+        }
+
         // Handle pagination
         int page = args.containsKey("page") ? ((Number) args.get("page")).intValue() : 1;
         int pageSize = args.containsKey("page_size") ? ((Number) args.get("page_size")).intValue() : 500;
 
-        String countSql = "SELECT COUNT(*) AS _total FROM (" + sql + ") _sub";
+        String countSql = "SELECT COUNT(*) AS _total FROM (" + strippedSql + ") _sub";
         int totalRows;
         try (PreparedStatement countStmt = prepareStatement(conn, countSql, params);
              ResultSet rs = countStmt.executeQuery()) {
@@ -266,10 +336,10 @@ public class DbTool extends Tool {
         }
 
         int offset = (page - 1) * pageSize;
-        String pagedSql = sql + " LIMIT ? OFFSET ?";
+        String pagedSql = strippedSql + " LIMIT ? OFFSET ?";
 
         try (PreparedStatement stmt = conn.prepareStatement(pagedSql)) {
-            NamedParameterProcessor processor = new NamedParameterProcessor(sql);
+            NamedParameterProcessor processor = new NamedParameterProcessor(strippedSql);
             List<Object> values = processor.toPositionalValues(params);
             for (int i = 0; i < values.size(); i++) {
                 stmt.setObject(i + 1, values.get(i));
@@ -314,7 +384,7 @@ public class DbTool extends Tool {
                                   boolean isTx) throws Exception {
         try (PreparedStatement stmt = prepareStatement(conn, sql, params)) {
             int affected = stmt.executeUpdate();
-            if (!isTx) {
+            if (!isTx && !conn.getAutoCommit()) {
                 conn.commit();
             }
             return GsonFactory.toJson(Map.of("affected_rows", affected));

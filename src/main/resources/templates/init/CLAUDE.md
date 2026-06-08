@@ -90,7 +90,7 @@ This project is indexed by GitNexus as **javaclawbot** (16217 symbols, 40723 rel
 <!-- gitnexus:end -->
 
 ## 变动
-版本变动，修复bug 请放入 [CHANGELOG.md](CHANGELOG.md) 中 , 查询pom文件，获取版本号,如有必要 询问用户是否需要新增变动版本。如果是git仓库，每次版本变动需要同步在git中打上tag 并创建远程 branch,比如版本变动到2.3.4 远程需要同步新增这个分支 2.3.4
+版本变动，修复bug 请放入 [CHANGELOG.md](CHANGELOG.md) 中 , 查询pom文件，获取版本号,如有必要 询问用户是否需要新增变动版本（每次版本变动必须用户手动确认）。如果是git仓库，每次版本变动需要同步在git中打上tag 并创建远程 branch,比如版本变动到2.3.4 远程需要同步新增这个分支 2.3.4
 ## git or Svn
 由于在中国，github访问不稳定，需要 git -c http.proxy=http://127.0.0.1:7897  你需要检测是否开启代理，如果未开启代理 尝试一次原始提交 失败后提醒用户开启代理 
 如果项目为svn项目 则按照svn命令规范
