@@ -48,7 +48,7 @@ public class RunAgent {
     private static final int MAX_ITERATIONS = Integer.MAX_VALUE;
 
     /** 默认最大 tokens */
-    private static final int DEFAULT_MAX_TOKENS = 8192;
+    private static final int DEFAULT_MAX_TOKENS = 32768;
 
     /** 默认温度 */
     private static final double DEFAULT_TEMPERATURE = 0.7;

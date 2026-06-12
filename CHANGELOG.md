@@ -18,6 +18,11 @@ All notable changes to NexusAI will be documented in this file.
   - 新增 `manifest.txt` 资源清单用于 jar 内提取
 
 ### Fixed
+- **后台子代理报告被截断**：`BackgroundAgentExecutor.truncateResult()` 硬编码 500 字符上限导致 Explore/Plan/GeneralPurpose 在 `background=true` 模式下完成时报告被强制截断
+  - 根因：line 265-269 的 `truncateResult` 方法 `result.length() <= 500` 与 `substring(0, 500)` 两个魔术数字
+  - 修复：将上限提升至 10000 字符，覆盖典型 Explore 报告长度
+- **子代理 LLM 输出 token 上限过低**：`RunAgent.DEFAULT_MAX_TOKENS = 8192` 限制子代理单次 LLM 响应最大长度，可能导致长报告被 LLM 服务端在 8192 token 处截断
+  - 修复：提升至 32768 token，避免典型 Explore/Plan 报告被服务端截断
 - **历史会话恢复时 [查看对比]/[回滚] 按钮无反应**：`SessionTabManager` 恢复会话时未调用 `setBackupManager()`，导致 `loadMessages()` 中 `ToolCallCard` 的 `fileBackupManager` 为 null
   - 根因：`restoreSessionToNewTab()` 和 `loadSessionInCurrentTab()` 两个恢复路径均缺少 `setBackupManager()` 调用
   - 修复：在两个路径的 `loadMessages()` 之前注入 `backendBridge.getFileBackupManager()` → `setBackupManager()` + `loadFromBackupManager()`
