@@ -341,7 +341,7 @@ public class ContextBuilder {
      * - 该块只是"元数据"，不是指令（tag 文本保持一致）
      */
     public static String buildRuntimeContext(String channel, String chatId) {
-        String now = ZonedDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm (EEEE)"));
+        String now = ZonedDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd"));
 
         // Python 用 %Z（例如 CST/UTC）；Java 里直接获取 ID（例如 Asia/Shanghai）
         TimeZone tz = TimeZone.getDefault();
@@ -487,7 +487,12 @@ public class ContextBuilder {
         userBlocks.add(Map.of("type", "text", "text", loadResidentSkill()));
 
         // 构建第4条用户消息, 该消息为本地命令描述
-        userBlocks.add(Map.of("type", "text", "text", buildLocalCommandDesc()));
+        String localCommandDesc = buildLocalCommandDesc();
+        if (log.isDebugEnabled()) {
+            log.debug("当前用户本地命令为: {}", localCommandDesc);
+        }
+        // 使用了这个会造成ds中缓存命中率降低 by zcw 2026/06/24
+        //userBlocks.add(Map.of("type", "text", "text", buildLocalCommandDesc()));
         out.add(mapOf(
                 "role", "user",
                 "content", userBlocks
@@ -548,8 +553,13 @@ public class ContextBuilder {
             userBlocks.add(Map.of("type", "text", "text", loaded));
         }
 
-        // 该消息为本地命令描述
-        userBlocks.add(Map.of("type", "text", "text", buildLocalCommandDesc()));
+        // 构建第4条用户消息, 该消息为本地命令描述
+        String localCommandDesc = buildLocalCommandDesc();
+        if (log.isDebugEnabled()) {
+            log.debug("当前用户本地命令为: {}", localCommandDesc);
+        }
+        // 使用了这个会造成ds中缓存命中率降低 by zcw 2026/06/24
+        //userBlocks.add(Map.of("type", "text", "text", buildLocalCommandDesc()));
         out.add(mapOf(
                 "role", "user",
                 "content", userBlocks
@@ -606,7 +616,12 @@ public class ContextBuilder {
         userBlocks.add(Map.of("type", "text", "text", loadResidentSkill()));
 
         // 构建第4条用户消息, 该消息为本地命令描述
-        userBlocks.add(Map.of("type", "text", "text", buildLocalCommandDesc()));
+        String localCommandDesc = buildLocalCommandDesc();
+        if (log.isDebugEnabled()) {
+            log.debug("当前用户本地命令为: {}", localCommandDesc);
+        }
+        // 使用了这个会造成ds中缓存命中率降低 by zcw 2026/06/24
+        //userBlocks.add(Map.of("type", "text", "text", buildLocalCommandDesc()));
         out.add(mapOf(
                 "role", "user",
                 "content", userBlocks
