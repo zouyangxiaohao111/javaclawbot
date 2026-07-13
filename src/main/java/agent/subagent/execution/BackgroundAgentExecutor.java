@@ -264,8 +264,8 @@ public class BackgroundAgentExecutor {
 
     private String truncateResult(String result) {
         if (result == null) return "";
-        if (result.length() <= 100000) return result;
-        return result.substring(0, 100000) + "...\n\n(truncated)";
+        if (result.length() <= 500000) return result;
+        return result.substring(0, 500000) + "...\n\n(truncated)";
     }
 
     /**
