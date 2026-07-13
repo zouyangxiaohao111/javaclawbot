@@ -45,4 +45,23 @@ public final class PathUtil {
         }
         return Paths.get(s);
     }
+
+    /**
+     * Normalize a project-relative path string.
+     * - null returns null
+     * - all-whitespace input returns the trimmed (empty) string
+     * - Windows backslashes are converted to forward slashes
+     * - consecutive slashes are collapsed
+     * - trailing slash is removed (except for root "/")
+     * - leading "./" or "../" segments are preserved
+     */
+    public static String normalizeProjectPath(String raw) {
+        if (raw == null) return null;
+        if (raw.isBlank()) return raw.trim();
+        String s = raw.replace('\\', '/');
+        s = s.replaceAll("/+", "/");
+        if ("/".equals(s)) return "/";
+        if (s.endsWith("/")) s = s.substring(0, s.length() - 1);
+        return s;
+    }
 }
