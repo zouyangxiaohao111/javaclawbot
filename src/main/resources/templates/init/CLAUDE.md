@@ -26,15 +26,24 @@ Token 预算绝非软性建议（Token budgets are not advisory）单任务上�
 严格遵从代码库既有规范，即便持保留意见（Match the codebase's conventions, even if you disagree）在代码库内部：规范一致性 > 个人技术偏好。若确信某规范存在实质危害，请显式提出。切勿暗中另起范式。
 ## 规则十二：
 显式失败（Fail loud）若有步骤被静默跳过，宣称“已完成”即为错误。若有测试被跳过，宣称“测试通过”即为错误。默认原则：主动暴露不确定性，绝不掩盖。
-##  编码后必须添加数据流日志
+## 规则十三:
+每个代码都需要添加注释，这个非常重要 注释保留中文
+
+## 用户偏好的编码规则
+1. 对于if 不能简化 错误示例： if (out != null) outputs.add(out);  正确应该
+```java
+        if (out != null) {
+            outputs.add(out);
+        }
+```
+2. 编码后必须添加数据流日志
 日志通常采用sfl4j 和 logback 切勿使用其他日志 格式为：
 ```java
 if(log.enableDebug) {
     log.debug()
         }
-log.info  log.warn log.error
+log.info  log.warn log.error 等等
 ```
-
 ## 可参考的经验
 [经验.md](%E7%BB%8F%E9%AA%8C.md)
 
@@ -90,7 +99,7 @@ This project is indexed by GitNexus as **javaclawbot** (16217 symbols, 40723 rel
 <!-- gitnexus:end -->
 
 ## 变动
-版本变动，修复bug 请放入 [CHANGELOG.md](CHANGELOG.md) 中 , 查询pom文件，获取版本号,如有必要 询问用户是否需要新增变动版本（每次版本变动必须用户手动确认）。如果是git仓库，每次版本变动需要同步在git中打上tag 并创建远程 branch,比如版本变动到2.3.4 远程需要同步新增这个分支 2.3.4
+版本变动，修复bug 请放入 [CHANGELOG.md](CHANGELOG.md) 中 , 查询pom文件，获取版本号,如有必要 询问用户是否需要新增变动版本。如果是git仓库，每次版本变动需要同步在git中打上tag 并创建远程 branch,比如版本变动到2.3.4 远程需要同步新增这个分支 2.3.4
 ## git or Svn
 由于在中国，github访问不稳定，需要 git -c http.proxy=http://127.0.0.1:7897  你需要检测是否开启代理，如果未开启代理 尝试一次原始提交 失败后提醒用户开启代理 
 如果项目为svn项目 则按照svn命令规范
@@ -103,3 +112,6 @@ This project is indexed by GitNexus as **javaclawbot** (16217 symbols, 40723 rel
 
 ## 安全围栏
 具体请查看 [GUARDRAILS.md](GUARDRAILS.md)
+
+## 项目工具包
+优先使用hutool工具包，在考虑本项目util包下面的
